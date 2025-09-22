@@ -1,0 +1,52 @@
+site_name: goedels-poetry
+repo_url: https://github.com/KellyJDavis/goedels-poetry
+site_url: https://KellyJDavis.github.io/goedels-poetry
+site_description: A recursive, reflective POETRY algorithm variant using Goedel-Prover-V2
+site_author: Kelly J Davis
+edit_uri: edit/main/docs/
+repo_name: KellyJDavis/goedels-poetry
+copyright: Maintained by <a href="https://KellyJDavis.com">KellyJDavis</a>.
+
+nav:
+  - Home: index.md
+  - Modules: modules.md
+plugins:
+  - search
+  - mkdocstrings:
+      handlers:
+        python:
+          paths: ["goedels_poetry"]
+theme:
+  name: material
+  feature:
+    tabs: true
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: white
+      accent: deep orange
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: black
+      accent: deep orange
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+  icon:
+    repo: fontawesome/brands/github
+
+extra:
+  social:
+    - icon: fontawesome/brands/github
+      link: https://github.com/KellyJDavis/goedels-poetry
+    - icon: fontawesome/brands/python
+      link: https://pypi.org/project/goedels-poetry
+
+markdown_extensions:
+  - toc:
+      permalink: true
+  - pymdownx.arithmatex:
+      generic: true
