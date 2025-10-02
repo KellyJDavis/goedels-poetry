@@ -1,0 +1,145 @@
+import re
+from functools import partial
+
+from langchain_core.language_models.chat_models import BaseChatModel
+from langchain_core.messages import AIMessage, HumanMessage
+from langgraph.graph import END, START, StateGraph
+from langgraph.types import Send
+
+from goedels_poetry.agents.state import DecomposedFormalTheoremState, DecomposedFormalTheoremStates
+from goedels_poetry.agents.util.common import DEFAULT_IMPORTS, load_prompt
+
+
+class ProofSketcherAgentFactory:
+    """
+    Factory class for creating instances of the ProofSketcherAgent.
+    """
+
+    @staticmethod
+    def create_agent(llm: BaseChatModel) -> StateGraph:
+        """
+        Creates a ProofSketcherAgent instance with the passed llm.
+
+        Parameters
+        ----------
+        llm: BaseChatModel
+            The LLM to use for the proof sketcher agent
+
+        Returns
+        -------
+        StateGraph
+            A StateGraph instance of the proof sketcher agent.
+        """
+        return _build_agent(llm=llm)
+
+
+def _build_agent(llm: BaseChatModel) -> StateGraph:
+    """
+    Builds a state graph for the proof sketcher agent.
+
+    Parameters
+    ----------
+    llm: BaseChatModel
+        The LLM to use for the proof sketcher agent
+
+    Returns
+    ----------
+    StateGraph
+        The state graph for the proof sketcher agent.
+    """
+    # Create the proof sketcher agent state graph
+    graph_builder = StateGraph(DecomposedFormalTheoremStates)
+
+    # Bind the llm argument of _proof_sketcher
+    bound_proof_sketcher = partial(_proof_sketcher, llm)
+
+    # Add the nodes
+    graph_builder.add_node("proof_sketcher", bound_proof_sketcher)
+
+    # Add the edges
+    graph_builder.add_conditional_edges(START, _map_edge, ["proof_sketcher"])
+    graph_builder.add_edge("proof_sketcher", END)
+
+    return graph_builder.compile()
+
+
+def _map_edge(states: DecomposedFormalTheoremStates) -> list[Send]:
+    """
+    Map edge that takes the members of the states["inputs"] list and dispers them to the
+    proof_sketcher nodes.
+
+    Parameters
+    ----------
+    states: DecomposedFormalTheoremStates
+        The DecomposedFormalTheoremStates containing in the "inputs" member the
+        DecomposedFormalTheoremState instances to sketch proofs for.
+
+    Returns
+    -------
+    list[Send]
+        List of Send objects each indicating the their target node and its input, singular.
+    """
+    return [Send("proof_sketcher", state) for state in states["inputs"]]
+
+
+def _proof_sketcher(llm: BaseChatModel, state: DecomposedFormalTheoremState) -> DecomposedFormalTheoremStates:
+    """
+    Sketch the proof of the formal theorem in the passed DecomposedFormalTheoremState.
+
+    Parameters
+    ----------
+    llm: BaseChatModel
+        The LLM to use for the proof sketcher agent
+    state: DecomposedFormalTheoremState
+        The decomposed formal theorem state with the formal theorem to have its proof sketched.
+
+    Returns
+    -------
+    DecomposedFormalTheoremStates
+        A DecomposedFormalTheoremStates with the DecomposedFormalTheoremState with the formal proof
+        sketch added to the DecomposedFormalTheoremStates "outputs" member.
+    """
+    # Check if errors is None
+    if state["errors"] is None:
+        # If it is, load the prompt used when not correcting a previous proof sketch
+        prompt = load_prompt("decomposer-initial", formal_theorem=state["formal_theorem"])
+
+        # Put the prompt in the final message
+        state["decomposition_history"] += [HumanMessage(content=prompt)]
+
+    # Sketch the proof of the formal theorem
+    response_content = llm.invoke(state["decomposition_history"]).content
+
+    # Parse sketcher response
+    proof_sketch = _parse_proof_sketcher_response(response_content)
+
+    # Add the proof sketch to the state
+    state["proof_sketch"] = proof_sketch
+
+    # Add the proof sketch to the state's decomposition_history
+    state["decomposition_history"] += [AIMessage(content=proof_sketch)]
+
+    # Return a DecomposedFormalTheoremStates with state added to its outputs
+    return {"outputs": [state]}
+
+
+def _parse_proof_sketcher_response(response: str) -> str:
+    """
+    Extract the final lean code snippet from the passed string.
+
+    Parameters
+    ----------
+    response: str
+        The string to extract the final lean code snippet from
+
+    Returns
+    -------
+    str
+        A string containing the lean code snippet if found, otherwise None.
+    """
+    # TODO: Figure out if this algorithm works for the non-Goedel LLM
+    pattern = r"```lean4?\n(.*?)\n?```"
+    matches = re.findall(pattern, response, re.DOTALL)
+    proof_sketch = matches[-1].strip() if matches else None
+    proof_sketch = DEFAULT_IMPORTS + proof_sketch  # TODO: Figure out global policy for DEFAULT_IMPORTS
+    return proof_sketch

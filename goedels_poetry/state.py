@@ -1,0 +1,886 @@
+from __future__ import annotations
+
+import os
+import pickle
+from datetime import datetime
+from hashlib import sha256
+from pathlib import Path
+from shutil import rmtree
+
+from goedels_poetry.agents.state import (
+    DecomposedFormalTheoremState,
+    DecomposedFormalTheoremStates,
+    FormalTheoremProofState,
+    FormalTheoremProofStates,
+    InformalTheoremState,
+)
+from goedels_poetry.config.llm import (
+    DECOMPOSER_AGENT_MAX_RETRIES,
+    FORMALIZER_AGENT_MAX_RETRIES,
+    PROVER_AGENT_MAX_DEPTH,
+    PROVER_AGENT_MAX_RETRIES,
+)
+from goedels_poetry.functools import maybe_save
+from goedels_poetry.util.tree import TreeNode
+
+# Global configuration for output directory
+_OUTPUT_DIR = os.environ.get("GOEDELS_POETRY_DIR", os.path.expanduser("~/.goedels_poetry"))
+
+
+class GoedelsPoetryState:
+    def __init__(self, formal_theorem: str | None = None, informal_theorem: str | None = None):
+        # Check that the proper number of arguments has been provided
+        if (formal_theorem is None) and (informal_theorem is None):
+            raise ValueError("Either 'formal_theorem' xor 'informal_theorem' must be provided")  # noqa: TRY003
+        if (formal_theorem is not None) and (informal_theorem is not None):
+            raise ValueError("Only one of 'formal_theorem' or 'informal_theorem' can be provided")  # noqa: TRY003
+
+        # Introduce a bool to indicate if the proof is finished unable to be finished
+        self.is_finished: bool = False
+
+        # Introduce a list of strings to hold the action history
+        self.action_history: list[str] = []
+
+        # Initialize state with provided arguemnts
+        self.formal_theorem_proof: TreeNode = (
+            None
+            if formal_theorem is None
+            else FormalTheoremProofState(
+                parent=None,
+                depth=0,
+                formal_theorem=formal_theorem,
+                syntactic=False,
+                formal_proof=None,
+                proved=False,
+                errors=None,
+                ast=None,
+                proof_attempts=0,
+                proof_history=[],
+            )
+        )
+
+        # Initialize InformalTheoremState queues
+        self.informal_formalizer_queue: InformalTheoremState = (
+            None
+            if informal_theorem is None
+            else InformalTheoremState(
+                informal_theorem=informal_theorem,
+                formalization_attempts=0,
+                formal_theorem=None,
+                syntactic=False,
+                semantic=False,
+            )
+        )
+        self.informal_syntax_queue: None
+        self.informal_semantics_queue: None
+
+        # Initialize FormalTheoremProofState lists
+        self.proof_syntax_queue: list[FormalTheoremProofState] = (
+            [] if formal_theorem is None else [FormalTheoremProofState(self.formal_theorem_proof)]
+        )
+        self.proof_prove_queue: list[FormalTheoremProofState] = []
+        self.proof_validate_queue: list[FormalTheoremProofState] = []
+        self.proof_correct_queue: list[FormalTheoremProofState] = []
+        self.proof_ast_queue: list[FormalTheoremProofState] = []
+
+        # Initialize DecomposedFormalTheoremState lists
+        self.decomposition_sketch_queue: list[DecomposedFormalTheoremState] = []
+        self.decomposition_validate_queue: list[DecomposedFormalTheoremState] = []
+        self.decomposition_correct_queue: list[DecomposedFormalTheoremState] = []
+        self.decomposition_ast_queue: list[DecomposedFormalTheoremState] = []
+        self.decomposition_decompose_queue: list[
+            DecomposedFormalTheoremState
+        ] = []  # Calls AST.get_named_subgoal_code to get child postulates of sketch, creates a FormalTheoremProofState for each, and puts the FormalTheoremProofState in self.proof_syntax_queue
+
+        # Initialize hidden parameter for tracking saves
+        self._iteration = 0
+
+        # Create theorem specific output directory
+        theorem = formal_theorem if formal_theorem else informal_theorem
+        theorem_hash = self._hash_theorem(theorem)
+        self._output_dir = os.path.join(_OUTPUT_DIR, theorem_hash)
+
+        # Check if directory already exists
+        if os.path.exists(self._output_dir):
+            raise FileExistsError(  # noqa: TRY003
+                f"Directory for theorem already exists: {self._output_dir}\n"
+                f"Please use GoedelsPoetryState.load_latest(theorem='{theorem}') "
+                f"to resume, or call GoedelsPoetryState.clear_theorem_directory('{theorem}') "
+                f"to start fresh."
+            )
+
+        # Create the directory
+        Path(self._output_dir).mkdir(parents=True, exist_ok=True)
+
+        # Store theorem metadata for discoverability
+        theorem_file = os.path.join(self._output_dir, "theorem.txt")
+        with open(theorem_file, "w", encoding="utf-8") as f:
+            f.write(theorem)
+
+    @staticmethod
+    def _hash_theorem(theorem: str) -> str:
+        """
+        Generate a hash string from the theorem for directory naming.
+
+        Parameters
+        ----------
+        theorem : str
+            The theorem string
+
+        Returns
+        -------
+        str
+            First 12 characters of SHA256 hash of the normalized theorem
+        """
+        normalized_theorem = GoedelsPoetryState._normalize_theorem(theorem)
+        return sha256(normalized_theorem.encode("utf-8")).hexdigest()[:12]
+
+    @staticmethod
+    def _normalize_theorem(theorem: str) -> str:
+        """
+        Normalize the theorem string for consistent hashing.
+
+        Parameters
+        ----------
+        theorem : str
+            The theorem string
+
+        Returns
+        -------
+        str
+            Normalized theorem string (stripped and lowercased)
+        """
+        return theorem.strip().lower()
+
+    @classmethod
+    def load_latest(cls, directory: str | None = None, theorem: str | None = None) -> GoedelsPoetryState | None:
+        """
+        Load the most recent checkpoint from the directory.
+
+        Parameters
+        ----------
+        directory : Optional[str]
+            Directory to search for checkpoints. Cannot be used with theorem parameter.
+        theorem : Optional[str]
+            Theorem to search checkpoints for. Cannot be used with directory parameter.
+
+        Returns
+        -------
+        GoedelsPoetryState | None
+            The loaded state object, or None if no checkpoints found
+
+        Raises
+        ------
+        ValueError
+            If both directory and theorem are provided, or if neither is provided
+        """
+        checkpoints = cls.list_checkpoints(directory=directory, theorem=theorem)
+        if not checkpoints:
+            return None
+
+        return cls.load(checkpoints[0])  # Load the newest checkpoint
+
+    @staticmethod
+    def list_checkpoints(directory: str | None = None, theorem: str | None = None) -> list[str]:
+        """
+        List all available checkpoint files in the directory.
+
+        Parameters
+        ----------
+        directory : Optional[str]
+            Directory to search for checkpoints. Cannot be used with theorem parameter.
+        theorem : Optional[str]
+            Theorem to search checkpoints for. Cannot be used with directory parameter.
+
+        Returns
+        -------
+        list[str]
+            List of checkpoint filepaths, sorted by modification time (newest first)
+
+        Raises
+        ------
+        ValueError
+            If both directory and theorem are provided, or if neither is provided
+        """
+        if (directory is not None) and (theorem is not None):
+            raise ValueError("Cannot specify both directory and theorem parameters")  # noqa: TRY003
+        if (directory is None) and (theorem is None):
+            raise ValueError("Must specify either directory or theorem parameter")  # noqa: TRY003
+
+        if theorem is not None:
+            theorem_hash = GoedelsPoetryState._hash_theorem(theorem)
+            search_directory = os.path.join(_OUTPUT_DIR, theorem_hash)
+        else:
+            search_directory = directory
+
+        if not os.path.exists(search_directory):
+            return []
+
+        # Find all pickle files matching our naming pattern
+        checkpoint_files = []
+        for filename in os.listdir(search_directory):
+            if filename.startswith("goedels_poetry_state_") and filename.endswith(".pkl"):
+                filepath = os.path.join(search_directory, filename)
+                checkpoint_files.append(filepath)
+
+        # Sort by modification time (newest first)
+        checkpoint_files.sort(key=os.path.getmtime, reverse=True)
+
+        return checkpoint_files
+
+    @classmethod
+    def load(cls, filepath: str) -> GoedelsPoetryState:
+        """
+        Load a GoedelsPoetryState from a pickle file.
+
+        Parameters
+        ----------
+        filepath : str
+            Path to the pickle file to load
+
+        Returns
+        -------
+        GoedelsPoetryState
+            The loaded state object
+        """
+        with open(filepath, "rb") as f:
+            return pickle.load(f)  # noqa: S301
+
+    @classmethod
+    def clear_theorem_directory(cls, theorem: str) -> str:
+        """
+        Clear the directory for a specific theorem.
+
+        Parameters
+        ----------
+        theorem : str
+            The research theorem whose directory should be cleared
+
+        Returns
+        -------
+        str
+            Confirmation message with the path that was cleared
+        """
+        theorem_hash = cls._hash_theorem(theorem)
+        theorem_dir = os.path.join(_OUTPUT_DIR, theorem_hash)
+
+        if os.path.exists(theorem_dir):
+            rmtree(theorem_dir)
+            return f"Successfully cleared directory: {theorem_dir}"
+        else:
+            return f"Directory does not exist: {theorem_dir}"
+
+    def save(self) -> str:
+        """
+        Save the current state to a pickle file.
+
+        Returns
+        -------
+        str
+            Path to the saved checkpoint file
+        """
+        # Generate filename with datetime and iteration
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        filename = f"goedels_poetry_state_{timestamp}_iter_{self._iteration:04d}.pkl"
+        filepath = os.path.join(self._output_dir, filename)
+
+        # Save state to pickle file
+        with open(filepath, "wb") as f:
+            pickle.dump(self, f)
+
+        # Increment iteration counter
+        self._iteration += 1
+
+        return filepath
+
+
+class GoedelsPoetryStateManager:
+    """
+    Manager class for coordinating operations on GoedelsPoetryState.
+
+    This class provides higher-level operations for managing the flow of the multi-agent pipeline.
+    """
+
+    def __init__(self, state: GoedelsPoetryState):
+        """
+        Initialize the manager with a GoedelsPoetryState.
+
+        Parameters
+        ----------
+        state : GoedelsPoetryState
+            The state object to manage
+        """
+        # This state should not be accessed directly. All the methods
+        # that update the state have logic to save checkpoints.
+        self._state = state
+
+    @property
+    def is_finished(self) -> bool:
+        """
+        A bool indicating if the proof process is finished
+        """
+        return self._state.is_finished
+
+    def add_action(self, action: str):
+        """
+        Adds the passed action to the action history
+
+        Parameters
+        ----------
+        action: str
+            The action to add to the action history
+        """
+        self._state.action_history.append(action)
+
+    def get_informal_theorem_to_formalize(self) -> InformalTheoremState:
+        """
+        Gets the InformalTheoremState that needs to be formalized. This may be None if there is no
+        InformalTheoremState that needs to be formalized.
+
+        Returns
+        -------
+        InformalTheoremState
+            The InformalTheoremState that needs to be formalized, may be None.
+        """
+        return self._state.informal_formalizer_queue
+
+    @maybe_save(n=1)
+    def set_formalized_informal_theorem(self, formalized_informal_theorem: InformalTheoremState):
+        """
+        Sets the InformalTheoremState that has been formalized. This InformalTheoremState may have
+        a syntactically valid formalization or it may not be syntactically valid.
+
+        Parameters
+        ----------
+        formalized_informal_theorem: InformalTheoremState
+            The InformalTheoremState that has been formalized, may or may not be syntactic.
+        """
+        # Remove all elements from the formalizer queue
+        self._state.informal_formalizer_queue = None
+
+        # Place formalized_informal_theorem on the queue to be syntactically validated
+        self._state.informal_syntax_queue = formalized_informal_theorem
+
+    def get_informal_theorem_to_validate(self) -> InformalTheoremState:
+        """
+        Gets the InformalTheoremState that needs to be validated syntactically. This may be None if
+        there is no InformalTheoremState that needs to be validated syntactically.
+
+        Returns
+        -------
+        InformalTheoremState
+            The InformalTheoremState that needs to be validated syntactically, may be None.
+        """
+        return self._state.informal_syntax_queue
+
+    @maybe_save(n=1)
+    def set_validated_informal_theorem(self, validated_informal_theorem: InformalTheoremState):
+        """
+        Sets the InformalTheoremState that has been validated syntactically. This
+        InformalTheoremState may be valid syntactically or invalid syntactically.
+
+        Parameters
+        ----------
+        validated_informal_theorem: InformalTheoremState
+            The InformalTheoremState that has been validated syntactically. It may be valid
+            syntactically or invalid syntactically.
+        """
+        # Remove all elements from the syntax queue
+        self._state.informal_syntax_queue = None
+
+        # Check if validated_informal_theorem is syntactically valid
+        if validated_informal_theorem["syntactic"]:
+            # If it is, queue it for semantic validation
+            self._state.informal_semantics_queue = validated_informal_theorem
+        else:
+            # If it isn't, queue it for re-formalization
+            self._state.informal_formalizer_queue = validated_informal_theorem
+
+        # In both cases increment the formalization attempts count
+        validated_informal_theorem["formalization_attempts"] += 1
+
+        # Set is_finished appropriately
+        self._state.is_finished = validated_informal_theorem["formalization_attempts"] >= FORMALIZER_AGENT_MAX_RETRIES
+
+    def get_informal_theorem_to_check_semantics_of(self) -> InformalTheoremState:
+        """
+        Gets the InformalTheoremState that needs to have its semantics checked, making sure that
+        the semantics of the informal statement matches that of the formal statement.
+
+        Returns
+        -------
+        InformalTheoremState
+           The InformalTheoremState to check the semantics of.
+        """
+        return self._state.informal_semantics_queue
+
+    @maybe_save(n=1)
+    def set_semantically_checked_informal_theorem(self, semantically_checked_informal_theorem: InformalTheoremState):
+        """
+        Sets the InformalTheoremState that has been check semantically. This InformalTheoremState
+        may be valid or invalid semantically.
+
+        Parameters
+        ----------
+        semantically_checked_informal_theorem: InformalTheoremState
+            The InformalTheoremState that has been check semantically, may be semantically invalid.
+        """
+        # Remove all elements from the semantics queue
+        self._state.informal_semantics_queue = None
+
+        # Check if semantically_checked_informal_theorem is semantically valid
+        if semantically_checked_informal_theorem["semantic"]:
+            # If it is semantically valid, create an associated FormalTheoremProofState
+            theorem_to_prove = FormalTheoremProofState(
+                parent=None,
+                depth=0,
+                formal_theorem=semantically_checked_informal_theorem["formal_theorem"],
+                syntactic=semantically_checked_informal_theorem["syntactic"],
+                formal_proof=None,
+                proved=False,
+                errors=None,
+                ast=None,
+                proof_attempts=0,
+                proof_history=[],
+            )
+            # Queue theorem_to_prove to be proven
+            self._state.proof_prove_queue += [theorem_to_prove]
+            # Set this FormalTheoremProofState as the root theorem to prove.
+            self._state.formal_theorem_proof = theorem_to_prove
+        else:
+            # If it isn't semantically valid, queue it to be re-formalized
+            self._state.informal_formalizer_queue = semantically_checked_informal_theorem
+
+    def get_theorems_to_validate(self) -> FormalTheoremProofStates:
+        """
+        Gets a FormalTheoremProofStates containing FormalTheoremProofStates["inputs"] the list of
+        FormalTheoremProofState that need to have the syntax of their root theorem validated. This
+        list may be empty.
+
+        Returns
+        -------
+        FormalTheoremProofStates
+            The FormalTheoremProofStates containing FormalTheoremProofStates["inputs"] the list of
+            FormalTheoremProofState that need their root theorems validated, may be empty.
+        """
+        return FormalTheoremProofStates(inputs=self._state.proof_syntax_queue, outputs=[])
+
+    @maybe_save(n=1)
+    def set_validated_theorems(self, validated_theorems: FormalTheoremProofStates):
+        """
+        Sets the FormalTheoremProofStates containing validated_theorems["outputs"] the list
+        of root theorem validated FormalTheoremProofState's. Each list item's root theorem may have
+        been sucessfully or unsuccessfully validated.
+
+        Parameters
+        ---------
+        validated_theorems: FormalTheoremProofStates
+            FormalTheoremProofStates containing validated_theorems["outputs"] the list of
+            FormalTheoremProofState each of which has been validated sucessfully or unsuccessfully.
+        """
+        # Remove all elements from the syntax queue
+        self._state.proof_syntax_queue.clear()
+
+        # Get FormalTheoremProofStates outputs
+        validated_theorems_outputs = validated_theorems["outputs"]
+
+        # For each sucessfully validated element queue it to be proven
+        sucessfully_validated_theorems = [vt for vt in validated_theorems_outputs if vt["syntactic"]]
+        self._state.proof_prove_queue += sucessfully_validated_theorems
+
+        # Unsucessfully validated theorems are user supplied; we can't fix them. So finish
+        self._state.is_finished = any((not vt["syntactic"]) for vt in validated_theorems_outputs)
+
+    def get_theorems_to_prove(self) -> FormalTheoremProofStates:
+        """
+        Gets a FormalTheoremProofStates containing FormalTheoremProofStates["inputs"] the list of
+        FormalTheoremProofState that need to be proven. This list man be empty.
+
+        Returns
+        -------
+        FormalTheoremProofStates
+            FormalTheoremProofStates containing FormalTheoremProofStates["inputs"] the list of
+            FormalTheoremProofState that need to be proven, may be empty.
+        """
+        return FormalTheoremProofStates(inputs=self._state.proof_prove_queue, outputs=[])
+
+    @maybe_save(n=1)
+    def set_proven_theorems(self, proven_theorems: FormalTheoremProofStates):
+        """
+        Sets the FormalTheoremProofStates containing proven_theorems["outputs"] the list
+        of proven FormalTheoremProofState. The proof of each list item has yet to be validated or
+        invalidated.
+
+        Parameters
+        ---------
+        proven_theorems: FormalTheoremProofStates
+            FormalTheoremProofStates containing proven_theorems["outputs"] the list of
+            FormalTheoremProofState seach of which has been attempted to be proven.
+        """
+        # Remove all attempted proofs elements from the queue to be proven
+        self._state.proof_prove_queue.clear()
+
+        # Place attempted proofs in the queue of proofs to be validated
+        self._state.proof_validate_queue += proven_theorems["outputs"]
+
+    def get_proofs_to_validate(self) -> FormalTheoremProofStates:
+        """
+        Gets a FormalTheoremProofStates containing FormalTheoremProofStates["inputs"] the list of
+        FormalTheoremProofState that have proofs that need to be validated. This list may be empty.
+
+        Returns
+        -------
+        FormalTheoremProofStates
+            FormalTheoremProofStates containing FormalTheoremProofStates["inputs"] the list of
+            FormalTheoremProofState that have proofs that need to be validated, may be an empty
+            list.
+        """
+        return FormalTheoremProofStates(inputs=self._state.proof_validate_queue, outputs=[])
+
+    @maybe_save(n=1)
+    def set_validated_proofs(self, validated_proofs: FormalTheoremProofStates):
+        """
+        Sets the FormalTheoremProofStates containing validated_proofs["outputs"] the list of
+        validated FormalTheoremProofState. Each list item's proof is marked as being valid or
+        invalid.
+
+        Parameters
+        ---------
+        validated_proofs: FormalTheoremProofStates
+            FormalTheoremProofStates containing validated_proofs["outputs"] the list of
+            FormalTheoremProofState each of which has its proof been validated or invalided.
+        """
+        # Remove all elements from the queue of proofs to validate
+        self._state.proof_validate_queue.clear()
+
+        # Get validated_proofs outputs
+        validated_proofs_outputs = validated_proofs["outputs"]
+
+        # Increment the proof attempt count for all validated proofs
+        for validated_proof in validated_proofs_outputs:
+            validated_proof["proof_attempts"] += 1
+
+        # Gather all unsuccessful proofs
+        unsuccessful_proofs = [vp for vp in validated_proofs_outputs if (not vp["proved"])]
+
+        # Partition unsuccessful proofs into those that are too difficult and those to correct
+        proofs_too_difficult = [up for up in unsuccessful_proofs if (up["proof_attempts"] >= PROVER_AGENT_MAX_RETRIES)]
+        proofs_to_correct = [up for up in unsuccessful_proofs if (up["proof_attempts"] < PROVER_AGENT_MAX_RETRIES)]
+
+        # Queue proofs too difficult for decomposition
+        self._queue_proofs_for_decomposition(proofs_too_difficult)
+        # Queue proofs to correct for correction
+        self._state.proof_correct_queue += proofs_to_correct
+
+        # Queue all successful proofs to have their ASTs generated
+        successful_proofs = [vp for vp in validated_proofs_outputs if vp["proved"]]
+        self._state.proof_ast_queue += successful_proofs
+
+    def _queue_proofs_for_decomposition(self, proofs_too_difficult: list[FormalTheoremProofState]):
+        """
+        Queues the list of FormalTheoremProofState containing proofs too difficult to be decomposed.
+
+        Parameters
+        ----------
+        proofs_too_difficult: list[FormalTheoremProofState]
+            The lisr of FormalTheoremProofState containing proofs too difficult to be decomposed.
+        """
+        for proof_too_difficult in proofs_too_difficult:
+            # Create a new DecomposedFormalTheoremState and add it to the sketch queue
+            formal_theorem_to_decompose = DecomposedFormalTheoremState(
+                parent=proof_too_difficult["parent"],
+                children=[],
+                depth=proof_too_difficult["depth"],
+                formal_theorem=proof_too_difficult["formal_theorem"],
+                proof_sketch=None,
+                syntactic=False,
+                errors=None,
+                ast=None,
+                decomposition_attempts=0,
+                decomposition_history=[],
+            )
+            self._state.decomposition_sketch_queue.append(formal_theorem_to_decompose)
+
+            # Remove proof_too_difficult from the proof tree
+            if proof_too_difficult["parent"] is not None:
+                proof_too_difficult["parent"]["children"].remove(proof_too_difficult)
+                proof_too_difficult["parent"] = None
+
+            # Check to see if formal_theorem_to_decompose is the root theorem
+            if formal_theorem_to_decompose["parent"] is None:
+                # If so, set the root to formal_theorem_to_decompose
+                self._state.formal_theorem_proof = formal_theorem_to_decompose
+            else:
+                # If not, add formal_theorem_to_decompose as its parent's child
+                formal_theorem_to_decompose["parent"]["children"].append(formal_theorem_to_decompose)
+
+    def get_proofs_to_correct(self) -> FormalTheoremProofStates:
+        """
+        Gets FormalTheoremProofStates containing FormalTheoremProofStates["inputs"] the list of
+        FormalTheoremProofState that have proofs that need to be corrected, may be and empty list.
+
+        Returns
+        -------
+        FormalTheoremProofStates
+            FormalTheoremProofStates containing FormalTheoremProofStates["inputs"] the list of
+            FormalTheoremProofState that have proofs that need to be corrected, may be and empty
+            list.
+        """
+        return FormalTheoremProofStates(inputs=self._state.proof_correct_queue, outputs=[])
+
+    @maybe_save(n=1)
+    def set_corrected_proofs(self, corrected_proofs: FormalTheoremProofStates):
+        """
+        Sets the FormalTheoremProofStates containing corrected_proofs["outputs"] the list of
+        FormalTheoremProofState with proofs that have been marked for correction using the errors
+        from the previous proof attempt.
+
+        Parameters
+        ---------
+        corrected_proofs: FormalTheoremProofStates
+            FormalTheoremProofStates containing corrected_proofs["outputs"] the list of
+            FormalTheoremProofState each of which has been marked for correction using
+            the errors from the previous proof attempt.
+        """
+        # Remove all elements from the queue of proofs to correct
+        self._state.proof_correct_queue.clear()
+
+        # Place all proofs marked for correction into the queue to be proven
+        self.proof_prove_queue += corrected_proofs["outputs"]
+
+    def get_proofs_to_parse(self) -> FormalTheoremProofStates:
+        """
+        Gets FormalTheoremProofStates containing FormalTheoremProofStates["inputs"] the list of
+        FormalTheoremProofState that must be parsed to generate an AST, may be an empty list.
+
+        Returns
+        -------
+        FormalTheoremProofStates
+            FormalTheoremProofStates containing FormalTheoremProofStates["inputs"] list of
+            FormalTheoremProofState with proofs that must be parsed into an AST, may be
+            and empty list.
+        """
+        return FormalTheoremProofStates(inputs=self._state.proof_ast_queue, outputs=[])
+
+    @maybe_save(n=1)
+    def set_parsed_proofs(self, parsed_proofs: FormalTheoremProofStates):
+        """
+        Sets FormalTheoremProofStates containing parsed_proofs["outputs"] the list of
+        FormalTheoremProofState with proofs with associated ASTs.
+
+        Parameters
+        ---------
+        parsed_proofs: FormalTheoremProofStates
+            FormalTheoremProofStates containing parsed_proofs["outputs"] the list of
+            FormalTheoremProofState each of which has a proof associated AST.
+        """
+        # Remove all elements from the queue of proofs to generate ASTs for
+        self._state.proof_ast_queue.clear()
+
+        # TODO: Figure out how to deal with parent AST's. Doe we add this AST to ther parent here?
+        #       If we do, the grandparent won't have this AST. So do we do so recursively? If we do
+        #       when we find a decomposition or proof didn't work, we'll need to to lots of cleanup
+
+    def get_theorems_to_sketch(self) -> DecomposedFormalTheoremStates:
+        """
+        Gets DecomposedFormalTheoremStates containing DecomposedFormalTheoremStates["inputs"] the
+        list of DecomposedFormalTheoremState whose theorems were too difficult to prove head-on and
+        thus must be decomposed into simpler theorems that entail the original theorem.
+
+        Returns
+        -------
+        DecomposedFormalTheoremStates
+            DecomposedFormalTheoremStates containing DecomposedFormalTheoremStates["inputs"] the
+            list of DecomposedFormalTheoremState whose theorems were too difficult to prove head-on
+            and thus must be decomposed into simpler theorems.
+        """
+        return DecomposedFormalTheoremStates(inputs=self._state.decomposition_sketch_queue, outputs=[])
+
+    @maybe_save(n=1)
+    def set_sketched_theorems(self, sketched_theorems: DecomposedFormalTheoremStates):
+        """
+        Sets the DecomposedFormalTheoremStates containing sketched_theorems["outputs"] the list of
+        DecomposedFormalTheoremState whose theorems have been decomposed into simpler theorems.
+
+        Parameters
+        ----------
+        sketched_theorems: DecomposedFormalTheoremStates
+            DecomposedFormalTheoremStates containing sketched_theorems["outputs"] the list of
+            DecomposedFormalTheoremState whose theorems have been decomposed into simpler
+            theorems.
+        """
+        # Remove all elements from the queue of theorems to sketch
+        self._state.decomposition_sketch_queue.clear()
+
+        # Place all sketched theorems into the queue of sketches to be validated
+        self._state.decomposition_validate_queue += sketched_theorems["outputs"]
+
+    def get_sketches_to_validate(self) -> DecomposedFormalTheoremStates:
+        """
+        Gets DecomposedFormalTheoremStates containing DecomposedFormalTheoremStates["inputs"] the
+        list of DecomposedFormalTheoremState containing sketches the syntax of which must be
+        validated.
+
+        Returns
+        -------
+        DecomposedFormalTheoremStates
+            DecomposedFormalTheoremStates containing DecomposedFormalTheoremStates["inputs"] the
+            list of DecomposedFormalTheoremState containing sketches the syntax of which must
+            be validated.
+        """
+        return DecomposedFormalTheoremStates(inputs=self._state.decomposition_validate_queue, outputs=[])
+
+    @maybe_save(n=1)
+    def set_validated_sketches(self, validated_sketches: DecomposedFormalTheoremStates):
+        """
+        Sets DecomposedFormalTheoremStates containing validated_sketches["outputs"] the list of
+        DecomposedFormalTheoremState whose decompositions have been syntactically determined to
+        be valid or invalid.
+
+        Parameters
+        ----------
+        validated_sketches: DecomposedFormalTheoremStates
+            DecomposedFormalTheoremStates containing validated_sketches["outputs"] the list of
+            DecomposedFormalTheoremState whose decompositions have been syntactically
+            determined to be valid or invalid.
+        """
+        # Remove all elements from the queue of decompositions to validate
+        self._state.decomposition_validate_queue.clear()
+
+        # Get validated_sketches outputs
+        validated_sketches_outputs = validated_sketches["outputs"]
+
+        # Increment the decomposition attempt count
+        for validated_sketch in validated_sketches_outputs:
+            validated_sketch["decomposition_attempts"] += 1
+
+        # Gather all invalid sketches
+        invalid_sketches = [vs for vs in validated_sketches_outputs if (not vs["syntactic"])]
+
+        # Partition invalid sketches into those too difficult to decompose and those to correct
+        sketches_too_difficult = [
+            ivs for ivs in invalid_sketches if (ivs["decomposition_attempts"] >= DECOMPOSER_AGENT_MAX_RETRIES)
+        ]
+        sketches_to_correct = [
+            ivs for ivs in invalid_sketches if (ivs["decomposition_attempts"] < DECOMPOSER_AGENT_MAX_RETRIES)
+        ]
+
+        # Addd sketches to correct to the correction queue
+        self._state.decomposition_correct_queue += sketches_to_correct
+
+        # Set is_finished appropriately
+        self._state.is_finished = len(sketches_too_difficult) > 0
+
+        # Gather all valid sketches and add them to the queue of sketches to parse into an AST
+        valid_sketches = [vs for vs in validated_sketches_outputs if vs["syntactic"]]
+        self._state.decomposition_ast_queue += valid_sketches
+
+    def get_sketches_to_correct(self) -> DecomposedFormalTheoremStates:
+        """
+        Gets DecomposedFormalTheoremStates containing DecomposedFormalTheoremStates["inputs"] the
+        list of DecomposedFormalTheoremState containing sketches determined to be syntactically
+        invalid, may be an empty list.
+
+        Returns
+        -------
+        DecomposedFormalTheoremStates
+        """
+        return DecomposedFormalTheoremStates(inputs=self._state.decomposition_correct_queue, outputs=[])
+
+    @maybe_save(n=1)
+    def set_corrected_sketches(self, corrected_sketches: DecomposedFormalTheoremStates):
+        """
+        Sets DecomposedFormalTheoremStates containing corrected_sketches["outputs"] the list of
+        DecomposedFormalTheoremState with sketchesthat have been marked for correction using the
+        errors from the previous proof attempt.
+
+        Parameters
+        ----------
+        corrected_sketches: DecomposedFormalTheoremStates
+            DecomposedFormalTheoremStates containing corrected_sketches["outputs"] the list of
+            DecomposedFormalTheoremState with sketchesthat have been marked for correction using
+            the errors from the previous proof attempt.
+        """
+        # Remove all elements from the queue of sketches to correct
+        self._state.decomposition_correct_queue.clear()
+
+        # Place all sketches marked for correction into the queue to be sketched
+        self._state.decomposition_sketch_queue += corrected_sketches["outputs"]
+
+    def get_sketches_to_parse(self) -> DecomposedFormalTheoremStates:
+        """
+        Gets DecomposedFormalTheoremStates containing DecomposedFormalTheoremStates["inputs"] the
+        list of DecomposedFormalTheoremState that must be parsed to generate an AST, may be an
+        empty list.
+
+        Returns
+        -------
+        DecomposedFormalTheoremStates
+            DecomposedFormalTheoremStates containing DecomposedFormalTheoremStates["inputs"] the
+            list of DecomposedFormalTheoremState that must be parsed to generate an AST, may be
+            an empty list.
+        """
+        return DecomposedFormalTheoremStates(inputs=self._state.decomposition_ast_queue, outputs=[])
+
+    @maybe_save(n=1)
+    def set_parsed_sketches(self, parsed_sketches: DecomposedFormalTheoremStates):
+        """
+        Sets DecomposedFormalTheoremStates containing parsed_sketches["outputs"] the list of
+        DecomposedFormalTheoremState with sketches with associated ASTs.
+
+        Parameters
+        ----------
+        parsed_sketches: DecomposedFormalTheoremStates
+            DecomposedFormalTheoremStates containing parsed_sketches["outputs"] The list of
+            DecomposedFormalTheoremState each of which has a sketch associated AST.
+        """
+        # Remove all elements from the queue of elements to parse
+        self._state.decomposition_ast_queue.clear()
+
+        # TODO: Figure out how to deal with parent AST's. Doe we add this AST to ther parent here?
+        #       If we do, the grandparent won't have this AST. So do we do so recursively? If we do
+        #       when we find a decomposition or proof didn't work, we'll need to to lots of cleanup
+
+        # Add parsed_sketches to the queue of sketches to decompose into entailing FormalTheoremProofState's
+        self._state.decomposition_decompose_queue += parsed_sketches["outputs"]
+
+    def get_sketches_to_decompose(self) -> DecomposedFormalTheoremStates:
+        """
+        Gets DecomposedFormalTheoremStates containing DecomposedFormalTheoremStates["inputs"] the
+        list of DecomposedFormalTheoremState ready to be decomposed into dependant
+        FormalTheoremProofState's that entail their parent DecomposedFormalTheoremState.
+
+        Returns
+        -------
+        DecomposedFormalTheoremStates
+            DecomposedFormalTheoremStates containiing DecomposedFormalTheoremStates["inputs"] the
+            list of DecomposedFormalTheoremState ready to be decomposed into dependant
+            FormalTheoremProofState's that entail their parent DecomposedFormalTheoremState.
+        """
+        return DecomposedFormalTheoremStates(inputs=self._state.decomposition_decompose_queue, outputs=[])
+
+    @maybe_save(n=1)
+    def set_decomposed_sketches(self, decomposed_sketches: DecomposedFormalTheoremStates):
+        """
+        Sets DecomposedFormalTheoremStates containing decomposed_sketches["outputs"] the list of
+        DecomposedFormalTheoremState that have been decomposed into dependant
+        FormalTheoremProofState's that entail their parent DecomposedFormalTheoremState.
+
+        Parameters
+        ----------
+        decomposed_sketches: DecomposedFormalTheoremStates
+            DecomposedFormalTheoremStates containing decomposed_sketches["outputs"] the list of
+            DecomposedFormalTheoremState that have been decomposed into dependant
+            FormalTheoremProofState's that entail their parent DecomposedFormalTheoremState.
+        """
+        # Remove all elements from the queue of elements to decompose
+        self._state.decomposition_decompose_queue.clear()
+
+        # Gather all children FormalTheoremProofState's that need to be proven
+        all_children = [dt for ds in decomposed_sketches["outputs"] for dt in ds["children"]]
+
+        # Queue all children FormalTheoremProofState's to have their theorems proved
+        self._state.proof_prove_queue += all_children
+
+        # Flip is_finished appropriately
+        self._state.is_finished = any((child["depth"] >= PROVER_AGENT_MAX_DEPTH) for child in all_children)
