@@ -121,5 +121,10 @@ skip_empty = true
 branch = true
 source = ["goedels_poetry"]
 
+[tool.uv.workspace]
+members = [
+    "kimina-lean-server",
+]
+
 [tool.uv.sources]
-kimina-client = { path = "../kimina-lean-server" }
+kimina-client = { workspace = true }

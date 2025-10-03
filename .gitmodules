@@ -1,0 +1,3 @@
+[submodule "kimina-lean-server"]
+	path = kimina-lean-server
+	url = https://github.com/KellyJDavis/kimina-lean-server
