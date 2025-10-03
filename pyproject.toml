@@ -23,6 +23,10 @@ dependencies = [
     "langchain-core>=0.3.77",
     "langchain-ollama>=0.3.10",
     "langgraph>=0.6.8",
+    "rich>=13.0.0",
+    "tqdm>=4.66.0",
+    "ollama>=0.3.0",
+    "typing_extensions>=4.9.0",
 ]
 
 [project.urls]
@@ -42,6 +46,7 @@ dev = [
     "mkdocs>=1.4.2",
     "mkdocs-material>=8.5.10",
     "mkdocstrings[python]>=0.26.1",
+    "types-tqdm>=4.66.0.20240417",
 ]
 
 [build-system]
@@ -129,3 +134,12 @@ members = [
 
 [tool.uv.sources]
 kimina-client = { workspace = true }
+
+[tool.deptry]
+root = ["goedels_poetry"]
+exclude = [
+    "kimina-lean-server/.*",
+    "\\.venv/.*",
+    "dist/.*",
+    "site/.*",
+]
