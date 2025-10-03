@@ -21,6 +21,7 @@ dependencies = [
     "jinja2>=3.1.6",
     "kimina-client",
     "langchain-core>=0.3.77",
+    "langchain-ollama>=0.3.10",
     "langgraph>=0.6.8",
     "ollama>=0.6.0",
     "rich>=14.1.0",
