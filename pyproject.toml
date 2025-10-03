@@ -22,6 +22,10 @@ dependencies = [
     "kimina-client",
     "langchain-core>=0.3.77",
     "langgraph>=0.6.8",
+    "ollama>=0.6.0",
+    "rich>=14.1.0",
+    "tqdm>=4.67.1",
+    "typing-extensions>=4.15.0",
 ]
 
 [project.urls]
