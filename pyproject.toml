@@ -17,6 +17,12 @@ classifiers = [
     "Programming Language :: Python :: 3.13",
     "Topic :: Software Development :: Libraries :: Python Modules",
 ]
+dependencies = [
+    "jinja2>=3.1.6",
+    "kimina-client",
+    "langchain-core>=0.3.77",
+    "langgraph>=0.6.8",
+]
 
 [project.urls]
 Homepage = "https://KellyJDavis.github.io/goedels-poetry/"
@@ -114,3 +120,6 @@ skip_empty = true
 [tool.coverage.run]
 branch = true
 source = ["goedels_poetry"]
+
+[tool.uv.sources]
+kimina-client = { path = "../kimina-lean-server" }
