@@ -63,7 +63,7 @@ def _build_agent(server_url: str, server_max_retries: int) -> StateGraph:
     graph_builder.add_conditional_edges(START, _map_edge, ["parser_agent"])
     graph_builder.add_edge("parser_agent", END)
 
-    return graph_builder.compile()
+    return graph_builder.compile()  # type: ignore[return-value]
 
 
 def _map_edge(states: FormalTheoremProofStates) -> list[Send]:
@@ -108,13 +108,15 @@ def _parse_proof(server_url: str, server_max_retries: int, state: FormalTheoremP
     kimina_client = KiminaClient(api_url=server_url, http_timeout=36000, n_retries=server_max_retries)
 
     # Parse formal proof of the passed state
-    ast_code_response = kimina_client.ast_code(state["formal_proof"])
+    proof_code = state["formal_proof"] or ""
+    ast_code_response = kimina_client.ast_code(proof_code)
 
     # Parse ast_code_response
     parsed_response = parse_kimina_ast_code_response(ast_code_response)
 
     # Set state["ast"] with the parsed_response
-    state["ast"] = AST(parsed_response["ast"])
+    if parsed_response["ast"] is not None:
+        state["ast"] = AST(parsed_response["ast"])
 
     # Return a FormalTheoremProofStates with state added to its outputs
-    return {"outputs": [state]}
+    return {"inputs": [], "outputs": [state]}

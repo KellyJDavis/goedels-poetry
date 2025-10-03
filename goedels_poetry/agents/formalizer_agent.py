@@ -60,7 +60,7 @@ def _build_agent(llm: BaseChatModel) -> StateGraph:
     graph_builder.add_edge("formalizer_agent", END)
 
     # Return the agent
-    return graph_builder.compile()
+    return graph_builder.compile()  # type: ignore[return-value]
 
 
 def _formalizer(llm: BaseChatModel, state: InformalTheoremState) -> InformalTheoremState:
@@ -94,10 +94,10 @@ def _formalizer(llm: BaseChatModel, state: InformalTheoremState) -> InformalTheo
     response_content = llm.invoke(prompt).content
 
     # Parse formalizer response
-    formal_statement = _parser_formalizer_response(response_content)
+    formal_statement = _parser_formalizer_response(str(response_content))
 
-    # Return InformalTheoremState with the formal theorem
-    return {"formal_theorem": formal_statement}
+    # Return InformalTheoremState with the formal theorem merged
+    return {**state, "formal_theorem": formal_statement}
 
 
 def _hash_informal_statement(informal_statement: str) -> str:
@@ -151,5 +151,5 @@ def _parser_formalizer_response(response: str) -> str:
     """
     pattern = r"```lean4?\n(.*?)\n?```"
     matches = re.findall(pattern, response, re.DOTALL)
-    formal_statement = matches[-1].strip() if matches else None
+    formal_statement = matches[-1].strip() if matches else ""
     return formal_statement

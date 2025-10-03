@@ -1,3 +1,5 @@
+from typing import cast
+
 from langchain_core.language_models.chat_models import BaseChatModel
 
 from goedels_poetry.agents.formal_theorem_syntax_agent import FormalTheoremSyntaxAgentFactory
@@ -58,8 +60,8 @@ class GoedelsPoetryConfig:
         prover_agent_max_retries: int = PROVER_AGENT_MAX_RETRIES,
         semantics_agent_llm: BaseChatModel = SEMANTICS_AGENT_LLM,
         decomposer_agent_llm: BaseChatModel = DECOMPOSER_AGENT_LLM,
-        kimina_lean_server_url: str = KIMINA_LEAN_SERVER["url"],
-        kimina_lean_server_max_retries: int = KIMINA_LEAN_SERVER["max_retries"],
+        kimina_lean_server_url: str = cast(str, KIMINA_LEAN_SERVER["url"]),
+        kimina_lean_server_max_retries: int = cast(int, KIMINA_LEAN_SERVER["max_retries"]),
     ):
         self.formalizer_agent_llm = formalizer_agent_llm
         self.formalizer_agent_max_retries = formalizer_agent_max_retries
@@ -77,11 +79,11 @@ class GoedelsPoetryFramework:
     multi-agent system. The framework will be controlled by a supervisor agent.
     """
 
-    def __init__(self, config: GoedelsPoetryConfig, state_manager: GoedelsPoetryStateManager):
+    def __init__(self, config: GoedelsPoetryConfig, state_manager: GoedelsPoetryStateManager) -> None:
         self._config = config
         self._state_manager = state_manager
 
-    def run(self):
+    def run(self) -> None:
         """
         Runs the GoedelsPoetry system until it has proven the informal theorem or until it has
         failed to prove that theorem.
@@ -93,7 +95,7 @@ class GoedelsPoetryFramework:
             self._state_manager.set_action(action)
             getattr(self, action)()
 
-    def formalize_informal_theorem(self):
+    def formalize_informal_theorem(self) -> None:
         """
         Formalizes the pending informal theorem
         """
@@ -102,24 +104,25 @@ class GoedelsPoetryFramework:
 
         # Get informal theorem state and formalize informal theorem state
         informal_theorem_state = self._state_manager.get_informal_theorem_to_formalize()
-        informal_theorem_state = formalizer_agent.invoke(informal_theorem_state)
+        informal_theorem_state = formalizer_agent.invoke(informal_theorem_state)  # type: ignore[attr-defined]
         self._state_manager.set_formalized_informal_theorem(informal_theorem_state)
 
-    def check_informal_theorem_syntax(self):
+    def check_informal_theorem_syntax(self) -> None:
         """
         Checks syntax of the pending informal theorem's formalization
         """
         # Create informal theorem syntax agent
         syntax_agent = InformalTheoremSyntaxAgentFactory.create_agent(
-            server_url=KIMINA_LEAN_SERVER.url, server_max_retries=KIMINA_LEAN_SERVER.max_retries
+            server_url=KIMINA_LEAN_SERVER.url,  # type: ignore[attr-defined]
+            server_max_retries=KIMINA_LEAN_SERVER.max_retries,  # type: ignore[attr-defined]
         )
 
         # Get informal theorem state and syntax check informal theorem's formalization
         informal_theorem_state = self._state_manager.get_informal_theorem_to_validate()
-        informal_theorem_state = syntax_agent.invoke(informal_theorem_state)
+        informal_theorem_state = syntax_agent.invoke(informal_theorem_state)  # type: ignore[attr-defined]
         self._state_manager.set_validated_informal_theorem(informal_theorem_state)
 
-    def check_informal_theorem_semantics(self):
+    def check_informal_theorem_semantics(self) -> None:
         """
         Checks semantics of the pending informal theorem's formalization
         """
@@ -128,24 +131,25 @@ class GoedelsPoetryFramework:
 
         # Get informal theorem state and check semantics of formalization
         informal_theorem_state = self._state_manager.get_informal_theorem_to_check_semantics_of()
-        informal_theorem_state = semantics_agent.invoke(informal_theorem_state)
+        informal_theorem_state = semantics_agent.invoke(informal_theorem_state)  # type: ignore[attr-defined]
         self._state_manager.set_semantically_checked_informal_theorem(informal_theorem_state)
 
-    def check_theorems_syntax(self):
+    def check_theorems_syntax(self) -> None:
         """
         Checks syntax of the pending formal theorems'
         """
         # Create formal theorem syntax agent
         syntax_agent = FormalTheoremSyntaxAgentFactory.create_agent(
-            server_url=KIMINA_LEAN_SERVER.url, server_max_retries=KIMINA_LEAN_SERVER.max_retries
+            server_url=KIMINA_LEAN_SERVER.url,  # type: ignore[attr-defined]
+            server_max_retries=KIMINA_LEAN_SERVER.max_retries,  # type: ignore[attr-defined]
         )
 
         # Get formal theorem states and syntax check formal theorems
         formal_theorem_states = self._state_manager.get_theorems_to_validate()
-        formal_theorem_states = syntax_agent.invoke(formal_theorem_states)
+        formal_theorem_states = syntax_agent.invoke(formal_theorem_states)  # type: ignore[attr-defined]
         self._state_manager.set_validated_theorems(formal_theorem_states)
 
-    def prove_theorems(self):
+    def prove_theorems(self) -> None:
         """
         Proves the pending formal theorems
         """
@@ -154,24 +158,25 @@ class GoedelsPoetryFramework:
 
         # Get formal theorems to prove and prove them
         formal_theorem_states = self._state_manager.get_theorems_to_prove()
-        formal_theorem_states = prover_agent.invoke(formal_theorem_states)
+        formal_theorem_states = prover_agent.invoke(formal_theorem_states)  # type: ignore[attr-defined]
         self._state_manager.set_proven_theorems(formal_theorem_states)
 
-    def check_theorems_proofs(self):
+    def check_theorems_proofs(self) -> None:
         """
         Checks validity of the pending formal theorems' proofs
         """
         # Create proof checker agent
         proof_checker_agent = ProofCheckerAgentFactory.create_agent(
-            server_url=KIMINA_LEAN_SERVER.url, server_max_retries=KIMINA_LEAN_SERVER.max_retries
+            server_url=KIMINA_LEAN_SERVER.url,  # type: ignore[attr-defined]
+            server_max_retries=KIMINA_LEAN_SERVER.max_retries,  # type: ignore[attr-defined]
         )
 
         # Get formal theorem states and check their proofs' validity
         formal_theorem_states = self._state_manager.get_proofs_to_validate()
-        formal_theorem_states = proof_checker_agent.invoke(formal_theorem_states)
+        formal_theorem_states = proof_checker_agent.invoke(formal_theorem_states)  # type: ignore[attr-defined]
         self._state_manager.set_validated_proofs(formal_theorem_states)
 
-    def request_proofs_corrections(self):
+    def request_proofs_corrections(self) -> None:
         """
         Requests corrections for the the pending invalid formal theorems' proofs
         """
@@ -180,24 +185,25 @@ class GoedelsPoetryFramework:
 
         # Get formal theorem states with invalid proofs and request corrections
         formal_theorem_states = self._state_manager.get_proofs_to_correct()
-        formal_theorem_states = corrector_agent.invoke(formal_theorem_states)
+        formal_theorem_states = corrector_agent.invoke(formal_theorem_states)  # type: ignore[attr-defined]
         self._state_manager.set_corrected_proofs(formal_theorem_states)
 
-    def parse_proofs(self):
+    def parse_proofs(self) -> None:
         """
         Parses validated formal proofs into abstract syntax trees (AST)
         """
         # Create proof parser agent
         proof_parser_agent = ProofParserAgentFactory.create_agent(
-            server_url=KIMINA_LEAN_SERVER.url, server_max_retries=KIMINA_LEAN_SERVER.max_retries
+            server_url=KIMINA_LEAN_SERVER.url,  # type: ignore[attr-defined]
+            server_max_retries=KIMINA_LEAN_SERVER.max_retries,  # type: ignore[attr-defined]
         )
 
         # Get formal theorem states and parse their proofs into ASTs
         formal_theorem_states = self._state_manager.get_proofs_to_parse()
-        formal_theorem_states = proof_parser_agent.invoke(formal_theorem_states)
+        formal_theorem_states = proof_parser_agent.invoke(formal_theorem_states)  # type: ignore[attr-defined]
         self._state_manager.set_parsed_proofs(formal_theorem_states)
 
-    def sketch_proofs(self):
+    def sketch_proofs(self) -> None:
         """
         Sketched a proof of pending formal theorems' that proved too difficult to prove directly
         """
@@ -206,24 +212,25 @@ class GoedelsPoetryFramework:
 
         # Get decomposed formal theorem states and sketch their proofs
         decomposed_states = self._state_manager.get_theorems_to_sketch()
-        decomposed_states = proof_sketch_agent.invoke(decomposed_states)
+        decomposed_states = proof_sketch_agent.invoke(decomposed_states)  # type: ignore[attr-defined]
         self._state_manager.set_sketched_theorems(decomposed_states)
 
-    def check_proof_sketches_syntax(self):
+    def check_proof_sketches_syntax(self) -> None:
         """
         Checks the syntax of the pending proof sketches
         """
         # Create sketch checker agent
         sketch_checker_agent = SketchCheckerAgentFactory.create_agent(
-            server_url=KIMINA_LEAN_SERVER.url, server_max_retries=KIMINA_LEAN_SERVER.max_retries
+            server_url=KIMINA_LEAN_SERVER.url,  # type: ignore[attr-defined]
+            server_max_retries=KIMINA_LEAN_SERVER.max_retries,  # type: ignore[attr-defined]
         )
 
         # Get decomposed formal theorem states and check their sketches' syntax
         decomposed_states = self._state_manager.get_sketches_to_validate()
-        decomposed_states = sketch_checker_agent.invoke(decomposed_states)
+        decomposed_states = sketch_checker_agent.invoke(decomposed_states)  # type: ignore[attr-defined]
         self._state_manager.set_validated_sketches(decomposed_states)
 
-    def request_proof_sketches_corrections(self):
+    def request_proof_sketches_corrections(self) -> None:
         """
         Requests corrections for the the pending invalid proof sketches
         """
@@ -232,24 +239,25 @@ class GoedelsPoetryFramework:
 
         # Get decomposed formal theorem states with invalid sketches and request corrections
         decomposed_states = self._state_manager.get_sketches_to_correct()
-        decomposed_states = corrector_agent.invoke(decomposed_states)
+        decomposed_states = corrector_agent.invoke(decomposed_states)  # type: ignore[attr-defined]
         self._state_manager.set_corrected_sketches(decomposed_states)
 
-    def parse_proof_sketches(self):
+    def parse_proof_sketches(self) -> None:
         """
         Parses validated sketch into abstract syntax trees (AST)
         """
         # Create sketch parser agent
         sketch_parser_agent = SketchParserAgentFactory.create_agent(
-            server_url=KIMINA_LEAN_SERVER.url, server_max_retries=KIMINA_LEAN_SERVER.max_retries
+            server_url=KIMINA_LEAN_SERVER.url,  # type: ignore[attr-defined]
+            server_max_retries=KIMINA_LEAN_SERVER.max_retries,  # type: ignore[attr-defined]
         )
 
         # Get decomposed formal theorem states and parse their sketches into ASTs
         decomposed_states = self._state_manager.get_sketches_to_parse()
-        decomposed_states = sketch_parser_agent.invoke(decomposed_states)
+        decomposed_states = sketch_parser_agent.invoke(decomposed_states)  # type: ignore[attr-defined]
         self._state_manager.set_parsed_sketches(decomposed_states)
 
-    def decompose_proof_sketches(self):
+    def decompose_proof_sketches(self) -> None:
         """
         Extracts unproven child theorems from decomposed formal theorem states and for each such
         extracted theorm introduces a formal theorem child of the parent decomposed formal theorem.
@@ -259,10 +267,10 @@ class GoedelsPoetryFramework:
 
         # Get decomposed formal theorem states with sketches and decompose each into formal theorems
         decomposed_states = self._state_manager.get_sketches_to_decompose()
-        decomposed_states = decomposition_agent.invoke(decomposed_states)
+        decomposed_states = decomposition_agent.invoke(decomposed_states)  # type: ignore[attr-defined]
         self._state_manager.set_decomposed_sketches(decomposed_states)
 
-    def finish(self):
+    def finish(self) -> None:
         """
         Finishes the proof process.
         """

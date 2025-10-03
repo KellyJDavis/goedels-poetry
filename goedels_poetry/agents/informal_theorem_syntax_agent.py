@@ -61,7 +61,7 @@ def _build_agent(server_url: str, server_max_retries: int) -> StateGraph:
     graph_builder.add_edge(START, "syntax_agent")
     graph_builder.add_edge("syntax_agent", END)
 
-    return graph_builder.compile()
+    return graph_builder.compile()  # type: ignore[return-value]
 
 
 def _check_syntax(server_url: str, server_max_retries: int, state: InformalTheoremState) -> InformalTheoremState:
@@ -86,7 +86,7 @@ def _check_syntax(server_url: str, server_max_retries: int, state: InformalTheor
     kimina_client = KiminaClient(api_url=server_url, n_retries=server_max_retries)
 
     # Check syntax of state["formal_theorem"]
-    check_response = kimina_client.check(state["formal_theorem"])
+    check_response = kimina_client.check(state["formal_theorem"])  # type: ignore[arg-type]
 
     # Parse check_response
     parsed_response = parse_kimina_check_response(check_response)
@@ -94,5 +94,5 @@ def _check_syntax(server_url: str, server_max_retries: int, state: InformalTheor
     # Get the response from the server
     syntactic = parsed_response["pass"]
 
-    # Return a InformalTheoremState with the response from Kimina Server
-    return {"syntactic": syntactic}
+    # Return an updated InformalTheoremState merged with existing state
+    return {**state, "syntactic": syntactic}

@@ -63,7 +63,7 @@ def _build_agent(server_url: str, server_max_retries: int) -> StateGraph:
     graph_builder.add_conditional_edges(START, _map_edge, ["check_sketch_agent"])
     graph_builder.add_edge("check_sketch_agent", END)
 
-    return graph_builder.compile()
+    return graph_builder.compile()  # type: ignore[return-value]
 
 
 def _map_edge(states: DecomposedFormalTheoremStates) -> list[Send]:
@@ -110,7 +110,8 @@ def _check_sketch(
     kimina_client = KiminaClient(api_url=server_url, http_timeout=36000, n_retries=server_max_retries)
 
     # Check the proof sketch state["proof_sketch"]
-    check_response = kimina_client.check(state["proof_sketch"])
+    sketch_code = state["proof_sketch"] or ""
+    check_response = kimina_client.check(sketch_code)
 
     # Parse check_response
     parsed_response = parse_kimina_check_response(check_response)
@@ -119,7 +120,7 @@ def _check_sketch(
     state["syntactic"] = parsed_response["pass"]
 
     # Update the state with the formatted error string
-    state["errors"] = get_error_str(state["proof_sketch"], parsed_response.get("errors", []), False)
+    state["errors"] = get_error_str(sketch_code, parsed_response.get("errors", []), False)
 
     # Return a DecomposedFormalTheoremStates with state added to its outputs
-    return {"outputs": [state]}
+    return {"outputs": [state]}  # type: ignore[typeddict-item]

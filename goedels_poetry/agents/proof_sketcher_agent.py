@@ -60,7 +60,7 @@ def _build_agent(llm: BaseChatModel) -> StateGraph:
     graph_builder.add_conditional_edges(START, _map_edge, ["proof_sketcher"])
     graph_builder.add_edge("proof_sketcher", END)
 
-    return graph_builder.compile()
+    return graph_builder.compile()  # type: ignore[return-value]
 
 
 def _map_edge(states: DecomposedFormalTheoremStates) -> list[Send]:
@@ -111,7 +111,8 @@ def _proof_sketcher(llm: BaseChatModel, state: DecomposedFormalTheoremState) -> 
     response_content = llm.invoke(state["decomposition_history"]).content
 
     # Parse sketcher response
-    proof_sketch = _parse_proof_sketcher_response(response_content)
+    response_text = response_content if isinstance(response_content, str) else str(response_content)
+    proof_sketch = _parse_proof_sketcher_response(response_text)
 
     # Add the proof sketch to the state
     state["proof_sketch"] = proof_sketch
@@ -120,7 +121,7 @@ def _proof_sketcher(llm: BaseChatModel, state: DecomposedFormalTheoremState) -> 
     state["decomposition_history"] += [AIMessage(content=proof_sketch)]
 
     # Return a DecomposedFormalTheoremStates with state added to its outputs
-    return {"outputs": [state]}
+    return {"inputs": [], "outputs": [state]}
 
 
 def _parse_proof_sketcher_response(response: str) -> str:
@@ -140,6 +141,6 @@ def _parse_proof_sketcher_response(response: str) -> str:
     # TODO: Figure out if this algorithm works for the non-Goedel LLM
     pattern = r"```lean4?\n(.*?)\n?```"
     matches = re.findall(pattern, response, re.DOTALL)
-    proof_sketch = matches[-1].strip() if matches else None
+    proof_sketch = matches[-1].strip() if matches else ""
     proof_sketch = DEFAULT_IMPORTS + proof_sketch  # TODO: Figure out global policy for DEFAULT_IMPORTS
     return proof_sketch

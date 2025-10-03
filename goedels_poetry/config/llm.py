@@ -1,3 +1,5 @@
+from typing import Any
+
 from langchain_ollama import ChatOllama
 from ollama import ResponseError, chat, pull
 from rich.console import Console
@@ -9,7 +11,7 @@ from goedels_poetry.config.config import parsed_config
 console = Console()
 
 
-def _download_llm(llm: str):
+def _download_llm(llm: str) -> None:
     """
     Method which ensures the specified LLM is downloaded. This code if based off of that provided
     # by Ollama https://github.com/ollama/ollama-python/blob/main/examples/pull.py
@@ -23,7 +25,8 @@ def _download_llm(llm: str):
     console.print(f"Starting download of {llm}")
 
     # Track progress for each layer
-    current_digest, bars = "", {}
+    current_digest: str = ""
+    bars: dict[str, Any] = {}
     for progress in pull(llm, stream=True):
         digest = progress.get("digest", "")
         if digest != current_digest and current_digest in bars:
@@ -42,7 +45,7 @@ def _download_llm(llm: str):
         current_digest = digest
 
 
-def _download_llms(llms: list[str]):
+def _download_llms(llms: list[str]) -> None:
     """
     Method which ensures the specified LLMs are downloaded.
 

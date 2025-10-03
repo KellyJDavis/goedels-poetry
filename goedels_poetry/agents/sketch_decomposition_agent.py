@@ -1,3 +1,5 @@
+from typing import cast
+
 from langgraph.graph import END, START, StateGraph
 from langgraph.types import Send
 
@@ -6,6 +8,7 @@ from goedels_poetry.agents.state import (
     DecomposedFormalTheoremStates,
     FormalTheoremProofState,
 )
+from goedels_poetry.util.tree import TreeNode
 
 
 class SketchDecompositionAgentFactory:
@@ -45,7 +48,7 @@ def _build_agent() -> StateGraph:
     graph_builder.add_conditional_edges(START, _map_edge, ["sketch_decomposition_agent"])
     graph_builder.add_edge("sketch_decomposition_agent", END)
 
-    return graph_builder.compile()
+    return graph_builder.compile()  # type: ignore[return-value]
 
 
 def _map_edge(states: DecomposedFormalTheoremStates) -> list[Send]:
@@ -85,6 +88,8 @@ def _sketch_decomposer(state: DecomposedFormalTheoremState) -> DecomposedFormalT
     DecomposedFormalTheoremStates
         A DecomposedFormalTheoremStates containing in its outputs the modified DecomposedFormalTheoremState
     """
+    if state["ast"] is None:
+        return {"outputs": [state]}  # type: ignore[typeddict-item]
     # Obtain the names of all unproven subgoals
     unproven_subgoal_names = state["ast"].get_unproven_subgoal_names()
 
@@ -97,7 +102,7 @@ def _sketch_decomposer(state: DecomposedFormalTheoremState) -> DecomposedFormalT
         state["children"].append(_create_formal_theorem_proof_state(unproven_subgoal_code, state))
 
     # Return a DecomposedFormalTheoremStates with state added to its outputs
-    return {"outputs": [state]}
+    return {"outputs": [state]}  # type: ignore[typeddict-item]
 
 
 def _create_formal_theorem_proof_state(
@@ -114,7 +119,7 @@ def _create_formal_theorem_proof_state(
         The parent of the returned FormalTheoremProofState
     """
     return FormalTheoremProofState(
-        parent=state,
+        parent=cast(TreeNode | None, state),
         depth=(state["depth"] + 1),
         formal_theorem=formal_theorem,
         syntactic=True,

@@ -18,7 +18,7 @@ class InformalTheoremState(TypedDict):
         The text of the informal theorem
     formalization_attempts: Required[int]
         The number of attempts to formalize the informal theorem
-    formal_theorem: Required[str]
+    formal_theorem: Required[str | None]
         The text of the formalization of the informal theorem
     syntactic: Required[bool]
         A bool indicating if formal_theorem is syntactically valid
@@ -28,7 +28,7 @@ class InformalTheoremState(TypedDict):
 
     informal_theorem: Required[str]
     formalization_attempts: Required[int]
-    formal_theorem: Required[str]
+    formal_theorem: Required[str | None]
     syntactic: Required[bool]
     semantic: Required[bool]
 
@@ -96,13 +96,13 @@ class DecomposedFormalTheoremState(TypedDict):
     ----------
     parent: Required[TreeNode | None]
         The parent in the proof tree
-    children: Required[list[TreeNode]]
+    children: Required[list[FormalTheoremProofState]]
         The children of this node in the proof tree
     depth: Required[int]
         The depth of this node in the proof tree
     formal_theorem: Required[str]
         The text of the formalization of the informal theorem
-    proof_sketch: Required[str]
+    proof_sketch: Required[str | None]
         The formal sketch of the proof of formal_theorem
     syntactic: Required[bool]
         A bool indicating if proof_sketch is syntactically valid
@@ -118,15 +118,15 @@ class DecomposedFormalTheoremState(TypedDict):
 
     # InternalTreeNode specific properties
     parent: Required[TreeNode | None]
-    children: Required[list[TreeNode]]
+    children: Required[list[FormalTheoremProofState]]
     depth: Required[int]
     # FormalTheorem specific properties
     formal_theorem: Required[str]
     # DecomposedFormalTheoremState specific properties
-    proof_sketch: Required[str]
+    proof_sketch: Required[str | None]
     syntactic: Required[bool]
-    errors: Required[str]
-    ast: Required[AST]
+    errors: Required[str | None]
+    ast: Required[AST | None]
     decomposition_attempts: Required[int]
     decomposition_history: Required[Annotated[list[AnyMessage], add]]
 

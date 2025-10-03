@@ -6,6 +6,7 @@ from datetime import datetime
 from hashlib import sha256
 from pathlib import Path
 from shutil import rmtree
+from typing import Any, cast
 
 from goedels_poetry.agents.state import (
     DecomposedFormalTheoremState,
@@ -21,14 +22,13 @@ from goedels_poetry.config.llm import (
     PROVER_AGENT_MAX_RETRIES,
 )
 from goedels_poetry.functools import maybe_save
-from goedels_poetry.util.tree import TreeNode
 
 # Global configuration for output directory
 _OUTPUT_DIR = os.environ.get("GOEDELS_POETRY_DIR", os.path.expanduser("~/.goedels_poetry"))
 
 
 class GoedelsPoetryState:
-    def __init__(self, formal_theorem: str | None = None, informal_theorem: str | None = None):
+    def __init__(self, formal_theorem: str | None = None, informal_theorem: str | None = None) -> None:
         # Check that the proper number of arguments has been provided
         if (formal_theorem is None) and (informal_theorem is None):
             raise ValueError("Either 'formal_theorem' xor 'informal_theorem' must be provided")  # noqa: TRY003
@@ -41,8 +41,8 @@ class GoedelsPoetryState:
         # Introduce a list of strings to hold the action history
         self.action_history: list[str] = []
 
-        # Initialize state with provided arguemnts
-        self.formal_theorem_proof: TreeNode = (
+        # Initialize state with provided arguments
+        self.formal_theorem_proof: FormalTheoremProofState | DecomposedFormalTheoremState | None = (
             None
             if formal_theorem is None
             else FormalTheoremProofState(
@@ -60,7 +60,7 @@ class GoedelsPoetryState:
         )
 
         # Initialize InformalTheoremState queues
-        self.informal_formalizer_queue: InformalTheoremState = (
+        self.informal_formalizer_queue: InformalTheoremState | None = (
             None
             if informal_theorem is None
             else InformalTheoremState(
@@ -71,12 +71,12 @@ class GoedelsPoetryState:
                 semantic=False,
             )
         )
-        self.informal_syntax_queue: None
-        self.informal_semantics_queue: None
+        self.informal_syntax_queue: InformalTheoremState | None = None
+        self.informal_semantics_queue: InformalTheoremState | None = None
 
         # Initialize FormalTheoremProofState lists
         self.proof_syntax_queue: list[FormalTheoremProofState] = (
-            [] if formal_theorem is None else [FormalTheoremProofState(self.formal_theorem_proof)]
+            [] if self.formal_theorem_proof is None else [cast(FormalTheoremProofState, self.formal_theorem_proof)]
         )
         self.proof_prove_queue: list[FormalTheoremProofState] = []
         self.proof_validate_queue: list[FormalTheoremProofState] = []
@@ -96,7 +96,7 @@ class GoedelsPoetryState:
         self._iteration = 0
 
         # Create theorem specific output directory
-        theorem = formal_theorem if formal_theorem else informal_theorem
+        theorem = cast(str, formal_theorem if formal_theorem is not None else informal_theorem)
         theorem_hash = self._hash_theorem(theorem)
         self._output_dir = os.path.join(_OUTPUT_DIR, theorem_hash)
 
@@ -211,7 +211,7 @@ class GoedelsPoetryState:
             theorem_hash = GoedelsPoetryState._hash_theorem(theorem)
             search_directory = os.path.join(_OUTPUT_DIR, theorem_hash)
         else:
-            search_directory = directory
+            search_directory = cast(str, directory)
 
         if not os.path.exists(search_directory):
             return []
@@ -244,7 +244,8 @@ class GoedelsPoetryState:
             The loaded state object
         """
         with open(filepath, "rb") as f:
-            return pickle.load(f)  # noqa: S301
+            obj = pickle.load(f)  # noqa: S301
+        return cast(GoedelsPoetryState, obj)
 
     @classmethod
     def clear_theorem_directory(cls, theorem: str) -> str:
@@ -321,7 +322,7 @@ class GoedelsPoetryStateManager:
         """
         return self._state.is_finished
 
-    def add_action(self, action: str):
+    def add_action(self, action: str) -> None:
         """
         Adds the passed action to the action history
 
@@ -332,7 +333,11 @@ class GoedelsPoetryStateManager:
         """
         self._state.action_history.append(action)
 
-    def get_informal_theorem_to_formalize(self) -> InformalTheoremState:
+    # Backwards-compatible alias expected by framework
+    def set_action(self, action: str) -> None:
+        self.add_action(action)
+
+    def get_informal_theorem_to_formalize(self) -> InformalTheoremState | None:
         """
         Gets the InformalTheoremState that needs to be formalized. This may be None if there is no
         InformalTheoremState that needs to be formalized.
@@ -345,7 +350,7 @@ class GoedelsPoetryStateManager:
         return self._state.informal_formalizer_queue
 
     @maybe_save(n=1)
-    def set_formalized_informal_theorem(self, formalized_informal_theorem: InformalTheoremState):
+    def set_formalized_informal_theorem(self, formalized_informal_theorem: InformalTheoremState) -> None:
         """
         Sets the InformalTheoremState that has been formalized. This InformalTheoremState may have
         a syntactically valid formalization or it may not be syntactically valid.
@@ -361,7 +366,7 @@ class GoedelsPoetryStateManager:
         # Place formalized_informal_theorem on the queue to be syntactically validated
         self._state.informal_syntax_queue = formalized_informal_theorem
 
-    def get_informal_theorem_to_validate(self) -> InformalTheoremState:
+    def get_informal_theorem_to_validate(self) -> InformalTheoremState | None:
         """
         Gets the InformalTheoremState that needs to be validated syntactically. This may be None if
         there is no InformalTheoremState that needs to be validated syntactically.
@@ -374,7 +379,7 @@ class GoedelsPoetryStateManager:
         return self._state.informal_syntax_queue
 
     @maybe_save(n=1)
-    def set_validated_informal_theorem(self, validated_informal_theorem: InformalTheoremState):
+    def set_validated_informal_theorem(self, validated_informal_theorem: InformalTheoremState) -> None:
         """
         Sets the InformalTheoremState that has been validated syntactically. This
         InformalTheoremState may be valid syntactically or invalid syntactically.
@@ -402,7 +407,7 @@ class GoedelsPoetryStateManager:
         # Set is_finished appropriately
         self._state.is_finished = validated_informal_theorem["formalization_attempts"] >= FORMALIZER_AGENT_MAX_RETRIES
 
-    def get_informal_theorem_to_check_semantics_of(self) -> InformalTheoremState:
+    def get_informal_theorem_to_check_semantics_of(self) -> InformalTheoremState | None:
         """
         Gets the InformalTheoremState that needs to have its semantics checked, making sure that
         the semantics of the informal statement matches that of the formal statement.
@@ -415,7 +420,9 @@ class GoedelsPoetryStateManager:
         return self._state.informal_semantics_queue
 
     @maybe_save(n=1)
-    def set_semantically_checked_informal_theorem(self, semantically_checked_informal_theorem: InformalTheoremState):
+    def set_semantically_checked_informal_theorem(
+        self, semantically_checked_informal_theorem: InformalTheoremState
+    ) -> None:
         """
         Sets the InformalTheoremState that has been check semantically. This InformalTheoremState
         may be valid or invalid semantically.
@@ -434,7 +441,7 @@ class GoedelsPoetryStateManager:
             theorem_to_prove = FormalTheoremProofState(
                 parent=None,
                 depth=0,
-                formal_theorem=semantically_checked_informal_theorem["formal_theorem"],
+                formal_theorem=cast(str, semantically_checked_informal_theorem["formal_theorem"]),
                 syntactic=semantically_checked_informal_theorem["syntactic"],
                 formal_proof=None,
                 proved=False,
@@ -466,7 +473,7 @@ class GoedelsPoetryStateManager:
         return FormalTheoremProofStates(inputs=self._state.proof_syntax_queue, outputs=[])
 
     @maybe_save(n=1)
-    def set_validated_theorems(self, validated_theorems: FormalTheoremProofStates):
+    def set_validated_theorems(self, validated_theorems: FormalTheoremProofStates) -> None:
         """
         Sets the FormalTheoremProofStates containing validated_theorems["outputs"] the list
         of root theorem validated FormalTheoremProofState's. Each list item's root theorem may have
@@ -505,7 +512,7 @@ class GoedelsPoetryStateManager:
         return FormalTheoremProofStates(inputs=self._state.proof_prove_queue, outputs=[])
 
     @maybe_save(n=1)
-    def set_proven_theorems(self, proven_theorems: FormalTheoremProofStates):
+    def set_proven_theorems(self, proven_theorems: FormalTheoremProofStates) -> None:
         """
         Sets the FormalTheoremProofStates containing proven_theorems["outputs"] the list
         of proven FormalTheoremProofState. The proof of each list item has yet to be validated or
@@ -538,7 +545,7 @@ class GoedelsPoetryStateManager:
         return FormalTheoremProofStates(inputs=self._state.proof_validate_queue, outputs=[])
 
     @maybe_save(n=1)
-    def set_validated_proofs(self, validated_proofs: FormalTheoremProofStates):
+    def set_validated_proofs(self, validated_proofs: FormalTheoremProofStates) -> None:
         """
         Sets the FormalTheoremProofStates containing validated_proofs["outputs"] the list of
         validated FormalTheoremProofState. Each list item's proof is marked as being valid or
@@ -576,7 +583,7 @@ class GoedelsPoetryStateManager:
         successful_proofs = [vp for vp in validated_proofs_outputs if vp["proved"]]
         self._state.proof_ast_queue += successful_proofs
 
-    def _queue_proofs_for_decomposition(self, proofs_too_difficult: list[FormalTheoremProofState]):
+    def _queue_proofs_for_decomposition(self, proofs_too_difficult: list[FormalTheoremProofState]) -> None:
         """
         Queues the list of FormalTheoremProofState containing proofs too difficult to be decomposed.
 
@@ -603,7 +610,8 @@ class GoedelsPoetryStateManager:
 
             # Remove proof_too_difficult from the proof tree
             if proof_too_difficult["parent"] is not None:
-                proof_too_difficult["parent"]["children"].remove(proof_too_difficult)
+                parent_node = cast(DecomposedFormalTheoremState, proof_too_difficult["parent"])
+                parent_node["children"].remove(proof_too_difficult)
                 proof_too_difficult["parent"] = None
 
             # Check to see if formal_theorem_to_decompose is the root theorem
@@ -612,7 +620,10 @@ class GoedelsPoetryStateManager:
                 self._state.formal_theorem_proof = formal_theorem_to_decompose
             else:
                 # If not, add formal_theorem_to_decompose as its parent's child
-                formal_theorem_to_decompose["parent"]["children"].append(formal_theorem_to_decompose)
+                parent_node2 = cast(DecomposedFormalTheoremState, formal_theorem_to_decompose["parent"])
+                # children is declared as list[FormalTheoremProofState], but runtime accepts TreeNode
+                children_any = cast(list[Any], parent_node2["children"])
+                children_any.append(formal_theorem_to_decompose)
 
     def get_proofs_to_correct(self) -> FormalTheoremProofStates:
         """
@@ -629,7 +640,7 @@ class GoedelsPoetryStateManager:
         return FormalTheoremProofStates(inputs=self._state.proof_correct_queue, outputs=[])
 
     @maybe_save(n=1)
-    def set_corrected_proofs(self, corrected_proofs: FormalTheoremProofStates):
+    def set_corrected_proofs(self, corrected_proofs: FormalTheoremProofStates) -> None:
         """
         Sets the FormalTheoremProofStates containing corrected_proofs["outputs"] the list of
         FormalTheoremProofState with proofs that have been marked for correction using the errors
@@ -646,7 +657,7 @@ class GoedelsPoetryStateManager:
         self._state.proof_correct_queue.clear()
 
         # Place all proofs marked for correction into the queue to be proven
-        self.proof_prove_queue += corrected_proofs["outputs"]
+        self._state.proof_prove_queue += corrected_proofs["outputs"]
 
     def get_proofs_to_parse(self) -> FormalTheoremProofStates:
         """
@@ -663,7 +674,7 @@ class GoedelsPoetryStateManager:
         return FormalTheoremProofStates(inputs=self._state.proof_ast_queue, outputs=[])
 
     @maybe_save(n=1)
-    def set_parsed_proofs(self, parsed_proofs: FormalTheoremProofStates):
+    def set_parsed_proofs(self, parsed_proofs: FormalTheoremProofStates) -> None:
         """
         Sets FormalTheoremProofStates containing parsed_proofs["outputs"] the list of
         FormalTheoremProofState with proofs with associated ASTs.
@@ -697,7 +708,7 @@ class GoedelsPoetryStateManager:
         return DecomposedFormalTheoremStates(inputs=self._state.decomposition_sketch_queue, outputs=[])
 
     @maybe_save(n=1)
-    def set_sketched_theorems(self, sketched_theorems: DecomposedFormalTheoremStates):
+    def set_sketched_theorems(self, sketched_theorems: DecomposedFormalTheoremStates) -> None:
         """
         Sets the DecomposedFormalTheoremStates containing sketched_theorems["outputs"] the list of
         DecomposedFormalTheoremState whose theorems have been decomposed into simpler theorems.
@@ -731,7 +742,7 @@ class GoedelsPoetryStateManager:
         return DecomposedFormalTheoremStates(inputs=self._state.decomposition_validate_queue, outputs=[])
 
     @maybe_save(n=1)
-    def set_validated_sketches(self, validated_sketches: DecomposedFormalTheoremStates):
+    def set_validated_sketches(self, validated_sketches: DecomposedFormalTheoremStates) -> None:
         """
         Sets DecomposedFormalTheoremStates containing validated_sketches["outputs"] the list of
         DecomposedFormalTheoremState whose decompositions have been syntactically determined to
@@ -788,7 +799,7 @@ class GoedelsPoetryStateManager:
         return DecomposedFormalTheoremStates(inputs=self._state.decomposition_correct_queue, outputs=[])
 
     @maybe_save(n=1)
-    def set_corrected_sketches(self, corrected_sketches: DecomposedFormalTheoremStates):
+    def set_corrected_sketches(self, corrected_sketches: DecomposedFormalTheoremStates) -> None:
         """
         Sets DecomposedFormalTheoremStates containing corrected_sketches["outputs"] the list of
         DecomposedFormalTheoremState with sketchesthat have been marked for correction using the
@@ -823,7 +834,7 @@ class GoedelsPoetryStateManager:
         return DecomposedFormalTheoremStates(inputs=self._state.decomposition_ast_queue, outputs=[])
 
     @maybe_save(n=1)
-    def set_parsed_sketches(self, parsed_sketches: DecomposedFormalTheoremStates):
+    def set_parsed_sketches(self, parsed_sketches: DecomposedFormalTheoremStates) -> None:
         """
         Sets DecomposedFormalTheoremStates containing parsed_sketches["outputs"] the list of
         DecomposedFormalTheoremState with sketches with associated ASTs.
@@ -860,7 +871,7 @@ class GoedelsPoetryStateManager:
         return DecomposedFormalTheoremStates(inputs=self._state.decomposition_decompose_queue, outputs=[])
 
     @maybe_save(n=1)
-    def set_decomposed_sketches(self, decomposed_sketches: DecomposedFormalTheoremStates):
+    def set_decomposed_sketches(self, decomposed_sketches: DecomposedFormalTheoremStates) -> None:
         """
         Sets DecomposedFormalTheoremStates containing decomposed_sketches["outputs"] the list of
         DecomposedFormalTheoremState that have been decomposed into dependant

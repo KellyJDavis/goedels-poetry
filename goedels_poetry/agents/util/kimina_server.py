@@ -1,4 +1,5 @@
 import re
+from typing import Any, cast
 
 from kimina_client.models import AstModuleResponse, CheckResponse
 
@@ -18,13 +19,15 @@ def parse_kimina_check_response(check_response: CheckResponse) -> dict:
         A dict used by Goedel-Prover-V2
     """
     response = check_response.results[0].response  # TODO: Is this the right element?
-    ast_responses = {}
+    resp = cast(dict[str, Any], response)
+    ast_responses: dict[str, Any] = {}
+    messages = cast(list[dict[str, Any]], resp.get("messages", []))
     parsed_response = {
-        "sorries": response.get("sorries", []),
-        "tactics": response.get("tactics", []),
-        "errors": [m for m in response.get("messages", []) if m.get("severity") == "error"],
-        "warnings": [m for m in response.get("messages", []) if m.get("severity") == "warning"],
-        "infos": [m for m in response.get("messages", []) if m.get("severity") == "info"],
+        "sorries": resp.get("sorries", []),
+        "tactics": resp.get("tactics", []),
+        "errors": [m for m in messages if m.get("severity") == "error"],
+        "warnings": [m for m in messages if m.get("severity") == "warning"],
+        "infos": [m for m in messages if m.get("severity") == "info"],
         "ast": ast_responses,
         "system_errors": None,
     }
@@ -56,7 +59,7 @@ def parse_semantic_check_response(response: str) -> str:
     """
     pattern = r"Judgement:\s*(.+)"
     matches = re.findall(pattern, response, re.IGNORECASE)
-    return matches[-1].strip() if matches else None
+    return matches[-1].strip() if matches else None  # type: ignore[return-value]
 
 
 def parse_kimina_ast_code_response(ast_code_response: AstModuleResponse) -> dict:

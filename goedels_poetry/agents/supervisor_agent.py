@@ -77,7 +77,8 @@ class SupervisorAgent:
             return "decompose_proof_sketches"
 
         # No action is pending, we are finished
-        self._state_manager.is_finished = True
+        # Mark finished via action rather than property assignment
+        # The framework will call the 'finish' action next
 
         # Return the final action "finish"
         return "finish"

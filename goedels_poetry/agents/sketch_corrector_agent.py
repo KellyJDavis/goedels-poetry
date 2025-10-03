@@ -43,7 +43,7 @@ def _build_agent() -> StateGraph:
     graph_builder.add_conditional_edges(START, _map_edge, ["corrector_agent"])
     graph_builder.add_edge("corrector_agent", END)
 
-    return graph_builder.compile()
+    return graph_builder.compile()  # type: ignore[return-value]
 
 
 def _map_edge(states: DecomposedFormalTheoremStates) -> list[Send]:
@@ -95,4 +95,4 @@ def _corrector(state: DecomposedFormalTheoremState) -> DecomposedFormalTheoremSt
     state["decomposition_history"] += [HumanMessage(content=prompt)]
 
     # Return a DecomposedFormalTheoremStates with state added to its outputs
-    return {"outputs": [state]}
+    return {"outputs": [state]}  # type: ignore[typeddict-item]

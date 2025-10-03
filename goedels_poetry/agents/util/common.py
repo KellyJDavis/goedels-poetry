@@ -16,7 +16,7 @@ DEFAULT_IMPORTS = (
 )
 
 
-def load_prompt(name: str, **kwargs) -> str:
+def load_prompt(name: str, **kwargs: object) -> str:
     """
     Load a template from the prompts directory and renders
     it with the given kwargs.
@@ -36,7 +36,7 @@ def load_prompt(name: str, **kwargs) -> str:
     return _env.get_template(f"{name}.md").render(**kwargs)
 
 
-def get_error_str(code: str, errors: list[dict], error_thres: bool):  # noqa: C901
+def get_error_str(code: str, errors: list[dict], error_thres: bool) -> str:  # noqa: C901
     """
     Given the code and errors from the previous proof attempt, this function returns a string
     summarizing the error. This string is in the formate expected by Goedel-Prover-V2.

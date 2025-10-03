@@ -63,7 +63,7 @@ def _build_agent(server_url: str, server_max_retries: int) -> StateGraph:
     graph_builder.add_conditional_edges(START, _map_edge, ["check_proof_agent"])
     graph_builder.add_edge("check_proof_agent", END)
 
-    return graph_builder.compile()
+    return graph_builder.compile()  # type: ignore[return-value]
 
 
 def _map_edge(states: FormalTheoremProofStates) -> list[Send]:
@@ -108,7 +108,7 @@ def _check_proof(server_url: str, server_max_retries: int, state: FormalTheoremP
     kimina_client = KiminaClient(api_url=server_url, http_timeout=36000, n_retries=server_max_retries)
 
     # Check the formal proof state["formal_proof"]
-    check_response = kimina_client.check(state["formal_proof"])
+    check_response = kimina_client.check(state["formal_proof"])  # type: ignore[arg-type]
 
     # Parse check_response
     parsed_response = parse_kimina_check_response(check_response)
@@ -117,7 +117,8 @@ def _check_proof(server_url: str, server_max_retries: int, state: FormalTheoremP
     state["proved"] = parsed_response["pass"]
 
     # Update the state with the error string formatted for Goedel-Prover-V2 use
-    state["errors"] = get_error_str(state["formal_proof"], parsed_response.get("errors", []), False)
+    code_for_errors = state["formal_proof"] or ""
+    state["errors"] = get_error_str(code_for_errors, parsed_response.get("errors", []), False)
 
     # Return a FormalTheoremProofStates with state added to its outputs
-    return {"outputs": [state]}
+    return {"inputs": [], "outputs": [state]}

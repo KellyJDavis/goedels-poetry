@@ -62,7 +62,7 @@ def _build_agent(server_url: str, server_max_retries: int) -> StateGraph:
     graph_builder.add_conditional_edges(START, _map_edge, ["syntax_agent"])
     graph_builder.add_edge("syntax_agent", END)
 
-    return graph_builder.compile()
+    return graph_builder.compile()  # type: ignore[return-value]
 
 
 def _map_edge(states: FormalTheoremProofStates) -> list[Send]:
@@ -119,4 +119,4 @@ def _check_syntax(server_url: str, server_max_retries: int, state: FormalTheorem
     state["syntactic"] = syntactic
 
     # Return a FormalTheoremProofStates with state added to its outputs
-    return {"outputs": [state]}
+    return {"inputs": [], "outputs": [state]}

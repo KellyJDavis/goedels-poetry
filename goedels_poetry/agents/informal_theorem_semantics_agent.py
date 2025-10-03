@@ -59,7 +59,7 @@ def _build_agent(llm: BaseChatModel) -> StateGraph:
     graph_builder.add_edge("semantics_agent", END)
 
     # Return the agent
-    return graph_builder.compile()
+    return graph_builder.compile()  # type: ignore[return-value]
 
 
 def _check_semantics(llm: BaseChatModel, state: InformalTheoremState) -> InformalTheoremState:
@@ -89,7 +89,7 @@ def _check_semantics(llm: BaseChatModel, state: InformalTheoremState) -> Informa
     response_content = llm.invoke(prompt).content
 
     # Parse semantics checker response
-    judgement = parse_semantic_check_response(response_content)
+    judgement = parse_semantic_check_response(str(response_content))
 
     # Return InformalTheoremState with semantic set appropriately
-    return {"semantic": (judgement == "Appropriate")}
+    return {**state, "semantic": (judgement == "Appropriate")}

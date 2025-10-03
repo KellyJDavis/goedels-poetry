@@ -60,7 +60,7 @@ def _build_agent(llm: BaseChatModel) -> StateGraph:
     graph_builder.add_conditional_edges(START, _map_edge, ["prover_agent"])
     graph_builder.add_edge("prover_agent", END)
 
-    return graph_builder.compile()
+    return graph_builder.compile()  # type: ignore[return-value]
 
 
 def _map_edge(states: FormalTheoremProofStates) -> list[Send]:
@@ -111,7 +111,8 @@ def _prover(llm: BaseChatModel, state: FormalTheoremProofState) -> FormalTheorem
     response_content = llm.invoke(state["proof_history"]).content
 
     # Parse prover response
-    formal_proof = _parse_prover_response(response_content)
+    response_text = response_content if isinstance(response_content, str) else str(response_content)
+    formal_proof = _parse_prover_response(response_text)
 
     # Add the formal proof to the state
     state["formal_proof"] = formal_proof
@@ -120,7 +121,7 @@ def _prover(llm: BaseChatModel, state: FormalTheoremProofState) -> FormalTheorem
     state["proof_history"] += [AIMessage(content=formal_proof)]
 
     # Return a FormalTheoremProofStates with state added to its outputs
-    return {"outputs": [state]}
+    return {"inputs": [], "outputs": [state]}
 
 
 def _parse_prover_response(response: str) -> str:
@@ -139,6 +140,6 @@ def _parse_prover_response(response: str) -> str:
     """
     pattern = r"```lean4?\n(.*?)\n?```"
     matches = re.findall(pattern, response, re.DOTALL)
-    formal_proof = matches[-1].strip() if matches else None
+    formal_proof = matches[-1].strip() if matches else ""
     formal_proof = DEFAULT_IMPORTS + formal_proof  # TODO: Figure out global policy for DEFAULT_IMPORTS
     return formal_proof
