@@ -58,6 +58,7 @@ packages = ["goedels_poetry"]
 
 [tool.mypy]
 files = ["goedels_poetry"]
+python_version = "3.11"
 disallow_untyped_defs = true
 disallow_any_unimported = true
 no_implicit_optional = true
