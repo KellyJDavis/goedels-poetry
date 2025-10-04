@@ -14,7 +14,7 @@ class InformalTheoremState(TypedDict):
 
     Attributes
     ----------
-    informal_theorem: Required[str | None]
+    informal_theorem: Required[str]
         The text of the informal theorem
     formalization_attempts: Required[int]
         The number of attempts to formalize the informal theorem
@@ -26,7 +26,7 @@ class InformalTheoremState(TypedDict):
         A bool indicating if the informal_theorem and formal_theorem is semantically equivalent
     """
 
-    informal_theorem: Required[str | None]
+    informal_theorem: Required[str]
     formalization_attempts: Required[int]
     formal_theorem: Required[str | None]
     syntactic: Required[bool]
@@ -43,7 +43,7 @@ class FormalTheoremProofState(TypedDict):
         The parent in the proof tree
     depth: Required[int]
         The depth of this node in the proof tree
-    formal_theorem: Required[str | None]
+    formal_theorem: Required[str]
         The text of the formalization of the informal theorem
     syntactic: Required[bool]
         A bool indicating if formal_theorem is syntactically valid
@@ -63,7 +63,7 @@ class FormalTheoremProofState(TypedDict):
 
     parent: Required[TreeNode | None]
     depth: Required[int]
-    formal_theorem: Required[str | None]
+    formal_theorem: Required[str]
     syntactic: Required[bool]
     formal_proof: Required[str | None]
     proved: Required[bool]
@@ -100,7 +100,7 @@ class DecomposedFormalTheoremState(TypedDict):
         The children of this node in the proof tree
     depth: Required[int]
         The depth of this node in the proof tree
-    formal_theorem: Required[str | None]
+    formal_theorem: Required[str]
         The text of the formalization of the informal theorem
     proof_sketch: Required[str | None]
         The formal sketch of the proof of formal_theorem
@@ -121,12 +121,12 @@ class DecomposedFormalTheoremState(TypedDict):
     children: Required[list[TreeNode]]
     depth: Required[int]
     # FormalTheorem specific properties
-    formal_theorem: Required[str | None]
+    formal_theorem: Required[str]
     # DecomposedFormalTheoremState specific properties
     proof_sketch: Required[str | None]
     syntactic: Required[bool]
     errors: Required[str | None]
-    ast: Required[AST]
+    ast: Required[AST | None]
     decomposition_attempts: Required[int]
     decomposition_history: Required[Annotated[list[AnyMessage], add]]
 

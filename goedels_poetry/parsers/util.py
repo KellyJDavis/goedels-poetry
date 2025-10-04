@@ -1,53 +1,59 @@
 import contextlib
 import logging
 from copy import deepcopy
-from typing import Optional, Required, Union
+from typing import Any, Callable, Optional
+
+Node = dict[str, Any] | list[Any]
 
 
-def _get_unproven_subgoal_names(node: Required[Union[dict, list]], context: Required[dict], results: Required[dict]):  # noqa: C901
+def _context_after_decl(node: dict[str, Any], context: dict[str, str | None]) -> dict[str, str | None]:
+    kind = node.get("kind")
+    if kind in {"Lean.Parser.Command.theorem", "Lean.Parser.Command.lemma"}:
+        name: str | None = None
+        for arg in node.get("args", []):
+            if isinstance(arg, dict) and arg.get("kind") == "Lean.Parser.Command.declId":
+                with contextlib.suppress(Exception):
+                    name = arg["args"][0]["val"]
+        if name:
+            return {"theorem": name, "have": None}
+    return context
+
+
+def _context_after_have(node: dict[str, Any], context: dict[str, str | None]) -> dict[str, str | None]:
+    if node.get("kind") == "Lean.Parser.Tactic.tacticHave_":
+        have_name: str | None = None
+        with contextlib.suppress(Exception):
+            have_decl = node["args"][1]
+            have_id_decl = have_decl["args"][0]
+            have_id = have_id_decl["args"][0]["args"][0]["val"]
+            have_name = have_id
+        if have_name:
+            return {**context, "have": have_name}
+    return context
+
+
+def _record_sorry(node: dict[str, Any], context: dict[str, str | None], results: dict[str | None, list[str]]) -> None:
+    if node.get("kind") == "Lean.Parser.Tactic.tacticSorry":
+        theorem = context.get("theorem")
+        have = context.get("have")
+        results.setdefault(theorem, []).append(have or "<main body>")
+
+
+def _get_unproven_subgoal_names(
+    node: Node, context: dict[str, str | None], results: dict[str | None, list[str]]
+) -> None:
     if isinstance(node, dict):
-        kind = node.get("kind")
-
-        # If this is a theorem/lemma/def, update context
-        if kind in {"Lean.Parser.Command.theorem", "Lean.Parser.Command.lemma"}:
-            # Find declId name
-            name = None
-            for arg in node.get("args", []):
-                if isinstance(arg, dict) and arg.get("kind") == "Lean.Parser.Command.declId":
-                    # the actual name is in arg["args"][0]["val"]
-                    with contextlib.suppress(Exception):
-                        name = arg["args"][0]["val"]
-            if name:
-                context = {"theorem": name, "have": None}
-
-        # If this is a have declaration, update context
-        if kind == "Lean.Parser.Tactic.tacticHave_":
-            # descend into haveDecl → haveIdDecl → haveId
-            have_name = None
-            with contextlib.suppress(Exception):
-                have_decl = node["args"][1]  # Term.haveDecl
-                have_id_decl = have_decl["args"][0]
-                have_id = have_id_decl["args"][0]["args"][0]["val"]
-                have_name = have_id
-            if have_name:
-                context = {**context, "have": have_name}
-
-        # If this is a sorry, record with current context
-        if kind == "Lean.Parser.Tactic.tacticSorry":
-            theorem = context.get("theorem")
-            have = context.get("have")
-            results.setdefault(theorem, []).append(have or "<main body>")
-
-        # Recurse into children
+        context = _context_after_decl(node, context)
+        context = _context_after_have(node, context)
+        _record_sorry(node, context, results)
         for _key, val in node.items():
             _get_unproven_subgoal_names(val, dict(context), results)
-
     elif isinstance(node, list):
         for item in node:
             _get_unproven_subgoal_names(item, dict(context), results)
 
 
-def _get_named_subgoal_ast(node: Required[Union[dict, list]], target_name: Required[str]) -> dict:  # noqa: C901
+def _get_named_subgoal_ast(node: Node, target_name: str) -> dict[str, Any] | None:  # noqa: C901
     """
     Find the sub-AST for a given theorem/lemma/have name.
     Returns the entire subtree rooted at that declaration.
@@ -94,7 +100,7 @@ def _get_named_subgoal_ast(node: Required[Union[dict, list]], target_name: Requi
 # ---------------------------
 # AST -> Lean text renderer (keeps 'val' and info)
 # ---------------------------
-def _ast_to_code(node):
+def _ast_to_code(node: Any) -> str:
     if isinstance(node, dict):
         parts = []
         if "val" in node:
@@ -120,7 +126,7 @@ def _ast_to_code(node):
 # ---------------------------
 # Generic AST walkers
 # ---------------------------
-def __find_first(node, predicate):
+def __find_first(node: Node, predicate: Callable[[dict[str, Any]], bool]) -> dict[str, Any] | None:
     if isinstance(node, dict):
         if predicate(node):
             return node
@@ -136,7 +142,9 @@ def __find_first(node, predicate):
     return None
 
 
-def __find_all(node, predicate, acc=None):
+def __find_all(
+    node: Node, predicate: Callable[[dict[str, Any]], bool], acc: list[dict[str, Any]] | None = None
+) -> list[dict[str, Any]]:
     if acc is None:
         acc = []
     if isinstance(node, dict):
@@ -153,10 +161,10 @@ def __find_all(node, predicate, acc=None):
 # ---------------------------
 # Collect named decls and haves
 # ---------------------------
-def __collect_named_decls(ast) -> dict[str, dict]:  # noqa: C901
+def __collect_named_decls(ast: Node) -> dict[str, dict]:  # noqa: C901
     name_map = {}
 
-    def rec(n):  # noqa: C901
+    def rec(n: Any) -> None:  # noqa: C901
         if isinstance(n, dict):
             k = n.get("kind", "")
             if k in {"Lean.Parser.Command.theorem", "Lean.Parser.Command.lemma", "Lean.Parser.Command.def"}:
@@ -184,10 +192,10 @@ def __collect_named_decls(ast) -> dict[str, dict]:  # noqa: C901
 # ---------------------------
 # Collect defined names inside a subtree
 # ---------------------------
-def __collect_defined_names(subtree) -> set[str]:  # noqa: C901
+def __collect_defined_names(subtree: Node) -> set[str]:  # noqa: C901
     names = set()
 
-    def rec(n):  # noqa: C901
+    def rec(n: Any) -> None:  # noqa: C901
         if isinstance(n, dict):
             k = n.get("kind", "")
             if k == "Lean.Parser.Term.haveId":
@@ -215,11 +223,11 @@ def __collect_defined_names(subtree) -> set[str]:  # noqa: C901
 # ---------------------------
 # Find cross-subtree dependencies
 # ---------------------------
-def __find_dependencies(subtree, name_map: dict[str, dict]) -> set[str]:
+def __find_dependencies(subtree: Node, name_map: dict[str, dict]) -> set[str]:
     defined = __collect_defined_names(subtree)
     deps = set()
 
-    def rec(n):
+    def rec(n: Any) -> None:
         if isinstance(n, dict):
             v = n.get("val")
             if isinstance(v, str) and v in name_map and v not in defined:  # noqa: SIM102
@@ -253,7 +261,7 @@ __TYPE_KIND_CANDIDATES = {
 }
 
 
-def __extract_type_ast(node) -> Optional[dict]:
+def __extract_type_ast(node: Any) -> Optional[dict]:
     if not isinstance(node, dict):
         return None
     k = node.get("kind", "")
@@ -281,7 +289,7 @@ def __extract_type_ast(node) -> Optional[dict]:
 # ---------------------------
 # Strip a leading ":" token from a type AST (if present)
 # ---------------------------
-def __strip_leading_colon(type_ast):
+def __strip_leading_colon(type_ast: Any) -> Any:
     """If the AST begins with a ':' token (typeSpec style), return the inner type AST instead."""
     if not isinstance(type_ast, dict):
         return deepcopy(type_ast)
@@ -325,7 +333,7 @@ def __make_binder(name: str, type_ast: Optional[dict]) -> dict:
 # ---------------------------
 # The main AST-level rewrite
 # ---------------------------
-def _get_named_subgoal_rewritten_ast(ast, target_name: str) -> dict:  # noqa: C901
+def _get_named_subgoal_rewritten_ast(ast: Node, target_name: str) -> dict:  # noqa: C901
     name_map = __collect_named_decls(ast)
     if target_name not in name_map:
         raise KeyError(f"target '{target_name}' not found in AST")  # noqa: TRY003
@@ -378,7 +386,7 @@ def _get_named_subgoal_rewritten_ast(ast, target_name: str) -> dict:  # noqa: C9
             else {"val": "Prop", "info": {"leading": " ", "trailing": " "}}
         )
         # Build the new lemma node: "lemma NAME (binders) : TYPE := proof"
-        new_args = []
+        new_args: list[dict[str, Any]] = []
         new_args.append({"val": "lemma", "info": {"leading": "", "trailing": " "}})
         new_args.append({"val": have_name, "info": {"leading": "", "trailing": " "}})
         if binders:

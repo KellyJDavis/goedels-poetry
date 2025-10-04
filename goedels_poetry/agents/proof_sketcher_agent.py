@@ -3,7 +3,8 @@ from functools import partial
 
 from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.messages import AIMessage, HumanMessage
-from langgraph.graph import END, START, CompiledStateGraph, StateGraph
+from langgraph.graph import END, START, StateGraph
+from langgraph.graph.state import CompiledStateGraph
 from langgraph.types import Send
 
 from goedels_poetry.agents.state import DecomposedFormalTheoremState, DecomposedFormalTheoremStates
@@ -120,7 +121,7 @@ def _proof_sketcher(llm: BaseChatModel, state: DecomposedFormalTheoremState) -> 
     state["decomposition_history"] += [AIMessage(content=proof_sketch)]
 
     # Return a DecomposedFormalTheoremStates with state added to its outputs
-    return {"outputs": [state]}
+    return {"outputs": [state]}  # type: ignore[typeddict-item]
 
 
 def _parse_proof_sketcher_response(response: str) -> str:
@@ -141,5 +142,5 @@ def _parse_proof_sketcher_response(response: str) -> str:
     pattern = r"```lean4?\n(.*?)\n?```"
     matches = re.findall(pattern, response, re.DOTALL)
     proof_sketch = matches[-1].strip() if matches else None
-    proof_sketch = DEFAULT_IMPORTS + proof_sketch  # TODO: Figure out global policy for DEFAULT_IMPORTS
+    proof_sketch = DEFAULT_IMPORTS + str(proof_sketch)  # TODO: Figure out global policy for DEFAULT_IMPORTS
     return proof_sketch

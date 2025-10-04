@@ -3,7 +3,8 @@ from functools import partial
 from hashlib import sha256
 
 from langchain_core.language_models.chat_models import BaseChatModel
-from langgraph.graph import END, START, CompiledStateGraph, StateGraph
+from langgraph.graph import END, START, StateGraph
+from langgraph.graph.state import CompiledStateGraph
 
 from goedels_poetry.agents.state import InformalTheoremState
 from goedels_poetry.agents.util.common import load_prompt
@@ -97,7 +98,7 @@ def _formalizer(llm: BaseChatModel, state: InformalTheoremState) -> InformalTheo
     formal_statement = _parser_formalizer_response(str(response_content))
 
     # Return InformalTheoremState with the formal theorem
-    return {"formal_theorem": formal_statement}
+    return {"formal_theorem": formal_statement}  # type: ignore[typeddict-item]
 
 
 def _hash_informal_statement(informal_statement: str) -> str:
@@ -135,7 +136,7 @@ def _normalize_informal_statement(informal_statement: str) -> str:
     return informal_statement.strip().lower()
 
 
-def _parser_formalizer_response(response: str) -> str:
+def _parser_formalizer_response(response: str) -> str | None:
     """
     Extract the final lean code snippet from the passed string.
 

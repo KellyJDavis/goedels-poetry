@@ -2,6 +2,7 @@ from functools import partial
 
 from kimina_client import KiminaClient
 from langgraph.graph import END, START, StateGraph
+from langgraph.graph.state import CompiledStateGraph
 from langgraph.types import Send
 
 from goedels_poetry.agents.state import DecomposedFormalTheoremState, DecomposedFormalTheoremStates
@@ -15,7 +16,7 @@ class SketchParserAgentFactory:
     """
 
     @staticmethod
-    def create_agent(server_url: str, server_max_retries: int) -> StateGraph:
+    def create_agent(server_url: str, server_max_retries: int) -> CompiledStateGraph:
         """
         Creates a SketchParserAgent instance that employs the server at the passed URL.
 
@@ -28,15 +29,15 @@ class SketchParserAgentFactory:
 
         Returns
         -------
-        StateGraph
-            An StateGraph instance of the sketch parser agent.
+        CompiledStateGraph
+            An CompiledStateGraph instance of the sketch parser agent.
         """
         return _build_agent(server_url=server_url, server_max_retries=server_max_retries)
 
 
-def _build_agent(server_url: str, server_max_retries: int) -> StateGraph:
+def _build_agent(server_url: str, server_max_retries: int) -> CompiledStateGraph:
     """
-    Builds a state graph for the specified Kimina server.
+    Builds a compiled state graph for the specified Kimina server.
 
     Parameters
     ----------
@@ -47,8 +48,8 @@ def _build_agent(server_url: str, server_max_retries: int) -> StateGraph:
 
     Returns
     -------
-    StateGraph
-        The state graph for the sketch parser agent.
+    CompiledStateGraph
+        The compiled state graph for the sketch parser agent.
     """
     # Create the sketch parser agent state graph
     graph_builder = StateGraph(DecomposedFormalTheoremStates)
@@ -110,7 +111,7 @@ def _parse_sketch(
     kimina_client = KiminaClient(api_url=server_url, http_timeout=36000, n_retries=server_max_retries)
 
     # Parse formal proof sketch of the passed state
-    ast_code_response = kimina_client.ast_code(state["proof_sketch"])
+    ast_code_response = kimina_client.ast_code(str(state["proof_sketch"]))
 
     # Parse ast_code_response
     parsed_response = parse_kimina_ast_code_response(ast_code_response)
@@ -119,4 +120,4 @@ def _parse_sketch(
     state["ast"] = AST(parsed_response["ast"])
 
     # Return a DecomposedFormalTheoremStates with state added to its outputs
-    return {"outputs": [state]}
+    return {"outputs": [state]}  # type: ignore[typeddict-item]
