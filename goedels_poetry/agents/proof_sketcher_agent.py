@@ -3,7 +3,7 @@ from functools import partial
 
 from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.messages import AIMessage, HumanMessage
-from langgraph.graph import END, START, StateGraph
+from langgraph.graph import END, START, CompiledStateGraph, StateGraph
 from langgraph.types import Send
 
 from goedels_poetry.agents.state import DecomposedFormalTheoremState, DecomposedFormalTheoremStates
@@ -16,7 +16,7 @@ class ProofSketcherAgentFactory:
     """
 
     @staticmethod
-    def create_agent(llm: BaseChatModel) -> StateGraph:
+    def create_agent(llm: BaseChatModel) -> CompiledStateGraph:
         """
         Creates a ProofSketcherAgent instance with the passed llm.
 
@@ -27,15 +27,15 @@ class ProofSketcherAgentFactory:
 
         Returns
         -------
-        StateGraph
-            A StateGraph instance of the proof sketcher agent.
+        CompiledStateGraph
+            A CompiledStateGraph instance of the proof sketcher agent.
         """
         return _build_agent(llm=llm)
 
 
-def _build_agent(llm: BaseChatModel) -> StateGraph:
+def _build_agent(llm: BaseChatModel) -> CompiledStateGraph:
     """
-    Builds a state graph for the proof sketcher agent.
+    Builds a compiled state graph for the proof sketcher agent.
 
     Parameters
     ----------
@@ -44,8 +44,8 @@ def _build_agent(llm: BaseChatModel) -> StateGraph:
 
     Returns
     ----------
-    StateGraph
-        The state graph for the proof sketcher agent.
+    CompiledStateGraph
+        The compiled state graph for the proof sketcher agent.
     """
     # Create the proof sketcher agent state graph
     graph_builder = StateGraph(DecomposedFormalTheoremStates)
@@ -111,7 +111,7 @@ def _proof_sketcher(llm: BaseChatModel, state: DecomposedFormalTheoremState) -> 
     response_content = llm.invoke(state["decomposition_history"]).content
 
     # Parse sketcher response
-    proof_sketch = _parse_proof_sketcher_response(response_content)
+    proof_sketch = _parse_proof_sketcher_response(str(response_content))
 
     # Add the proof sketch to the state
     state["proof_sketch"] = proof_sketch

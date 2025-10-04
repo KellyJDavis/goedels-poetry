@@ -14,11 +14,11 @@ class InformalTheoremState(TypedDict):
 
     Attributes
     ----------
-    informal_theorem: Required[str]
+    informal_theorem: Required[str | None]
         The text of the informal theorem
     formalization_attempts: Required[int]
         The number of attempts to formalize the informal theorem
-    formal_theorem: Required[str]
+    formal_theorem: Required[str | None]
         The text of the formalization of the informal theorem
     syntactic: Required[bool]
         A bool indicating if formal_theorem is syntactically valid
@@ -26,9 +26,9 @@ class InformalTheoremState(TypedDict):
         A bool indicating if the informal_theorem and formal_theorem is semantically equivalent
     """
 
-    informal_theorem: Required[str]
+    informal_theorem: Required[str | None]
     formalization_attempts: Required[int]
-    formal_theorem: Required[str]
+    formal_theorem: Required[str | None]
     syntactic: Required[bool]
     semantic: Required[bool]
 
@@ -43,7 +43,7 @@ class FormalTheoremProofState(TypedDict):
         The parent in the proof tree
     depth: Required[int]
         The depth of this node in the proof tree
-    formal_theorem: Required[str]
+    formal_theorem: Required[str | None]
         The text of the formalization of the informal theorem
     syntactic: Required[bool]
         A bool indicating if formal_theorem is syntactically valid
@@ -63,7 +63,7 @@ class FormalTheoremProofState(TypedDict):
 
     parent: Required[TreeNode | None]
     depth: Required[int]
-    formal_theorem: Required[str]
+    formal_theorem: Required[str | None]
     syntactic: Required[bool]
     formal_proof: Required[str | None]
     proved: Required[bool]
@@ -100,9 +100,9 @@ class DecomposedFormalTheoremState(TypedDict):
         The children of this node in the proof tree
     depth: Required[int]
         The depth of this node in the proof tree
-    formal_theorem: Required[str]
+    formal_theorem: Required[str | None]
         The text of the formalization of the informal theorem
-    proof_sketch: Required[str]
+    proof_sketch: Required[str | None]
         The formal sketch of the proof of formal_theorem
     syntactic: Required[bool]
         A bool indicating if proof_sketch is syntactically valid
@@ -121,11 +121,11 @@ class DecomposedFormalTheoremState(TypedDict):
     children: Required[list[TreeNode]]
     depth: Required[int]
     # FormalTheorem specific properties
-    formal_theorem: Required[str]
+    formal_theorem: Required[str | None]
     # DecomposedFormalTheoremState specific properties
-    proof_sketch: Required[str]
+    proof_sketch: Required[str | None]
     syntactic: Required[bool]
-    errors: Required[str]
+    errors: Required[str | None]
     ast: Required[AST]
     decomposition_attempts: Required[int]
     decomposition_history: Required[Annotated[list[AnyMessage], add]]

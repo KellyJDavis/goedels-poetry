@@ -3,7 +3,7 @@ from functools import partial
 
 from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.messages import AIMessage, HumanMessage
-from langgraph.graph import END, START, StateGraph
+from langgraph.graph import END, START, CompiledStateGraph, StateGraph
 from langgraph.types import Send
 
 from goedels_poetry.agents.state import FormalTheoremProofState, FormalTheoremProofStates
@@ -16,7 +16,7 @@ class ProverAgentFactory:
     """
 
     @staticmethod
-    def create_agent(llm: BaseChatModel) -> StateGraph:
+    def create_agent(llm: BaseChatModel) -> CompiledStateGraph:
         """
         Creates a ProverAgent instance with the passed llm.
 
@@ -27,15 +27,15 @@ class ProverAgentFactory:
 
         Returns
         -------
-        StateGraph
-            An StateGraph instance of the prover agent.
+        CompiledStateGraph
+            An CompiledStateGraph instance of the prover agent.
         """
         return _build_agent(llm=llm)
 
 
-def _build_agent(llm: BaseChatModel) -> StateGraph:
+def _build_agent(llm: BaseChatModel) -> CompiledStateGraph:
     """
-    Builds a state graph for the prover agent.
+    Builds a compiled state graph for the prover agent.
 
     Parameters
     ----------
@@ -44,8 +44,8 @@ def _build_agent(llm: BaseChatModel) -> StateGraph:
 
     Returns
     ----------
-    StateGraph
-        The state graph for the prover agent.
+    CompiledStateGraph
+        The compiled state graph for the prover agent.
     """
     # Create the prover agent state graph
     graph_builder = StateGraph(FormalTheoremProofStates)
@@ -111,7 +111,7 @@ def _prover(llm: BaseChatModel, state: FormalTheoremProofState) -> FormalTheorem
     response_content = llm.invoke(state["proof_history"]).content
 
     # Parse prover response
-    formal_proof = _parse_prover_response(response_content)
+    formal_proof = _parse_prover_response(str(response_content))
 
     # Add the formal proof to the state
     state["formal_proof"] = formal_proof
