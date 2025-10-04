@@ -18,3 +18,14 @@ jobs:
 
       - name: Show submodule status
         run: git submodule status
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Setup uv
+        uses: astral-sh/setup-uv@v6
+
+      - name: Install dependencies (uv sync --frozen)
+        run: uv sync --frozen
