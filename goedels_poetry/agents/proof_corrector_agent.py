@@ -1,5 +1,5 @@
 from langchain_core.messages import HumanMessage
-from langgraph.graph import END, START, StateGraph
+from langgraph.graph import END, START, CompiledStateGraph, StateGraph
 from langgraph.types import Send
 
 from goedels_poetry.agents.state import FormalTheoremProofState, FormalTheoremProofStates
@@ -12,26 +12,26 @@ class ProofCorrectorAgentFactory:
     """
 
     @staticmethod
-    def create_agent() -> StateGraph:
+    def create_agent() -> CompiledStateGraph:
         """
         Creates a ProofCorrectorAgent instance.
 
         Returns
         -------
-        StateGraph
-            An StateGraph instance of the proof corrector agent.
+        CompiledStateGraph
+            An CompiledStateGraph instance of the proof corrector agent.
         """
         return _build_agent()
 
 
-def _build_agent() -> StateGraph:
+def _build_agent() -> CompiledStateGraph:
     """
-    Builds a state graph for the proof corrector agent.
+    Builds a compiled state graph for the proof corrector agent.
 
     Returns
     ----------
-    StateGraph
-        The state graph for the proof corrector agent.
+    CompiledStateGraph
+        The compiled state graph for the proof corrector agent.
     """
     # Create the proof corrector agent state graph
     graph_builder = StateGraph(FormalTheoremProofStates)

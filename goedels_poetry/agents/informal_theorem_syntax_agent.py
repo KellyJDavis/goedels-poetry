@@ -1,7 +1,7 @@
 from functools import partial
 
 from kimina_client import KiminaClient
-from langgraph.graph import END, START, StateGraph
+from langgraph.graph import END, START, CompiledStateGraph, StateGraph
 
 from goedels_poetry.agents.state import InformalTheoremState
 from goedels_poetry.agents.util.kimina_server import parse_kimina_check_response
@@ -13,7 +13,7 @@ class InformalTheoremSyntaxAgentFactory:
     """
 
     @staticmethod
-    def create_agent(server_url: str, server_max_retries: int) -> StateGraph:
+    def create_agent(server_url: str, server_max_retries: int) -> CompiledStateGraph:
         """
         Creates a InformalTheoremSyntaxAgent instance that employs the server at the passed URL.
 
@@ -26,15 +26,15 @@ class InformalTheoremSyntaxAgentFactory:
 
         Returns
         -------
-        StateGraph
-            An StateGraph instance of the informal theorem syntax agent.
+        CompiledStateGraph
+            An CompiledStateGraph instance of the informal theorem syntax agent.
         """
         return _build_agent(server_url=server_url, server_max_retries=server_max_retries)
 
 
-def _build_agent(server_url: str, server_max_retries: int) -> StateGraph:
+def _build_agent(server_url: str, server_max_retries: int) -> CompiledStateGraph:
     """
-    Builds a state graph for the specified Kimina server.
+    Builds a compiled state graph for the specified Kimina server.
 
     Parameters
     ----------
@@ -45,8 +45,8 @@ def _build_agent(server_url: str, server_max_retries: int) -> StateGraph:
 
     Returns
     -------
-    StateGraph
-        The state graph for the informal theorem syntax agent.
+    CompiledStateGraph
+        The compiled state graph for the informal theorem syntax agent.
     """
     # Create the formalizer agent state graph
     graph_builder = StateGraph(InformalTheoremState)

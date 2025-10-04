@@ -3,7 +3,7 @@ from functools import partial
 from hashlib import sha256
 
 from langchain_core.language_models.chat_models import BaseChatModel
-from langgraph.graph import END, START, StateGraph
+from langgraph.graph import END, START, CompiledStateGraph, StateGraph
 
 from goedels_poetry.agents.state import InformalTheoremState
 from goedels_poetry.agents.util.common import load_prompt
@@ -15,7 +15,7 @@ class FormalizerAgentFactory:
     """
 
     @staticmethod
-    def create_agent(llm: BaseChatModel) -> StateGraph:
+    def create_agent(llm: BaseChatModel) -> CompiledStateGraph:
         """
         Creates a FormalizerAgent instance with the passed llm.
 
@@ -26,15 +26,15 @@ class FormalizerAgentFactory:
 
         Returns
         -------
-        StateGraph
-            An StateGraph instance of the formalizer agent.
+        CompiledStateGraph
+            An CompiledStateGraph instance of the formalizer agent.
         """
         return _build_agent(llm=llm)
 
 
-def _build_agent(llm: BaseChatModel) -> StateGraph:
+def _build_agent(llm: BaseChatModel) -> CompiledStateGraph:
     """
-    Builds a state graph for the formalizer agent.
+    Builds a compiled state graph for the formalizer agent.
 
     Parameters
     ----------
@@ -43,8 +43,8 @@ def _build_agent(llm: BaseChatModel) -> StateGraph:
 
     Returns
     ----------
-    StateGraph
-        The state graph for the formalizer agent.
+    CompiledStateGraph
+        The compiled state graph for the formalizer agent.
     """
     # Create the formalizer agent state graph
     graph_builder = StateGraph(InformalTheoremState)
@@ -94,7 +94,7 @@ def _formalizer(llm: BaseChatModel, state: InformalTheoremState) -> InformalTheo
     response_content = llm.invoke(prompt).content
 
     # Parse formalizer response
-    formal_statement = _parser_formalizer_response(response_content)
+    formal_statement = _parser_formalizer_response(str(response_content))
 
     # Return InformalTheoremState with the formal theorem
     return {"formal_theorem": formal_statement}

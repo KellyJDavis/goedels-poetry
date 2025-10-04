@@ -1,7 +1,7 @@
 from functools import partial
 
 from langchain_core.language_models.chat_models import BaseChatModel
-from langgraph.graph import END, START, StateGraph
+from langgraph.graph import END, START, CompiledStateGraph, StateGraph
 
 from goedels_poetry.agents.state import InformalTheoremState
 from goedels_poetry.agents.util.common import load_prompt
@@ -14,7 +14,7 @@ class InformalTheoremSemanticsAgentFactory:
     """
 
     @staticmethod
-    def create_agent(llm: BaseChatModel) -> StateGraph:
+    def create_agent(llm: BaseChatModel) -> CompiledStateGraph:
         """
         Creates a InformalTheoremSemanticsAgent instance with the passed llm.
 
@@ -25,15 +25,15 @@ class InformalTheoremSemanticsAgentFactory:
 
         Returns
         -------
-        StateGraph
-            An StateGraph instance of the informal theorem sementics agent.
+        CompiledStateGraph
+            An CompiledStateGraph instance of the informal theorem sementics agent.
         """
         return _build_agent(llm=llm)
 
 
-def _build_agent(llm: BaseChatModel) -> StateGraph:
+def _build_agent(llm: BaseChatModel) -> CompiledStateGraph:
     """
-    Builds a state graph for the informal theorem sementics agent.
+    Builds a compiled state graph for the informal theorem sementics agent.
 
     Parameters
     ----------
@@ -42,8 +42,8 @@ def _build_agent(llm: BaseChatModel) -> StateGraph:
 
     Returns
     ----------
-    StateGraph
-        The state graph for the informal theorem sementics agent.
+    CompiledStateGraph
+        The compiled state graph for the informal theorem sementics agent.
     """
     # Create the formalizer agent state graph
     graph_builder = StateGraph(InformalTheoremState)
@@ -89,7 +89,7 @@ def _check_semantics(llm: BaseChatModel, state: InformalTheoremState) -> Informa
     response_content = llm.invoke(prompt).content
 
     # Parse semantics checker response
-    judgement = parse_semantic_check_response(response_content)
+    judgement = parse_semantic_check_response(str(response_content))
 
     # Return InformalTheoremState with semantic set appropriately
     return {"semantic": (judgement == "Appropriate")}
