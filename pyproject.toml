@@ -133,3 +133,12 @@ members = [
 
 [tool.uv.sources]
 kimina-client = { workspace = true }
+
+[tool.deptry]
+root = ["goedels_poetry"]
+exclude = [
+    "kimina-lean-server/.*",
+    "\\.venv/.*",
+    "dist/.*",
+    "site/.*",
+]

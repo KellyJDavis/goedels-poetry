@@ -1,4 +1,7 @@
+from typing import cast
+
 from langgraph.graph import END, START, StateGraph
+from langgraph.graph.state import CompiledStateGraph
 from langgraph.types import Send
 
 from goedels_poetry.agents.state import (
@@ -6,6 +9,8 @@ from goedels_poetry.agents.state import (
     DecomposedFormalTheoremStates,
     FormalTheoremProofState,
 )
+from goedels_poetry.parsers.ast import AST
+from goedels_poetry.util.tree import TreeNode
 
 
 class SketchDecompositionAgentFactory:
@@ -14,26 +19,26 @@ class SketchDecompositionAgentFactory:
     """
 
     @staticmethod
-    def create_agent() -> StateGraph:
+    def create_agent() -> CompiledStateGraph:
         """
         Creates a SketchDecompositionAgent instance.
 
         Returns
         -------
-        StateGraph
-            An StateGraph instance of the sketch decomposition agent.
+        CompiledStateGraph
+            An CompiledStateGraph instance of the sketch decomposition agent.
         """
         return _build_agent()
 
 
-def _build_agent() -> StateGraph:
+def _build_agent() -> CompiledStateGraph:
     """
-    Builds a state graph for the sketch decomposition agent.
+    Builds a compiled state graph for the sketch decomposition agent.
 
     Returns
     ----------
-    StateGraph
-        The state graph for the sketch decomposition agent.
+    CompiledStateGraph
+        The compiled state graph for the sketch decomposition agent.
     """
     # Create the sketch decomposition agent state graph
     graph_builder = StateGraph(DecomposedFormalTheoremStates)
@@ -86,18 +91,18 @@ def _sketch_decomposer(state: DecomposedFormalTheoremState) -> DecomposedFormalT
         A DecomposedFormalTheoremStates containing in its outputs the modified DecomposedFormalTheoremState
     """
     # Obtain the names of all unproven subgoals
-    unproven_subgoal_names = state["ast"].get_unproven_subgoal_names()
+    unproven_subgoal_names = cast(AST, state["ast"]).get_unproven_subgoal_names()
 
     # Loop over named unproven subgoals
     for unproven_subgoal_name in unproven_subgoal_names:
         # Obtain code of named unproven subgoal
-        unproven_subgoal_code = state["ast"].get_named_subgoal_code(unproven_subgoal_name)
+        unproven_subgoal_code = cast(AST, state["ast"]).get_named_subgoal_code(unproven_subgoal_name)
 
         # Append a FormalTheoremProofState corresponding to the unproven subgoal as a child of state
-        state["children"].append(_create_formal_theorem_proof_state(unproven_subgoal_code, state))
+        state["children"].append(cast(TreeNode, _create_formal_theorem_proof_state(unproven_subgoal_code, state)))
 
     # Return a DecomposedFormalTheoremStates with state added to its outputs
-    return {"outputs": [state]}
+    return {"outputs": [state]}  # type: ignore[typeddict-item]
 
 
 def _create_formal_theorem_proof_state(
@@ -114,7 +119,7 @@ def _create_formal_theorem_proof_state(
         The parent of the returned FormalTheoremProofState
     """
     return FormalTheoremProofState(
-        parent=state,
+        parent=cast(TreeNode | None, state),
         depth=(state["depth"] + 1),
         formal_theorem=formal_theorem,
         syntactic=True,

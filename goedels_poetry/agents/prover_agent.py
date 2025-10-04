@@ -3,7 +3,8 @@ from functools import partial
 
 from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.messages import AIMessage, HumanMessage
-from langgraph.graph import END, START, CompiledStateGraph, StateGraph
+from langgraph.graph import END, START, StateGraph
+from langgraph.graph.state import CompiledStateGraph
 from langgraph.types import Send
 
 from goedels_poetry.agents.state import FormalTheoremProofState, FormalTheoremProofStates
@@ -102,7 +103,7 @@ def _prover(llm: BaseChatModel, state: FormalTheoremProofState) -> FormalTheorem
     # Check if errors is None
     if state["errors"] is None:
         # If it is, load the prompt in use when not correcting a previous proof
-        prompt = load_prompt("goedel-prover-v2-initial", formal_statement=state["proof_history"][-1].content)
+        prompt = load_prompt("goedel-prover-v2-initial", formal_statement=str(state["proof_history"][-1].content))
 
         # Put the prompt in the final message
         state["proof_history"] += [HumanMessage(content=prompt)]
@@ -120,7 +121,7 @@ def _prover(llm: BaseChatModel, state: FormalTheoremProofState) -> FormalTheorem
     state["proof_history"] += [AIMessage(content=formal_proof)]
 
     # Return a FormalTheoremProofStates with state added to its outputs
-    return {"outputs": [state]}
+    return {"outputs": [state]}  # type: ignore[typeddict-item]
 
 
 def _parse_prover_response(response: str) -> str:
@@ -140,5 +141,5 @@ def _parse_prover_response(response: str) -> str:
     pattern = r"```lean4?\n(.*?)\n?```"
     matches = re.findall(pattern, response, re.DOTALL)
     formal_proof = matches[-1].strip() if matches else None
-    formal_proof = DEFAULT_IMPORTS + formal_proof  # TODO: Figure out global policy for DEFAULT_IMPORTS
+    formal_proof = DEFAULT_IMPORTS + str(formal_proof)  # TODO: Figure out global policy for DEFAULT_IMPORTS
     return formal_proof

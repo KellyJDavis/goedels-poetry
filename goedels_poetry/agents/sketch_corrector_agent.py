@@ -1,5 +1,6 @@
 from langchain_core.messages import HumanMessage
 from langgraph.graph import END, START, StateGraph
+from langgraph.graph.state import CompiledStateGraph
 from langgraph.types import Send
 
 from goedels_poetry.agents.state import DecomposedFormalTheoremState, DecomposedFormalTheoremStates
@@ -12,26 +13,26 @@ class SketchCorrectorAgentFactory:
     """
 
     @staticmethod
-    def create_agent() -> StateGraph:
+    def create_agent() -> CompiledStateGraph:
         """
         Creates a SketchCorrectorAgent instance.
 
         Returns
         -------
-        StateGraph
-            An StateGraph instance of the sketch corrector agent.
+        CompiledStateGraph
+            An CompiledStateGraph instance of the sketch corrector agent.
         """
         return _build_agent()
 
 
-def _build_agent() -> StateGraph:
+def _build_agent() -> CompiledStateGraph:
     """
-    Builds a state graph for the sketch corrector agent.
+    Builds a compiled state graph for the sketch corrector agent.
 
     Returns
     ----------
-    StateGraph
-        The state graph for the sketch corrector agent.
+    CompiledStateGraph
+        The compiled state graph for the sketch corrector agent.
     """
     # Create the sketch corrector agent state graph
     graph_builder = StateGraph(DecomposedFormalTheoremStates)
@@ -87,12 +88,12 @@ def _corrector(state: DecomposedFormalTheoremState) -> DecomposedFormalTheoremSt
     # Construct the prompt
     prompt = load_prompt(
         "decomposer-subsequent",
-        prev_round_num=(state["decomposition_attempts"] - 1),
-        error_message_for_prev_round=state["errors"],
+        prev_round_num=str(state["decomposition_attempts"] - 1),
+        error_message_for_prev_round=str(state["errors"]),
     )
 
     # Add correction request to the state's decomposition_history
     state["decomposition_history"] += [HumanMessage(content=prompt)]
 
     # Return a DecomposedFormalTheoremStates with state added to its outputs
-    return {"outputs": [state]}
+    return {"outputs": [state]}  # type: ignore[typeddict-item]

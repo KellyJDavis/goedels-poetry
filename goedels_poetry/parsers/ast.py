@@ -1,4 +1,5 @@
 import json
+from typing import Any
 
 from goedels_poetry.parsers.util import (
     _ast_to_code,
@@ -22,9 +23,9 @@ class AST:
         ast: str
             The AST string representation provided by the Kimin server.
         """
-        self._ast = json.loads(ast, strict=False)
+        self._ast: dict[str, Any] | list[Any] = json.loads(ast, strict=False)
 
-    def get_ast(self) -> dict:
+    def get_ast(self) -> dict[str, Any] | list[Any]:
         """
         Returns the AST representation.
 
@@ -44,11 +45,11 @@ class AST:
         list[str]
             List of unproven subgoals.
         """
-        results = {}
+        results: dict[str | None, list[str]] = {}
         _get_unproven_subgoal_names(self._ast, {}, results)
         return [name for names in list(results.values()) for name in names]
 
-    def get_named_subgoal_ast(self, subgoal_name: str) -> dict:
+    def get_named_subgoal_ast(self, subgoal_name: str) -> dict | None:
         """
         Gets the AST of the named subgoal.
 
@@ -80,4 +81,4 @@ class AST:
             The Lean code of the named subgoal.
         """
         rewritten_subgoal_ast = _get_named_subgoal_rewritten_ast(self._ast, subgoal_name)
-        return _ast_to_code(rewritten_subgoal_ast)
+        return str(_ast_to_code(rewritten_subgoal_ast))

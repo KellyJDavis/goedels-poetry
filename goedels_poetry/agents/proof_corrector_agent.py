@@ -1,5 +1,6 @@
 from langchain_core.messages import HumanMessage
-from langgraph.graph import END, START, CompiledStateGraph, StateGraph
+from langgraph.graph import END, START, StateGraph
+from langgraph.graph.state import CompiledStateGraph
 from langgraph.types import Send
 
 from goedels_poetry.agents.state import FormalTheoremProofState, FormalTheoremProofStates
@@ -86,12 +87,12 @@ def _corrector(state: FormalTheoremProofState) -> FormalTheoremProofStates:
     # Construct the prompt
     prompt = load_prompt(
         "goedel-prover-v2-subsequent",
-        prev_round_num=(state["proof_attempts"] - 1),
-        error_message_for_prev_round=state["errors"],
+        prev_round_num=str(state["proof_attempts"] - 1),
+        error_message_for_prev_round=str(state["errors"]),
     )
 
     # Add correction request to the state's proof_history
     state["proof_history"] += [HumanMessage(content=prompt)]
 
     # Return a FormalTheoremProofStates with state added to its outputs
-    return {"outputs": [state]}
+    return {"outputs": [state]}  # type: ignore[typeddict-item]

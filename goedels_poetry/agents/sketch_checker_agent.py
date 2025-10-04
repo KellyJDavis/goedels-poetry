@@ -1,7 +1,8 @@
 from functools import partial
 
 from kimina_client import KiminaClient
-from langgraph.graph import END, START, CompiledStateGraph, StateGraph
+from langgraph.graph import END, START, StateGraph
+from langgraph.graph.state import CompiledStateGraph
 from langgraph.types import Send
 
 from goedels_poetry.agents.state import DecomposedFormalTheoremState, DecomposedFormalTheoremStates
@@ -110,7 +111,7 @@ def _check_sketch(
     kimina_client = KiminaClient(api_url=server_url, http_timeout=36000, n_retries=server_max_retries)
 
     # Check the proof sketch state["proof_sketch"]
-    check_response = kimina_client.check(state["proof_sketch"])
+    check_response = kimina_client.check(str(state["proof_sketch"]))
 
     # Parse check_response
     parsed_response = parse_kimina_check_response(check_response)
@@ -119,7 +120,7 @@ def _check_sketch(
     state["syntactic"] = parsed_response["pass"]
 
     # Update the state with the formatted error string
-    state["errors"] = get_error_str(state["proof_sketch"], parsed_response.get("errors", []), False)
+    state["errors"] = get_error_str(str(state["proof_sketch"]), parsed_response.get("errors", []), False)
 
     # Return a DecomposedFormalTheoremStates with state added to its outputs
-    return {"outputs": [state]}
+    return {"outputs": [state]}  # type: ignore[typeddict-item]

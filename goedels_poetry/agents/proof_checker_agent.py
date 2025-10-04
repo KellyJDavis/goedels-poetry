@@ -1,7 +1,8 @@
 from functools import partial
 
 from kimina_client import KiminaClient
-from langgraph.graph import END, START, CompiledStateGraph, StateGraph
+from langgraph.graph import END, START, StateGraph
+from langgraph.graph.state import CompiledStateGraph
 from langgraph.types import Send
 
 from goedels_poetry.agents.state import FormalTheoremProofState, FormalTheoremProofStates
@@ -108,7 +109,7 @@ def _check_proof(server_url: str, server_max_retries: int, state: FormalTheoremP
     kimina_client = KiminaClient(api_url=server_url, http_timeout=36000, n_retries=server_max_retries)
 
     # Check the formal proof state["formal_proof"]
-    check_response = kimina_client.check(state["formal_proof"])
+    check_response = kimina_client.check(str(state["formal_proof"]))
 
     # Parse check_response
     parsed_response = parse_kimina_check_response(check_response)
@@ -117,7 +118,7 @@ def _check_proof(server_url: str, server_max_retries: int, state: FormalTheoremP
     state["proved"] = parsed_response["pass"]
 
     # Update the state with the error string formatted for Goedel-Prover-V2 use
-    state["errors"] = get_error_str(state["formal_proof"], parsed_response.get("errors", []), False)
+    state["errors"] = get_error_str(str(state["formal_proof"]), parsed_response.get("errors", []), False)
 
     # Return a FormalTheoremProofStates with state added to its outputs
-    return {"outputs": [state]}
+    return {"outputs": [state]}  # type: ignore[typeddict-item]

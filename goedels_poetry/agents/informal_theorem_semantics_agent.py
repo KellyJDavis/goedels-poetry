@@ -1,7 +1,8 @@
 from functools import partial
 
 from langchain_core.language_models.chat_models import BaseChatModel
-from langgraph.graph import END, START, CompiledStateGraph, StateGraph
+from langgraph.graph import END, START, StateGraph
+from langgraph.graph.state import CompiledStateGraph
 
 from goedels_poetry.agents.state import InformalTheoremState
 from goedels_poetry.agents.util.common import load_prompt
@@ -82,7 +83,9 @@ def _check_semantics(llm: BaseChatModel, state: InformalTheoremState) -> Informa
     """
     # Construct prompt
     prompt = load_prompt(
-        "goedel-semiotician-v2", formal_statement=state["formal_theorem"], informal_statement=state["informal_theorem"]
+        "goedel-semiotician-v2",
+        formal_statement=str(state["formal_theorem"]),
+        informal_statement=str(state["informal_theorem"]),
     )
 
     # Determine if the semantics of the informal and formal theorems are the same
@@ -92,4 +95,4 @@ def _check_semantics(llm: BaseChatModel, state: InformalTheoremState) -> Informa
     judgement = parse_semantic_check_response(str(response_content))
 
     # Return InformalTheoremState with semantic set appropriately
-    return {"semantic": (judgement == "Appropriate")}
+    return {"semantic": (judgement == "Appropriate")}  # type: ignore[typeddict-item]

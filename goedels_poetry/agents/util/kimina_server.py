@@ -1,6 +1,7 @@
 import re
+from typing import cast
 
-from kimina_client.models import AstModuleResponse, CheckResponse
+from kimina_client.models import AstModuleResponse, CheckResponse, CommandResponse, Message
 
 
 def parse_kimina_check_response(check_response: CheckResponse) -> dict:
@@ -17,14 +18,16 @@ def parse_kimina_check_response(check_response: CheckResponse) -> dict:
     dict
         A dict used by Goedel-Prover-V2
     """
-    response = check_response.results[0].response  # TODO: Is this the right element?
-    ast_responses = {}
-    parsed_response = {
+    response: CommandResponse = cast(
+        CommandResponse, check_response.results[0].response
+    )  # TODO: Is this the right element?
+    ast_responses: dict = {}
+    parsed_response: dict = {
         "sorries": response.get("sorries", []),
         "tactics": response.get("tactics", []),
-        "errors": [m for m in response.get("messages", []) if m.get("severity") == "error"],
-        "warnings": [m for m in response.get("messages", []) if m.get("severity") == "warning"],
-        "infos": [m for m in response.get("messages", []) if m.get("severity") == "info"],
+        "errors": [m for m in cast(list[Message], response.get("messages", [])) if m.get("severity") == "error"],
+        "warnings": [m for m in cast(list[Message], response.get("messages", [])) if m.get("severity") == "warning"],
+        "infos": [m for m in cast(list[Message], response.get("messages", [])) if m.get("severity") == "info"],
         "ast": ast_responses,
         "system_errors": None,
     }
@@ -40,7 +43,7 @@ def parse_kimina_check_response(check_response: CheckResponse) -> dict:
     return parsed_response
 
 
-def parse_semantic_check_response(response: str) -> str:
+def parse_semantic_check_response(response: str) -> str | None:
     """
     Parses the passed symantic response into a string used by  Goedel-Prover-V2
 

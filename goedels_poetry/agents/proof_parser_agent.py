@@ -1,7 +1,8 @@
 from functools import partial
 
 from kimina_client import KiminaClient
-from langgraph.graph import END, START, CompiledStateGraph, StateGraph
+from langgraph.graph import END, START, StateGraph
+from langgraph.graph.state import CompiledStateGraph
 from langgraph.types import Send
 
 from goedels_poetry.agents.state import FormalTheoremProofState, FormalTheoremProofStates
@@ -108,7 +109,7 @@ def _parse_proof(server_url: str, server_max_retries: int, state: FormalTheoremP
     kimina_client = KiminaClient(api_url=server_url, http_timeout=36000, n_retries=server_max_retries)
 
     # Parse formal proof of the passed state
-    ast_code_response = kimina_client.ast_code(state["formal_proof"])
+    ast_code_response = kimina_client.ast_code(str(state["formal_proof"]))
 
     # Parse ast_code_response
     parsed_response = parse_kimina_ast_code_response(ast_code_response)
@@ -117,4 +118,4 @@ def _parse_proof(server_url: str, server_max_retries: int, state: FormalTheoremP
     state["ast"] = AST(parsed_response["ast"])
 
     # Return a FormalTheoremProofStates with state added to its outputs
-    return {"outputs": [state]}
+    return {"outputs": [state]}  # type: ignore[typeddict-item]
