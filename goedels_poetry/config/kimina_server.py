@@ -1,6 +1,4 @@
-from typing import Required
-
-from typing_extensions import TypedDict
+from typing_extensions import Required, TypedDict
 
 from goedels_poetry.config.config import parsed_config
 

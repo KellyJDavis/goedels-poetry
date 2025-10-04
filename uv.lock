@@ -764,7 +764,6 @@ dependencies = [
     { name = "ollama" },
     { name = "rich" },
     { name = "tqdm" },
-    { name = "types-tqdm" },
     { name = "typing-extensions" },
 ]
 
@@ -780,6 +779,7 @@ dev = [
     { name = "pytest-cov" },
     { name = "ruff" },
     { name = "tox-uv" },
+    { name = "types-tqdm" },
 ]
 
 [package.metadata]
@@ -792,7 +792,6 @@ requires-dist = [
     { name = "ollama", specifier = ">=0.6.0" },
     { name = "rich", specifier = ">=14.1.0" },
     { name = "tqdm", specifier = ">=4.67.1" },
-    { name = "types-tqdm", specifier = ">=4.67.0.20250809" },
     { name = "typing-extensions", specifier = ">=4.15.0" },
 ]
 
@@ -808,6 +807,7 @@ dev = [
     { name = "pytest-cov", specifier = ">=4.0.0" },
     { name = "ruff", specifier = ">=0.11.5" },
     { name = "tox-uv", specifier = ">=1.11.3" },
+    { name = "types-tqdm", specifier = ">=4.67.0.20250809" },
 ]
 
 [[package]]
