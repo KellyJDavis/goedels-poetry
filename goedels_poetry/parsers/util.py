@@ -1,15 +1,15 @@
 import contextlib
 import logging
 from copy import deepcopy
-from typing import Any, Callable, Optional
+from typing import Any, Callable, Optional, Union
 
-Node = dict[str, Any] | list[Any]
+Node = Union[dict[str, Any], list[Any]]
 
 
-def _context_after_decl(node: dict[str, Any], context: dict[str, str | None]) -> dict[str, str | None]:
+def _context_after_decl(node: dict[str, Any], context: dict[str, Optional[str]]) -> dict[str, Optional[str]]:
     kind = node.get("kind")
     if kind in {"Lean.Parser.Command.theorem", "Lean.Parser.Command.lemma"}:
-        name: str | None = None
+        name: Optional[str] = None
         for arg in node.get("args", []):
             if isinstance(arg, dict) and arg.get("kind") == "Lean.Parser.Command.declId":
                 with contextlib.suppress(Exception):
@@ -19,9 +19,9 @@ def _context_after_decl(node: dict[str, Any], context: dict[str, str | None]) ->
     return context
 
 
-def _context_after_have(node: dict[str, Any], context: dict[str, str | None]) -> dict[str, str | None]:
+def _context_after_have(node: dict[str, Any], context: dict[str, Optional[str]]) -> dict[str, Optional[str]]:
     if node.get("kind") == "Lean.Parser.Tactic.tacticHave_":
-        have_name: str | None = None
+        have_name: Optional[str] = None
         with contextlib.suppress(Exception):
             have_decl = node["args"][1]
             have_id_decl = have_decl["args"][0]
@@ -32,7 +32,9 @@ def _context_after_have(node: dict[str, Any], context: dict[str, str | None]) ->
     return context
 
 
-def _record_sorry(node: dict[str, Any], context: dict[str, str | None], results: dict[str | None, list[str]]) -> None:
+def _record_sorry(
+    node: dict[str, Any], context: dict[str, Optional[str]], results: dict[Optional[str], list[str]]
+) -> None:
     if node.get("kind") == "Lean.Parser.Tactic.tacticSorry":
         theorem = context.get("theorem")
         have = context.get("have")
@@ -40,7 +42,7 @@ def _record_sorry(node: dict[str, Any], context: dict[str, str | None], results:
 
 
 def _get_unproven_subgoal_names(
-    node: Node, context: dict[str, str | None], results: dict[str | None, list[str]]
+    node: Node, context: dict[str, Optional[str]], results: dict[Optional[str], list[str]]
 ) -> None:
     if isinstance(node, dict):
         context = _context_after_decl(node, context)
@@ -53,7 +55,7 @@ def _get_unproven_subgoal_names(
             _get_unproven_subgoal_names(item, dict(context), results)
 
 
-def _get_named_subgoal_ast(node: Node, target_name: str) -> dict[str, Any] | None:  # noqa: C901
+def _get_named_subgoal_ast(node: Node, target_name: str) -> Optional[dict[str, Any]]:  # noqa: C901
     """
     Find the sub-AST for a given theorem/lemma/have name.
     Returns the entire subtree rooted at that declaration.
@@ -126,7 +128,7 @@ def _ast_to_code(node: Any) -> str:
 # ---------------------------
 # Generic AST walkers
 # ---------------------------
-def __find_first(node: Node, predicate: Callable[[dict[str, Any]], bool]) -> dict[str, Any] | None:
+def __find_first(node: Node, predicate: Callable[[dict[str, Any]], bool]) -> Optional[dict[str, Any]]:
     if isinstance(node, dict):
         if predicate(node):
             return node
@@ -143,7 +145,7 @@ def __find_first(node: Node, predicate: Callable[[dict[str, Any]], bool]) -> dic
 
 
 def __find_all(
-    node: Node, predicate: Callable[[dict[str, Any]], bool], acc: list[dict[str, Any]] | None = None
+    node: Node, predicate: Callable[[dict[str, Any]], bool], acc: Optional[list[dict[str, Any]]] = None
 ) -> list[dict[str, Any]]:
     if acc is None:
         acc = []
@@ -162,7 +164,7 @@ def __find_all(
 # Collect named decls and haves
 # ---------------------------
 def __collect_named_decls(ast: Node) -> dict[str, dict]:  # noqa: C901
-    name_map = {}
+    name_map: dict[str, dict] = {}
 
     def rec(n: Any) -> None:  # noqa: C901
         if isinstance(n, dict):
@@ -193,7 +195,7 @@ def __collect_named_decls(ast: Node) -> dict[str, dict]:  # noqa: C901
 # Collect defined names inside a subtree
 # ---------------------------
 def __collect_defined_names(subtree: Node) -> set[str]:  # noqa: C901
-    names = set()
+    names: set[str] = set()
 
     def rec(n: Any) -> None:  # noqa: C901
         if isinstance(n, dict):
@@ -225,7 +227,7 @@ def __collect_defined_names(subtree: Node) -> set[str]:  # noqa: C901
 # ---------------------------
 def __find_dependencies(subtree: Node, name_map: dict[str, dict]) -> set[str]:
     defined = __collect_defined_names(subtree)
-    deps = set()
+    deps: set[str] = set()
 
     def rec(n: Any) -> None:
         if isinstance(n, dict):
@@ -333,13 +335,15 @@ def __make_binder(name: str, type_ast: Optional[dict]) -> dict:
 # ---------------------------
 # The main AST-level rewrite
 # ---------------------------
+
+
 def _get_named_subgoal_rewritten_ast(ast: Node, target_name: str) -> dict:  # noqa: C901
     name_map = __collect_named_decls(ast)
     if target_name not in name_map:
         raise KeyError(f"target '{target_name}' not found in AST")  # noqa: TRY003
     target = deepcopy(name_map[target_name])
     deps = __find_dependencies(target, name_map)
-    binders = []
+    binders: list[dict] = []
     for d in sorted(deps):
         dep_node = name_map.get(d)
         dep_type_ast = __extract_type_ast(dep_node) if dep_node is not None else None
@@ -386,16 +390,16 @@ def _get_named_subgoal_rewritten_ast(ast: Node, target_name: str) -> dict:  # no
             else {"val": "Prop", "info": {"leading": " ", "trailing": " "}}
         )
         # Build the new lemma node: "lemma NAME (binders) : TYPE := proof"
-        new_args: list[dict[str, Any]] = []
-        new_args.append({"val": "lemma", "info": {"leading": "", "trailing": " "}})
-        new_args.append({"val": have_name, "info": {"leading": "", "trailing": " "}})
+        have_args: list[dict[str, Any]] = []
+        have_args.append({"val": "lemma", "info": {"leading": "", "trailing": " "}})
+        have_args.append({"val": have_name, "info": {"leading": "", "trailing": " "}})
         if binders:
-            new_args.append({"kind": "Lean.Parser.Term.bracketedBinderList", "args": binders})
-        new_args.append({"val": ":", "info": {"leading": " ", "trailing": " "}})
-        new_args.append(type_body)
-        new_args.append({"val": ":=", "info": {"leading": " ", "trailing": " "}})
-        new_args.append(proof_node)
-        lemma_node = {"kind": "Lean.Parser.Command.lemma", "args": new_args}
+            have_args.append({"kind": "Lean.Parser.Term.bracketedBinderList", "args": binders})
+        have_args.append({"val": ":", "info": {"leading": " ", "trailing": " "}})
+        have_args.append(type_body)
+        have_args.append({"val": ":=", "info": {"leading": " ", "trailing": " "}})
+        have_args.append(proof_node)
+        lemma_node = {"kind": "Lean.Parser.Command.lemma", "args": have_args}
         return lemma_node
 
     # Case: target is already top-level theorem/lemma -> insert binders after name and ensure single colon
@@ -433,7 +437,7 @@ def _get_named_subgoal_rewritten_ast(ast: Node, target_name: str) -> dict:  # no
                     },
                 ],
             }
-        new_args = []
+        top_args: list[dict[str, Any]] = []
         # keep same keyword (theorem/lemma/def)
         kw = (
             "theorem"
@@ -442,15 +446,15 @@ def _get_named_subgoal_rewritten_ast(ast: Node, target_name: str) -> dict:  # no
             if target.get("kind") == "Lean.Parser.Command.lemma"
             else "def"
         )
-        new_args.append({"val": kw, "info": {"leading": "", "trailing": " "}})
-        new_args.append({"val": decl_name, "info": {"leading": "", "trailing": " "}})
+        top_args.append({"val": kw, "info": {"leading": "", "trailing": " "}})
+        top_args.append({"val": decl_name, "info": {"leading": "", "trailing": " "}})
         if binders:
-            new_args.append({"kind": "Lean.Parser.Term.bracketedBinderList", "args": binders})
-        new_args.append({"val": ":", "info": {"leading": " ", "trailing": " "}})
-        new_args.append(type_body)
-        new_args.append({"val": ":=", "info": {"leading": " ", "trailing": " "}})
-        new_args.append(body)
-        new_node = {"kind": target.get("kind"), "args": new_args}
+            top_args.append({"kind": "Lean.Parser.Term.bracketedBinderList", "args": binders})
+        top_args.append({"val": ":", "info": {"leading": " ", "trailing": " "}})
+        top_args.append(type_body)
+        top_args.append({"val": ":=", "info": {"leading": " ", "trailing": " "}})
+        top_args.append(body)
+        new_node = {"kind": target.get("kind"), "args": top_args}
         return new_node
 
     # fallback: return the target unchanged

@@ -1,8 +1,8 @@
 from operator import add
-from typing import Annotated, Required
+from typing import Annotated
 
 from langchain_core.messages import AnyMessage
-from typing_extensions import TypedDict
+from typing_extensions import Required, TypedDict
 
 from goedels_poetry.parsers.ast import AST
 from goedels_poetry.util.tree import TreeNode

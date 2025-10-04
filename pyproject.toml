@@ -26,7 +26,6 @@ dependencies = [
     "ollama>=0.6.0",
     "rich>=14.1.0",
     "tqdm>=4.67.1",
-    "types-tqdm>=4.67.0.20250809",
     "typing-extensions>=4.15.0",
 ]
 
@@ -44,6 +43,7 @@ dev = [
     "mypy>=0.991",
     "pytest-cov>=4.0.0",
     "ruff>=0.11.5",
+    "types-tqdm>=4.67.0.20250809",
     "mkdocs>=1.4.2",
     "mkdocs-material>=8.5.10",
     "mkdocstrings[python]>=0.26.1",
@@ -58,6 +58,7 @@ packages = ["goedels_poetry"]
 
 [tool.mypy]
 files = ["goedels_poetry"]
+python_version = "3.11"
 disallow_untyped_defs = true
 disallow_any_unimported = true
 no_implicit_optional = true

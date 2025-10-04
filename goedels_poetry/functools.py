@@ -1,5 +1,7 @@
 from functools import wraps
-from typing import Any, Callable, Concatenate, ParamSpec, TypeVar
+from typing import Any, Callable, TypeVar
+
+from typing_extensions import Concatenate, ParamSpec
 
 P = ParamSpec("P")
 R = TypeVar("R")
