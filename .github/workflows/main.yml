@@ -13,6 +13,12 @@ jobs:
     steps:
       - name: Check out
         uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          fetch-depth: 0
+
+      - name: Show submodule status
+        run: git submodule status
 
       - uses: actions/cache@v4
         with:
@@ -37,6 +43,12 @@ jobs:
     steps:
       - name: Check out
         uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          fetch-depth: 0
+
+      - name: Show submodule status
+        run: git submodule status
 
       - name: Set up the environment
         uses: ./.github/actions/setup-python-env
@@ -61,6 +73,12 @@ jobs:
     steps:
       - name: Check out
         uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          fetch-depth: 0
+
+      - name: Show submodule status
+        run: git submodule status
 
       - name: Set up the environment
         uses: ./.github/actions/setup-python-env
