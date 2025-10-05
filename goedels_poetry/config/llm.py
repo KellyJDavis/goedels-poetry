@@ -62,6 +62,10 @@ def _download_llms(llms: list[str]) -> None:
             if e.status_code == 404:
                 console.print(f"Starting download of {llm}")
                 _download_llm(llm)
+        except ConnectionError:
+            # Ollama is not running (e.g., in CI/test environments)
+            # This is fine - we'll skip the download
+            pass
 
 
 # LLMS to download
@@ -77,26 +81,36 @@ _LLMS = [
 _download_llms(_LLMS)
 
 
-# Create LLMS
-FORMALIZER_AGENT_LLM = ChatOllama(
+# Create LLMS (with error handling for environments without Ollama)
+def _create_llm_safe(**kwargs):  # type: ignore[no-untyped-def]
+    """Create a ChatOllama instance, catching connection errors in test/CI environments."""
+    try:
+        return ChatOllama(**kwargs)
+    except ConnectionError:
+        # In test/CI environments without Ollama, create with validation disabled
+        kwargs["validate_model_on_init"] = False
+        return ChatOllama(**kwargs)
+
+
+FORMALIZER_AGENT_LLM = _create_llm_safe(
     model=parsed_config.get(section="FORMALIZER_AGENT_LLM", option="model", fallback="kdavis/goedel-formalizer-v2:32b"),
     validate_model_on_init=True,
     num_predict=50000,
     num_ctx=parsed_config.getint(section="FORMALIZER_AGENT_LLM", option="num_ctx", fallback=40960),
 )
-PROVER_AGENT_LLM = ChatOllama(
+PROVER_AGENT_LLM = _create_llm_safe(
     model=parsed_config.get(section="PROVER_AGENT_LLM", option="model", fallback="kdavis/Goedel-Prover-V2:32b"),
     validate_model_on_init=True,
     num_predict=50000,
     num_ctx=parsed_config.getint(section="PROVER_AGENT_LLM", option="num_ctx", fallback=40960),
 )
-SEMANTICS_AGENT_LLM = ChatOllama(
+SEMANTICS_AGENT_LLM = _create_llm_safe(
     model=parsed_config.get(section="SEMANTICS_AGENT_LLM", option="model", fallback="qwen3:30b"),
     validate_model_on_init=True,
     num_predict=50000,
     num_ctx=parsed_config.getint(section="SEMANTICS_AGENT_LLM", option="num_ctx", fallback=262144),
 )
-DECOMPOSER_AGENT_LLM = ChatOllama(
+DECOMPOSER_AGENT_LLM = _create_llm_safe(
     model=parsed_config.get(section="DECOMPOSER_AGENT_LLM", option="model", fallback="qwen3:30b"),
     validate_model_on_init=True,
     num_predict=50000,
