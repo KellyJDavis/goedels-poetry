@@ -4,7 +4,7 @@ from jinja2 import Environment, FileSystemLoader, select_autoescape
 
 # Create Environment for loading prompts
 _env = Environment(
-    loader=FileSystemLoader(os.path.join(os.path.dirname(__file__), "data/prompts")),
+    loader=FileSystemLoader(os.path.join(os.path.dirname(__file__), "../../data/prompts")),
     autoescape=select_autoescape(),
     trim_blocks=True,
     lstrip_blocks=True,
