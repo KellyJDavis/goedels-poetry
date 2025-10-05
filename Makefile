@@ -27,7 +27,11 @@ test-integration: ## Run integration tests (requires Lean installation)
 		echo "❌ Error: Lean (lake) is not installed. Run 'cd kimina-lean-server && bash setup.sh' first."; \
 		exit 1; \
 	fi
-	@uv run prisma generate --schema=kimina-lean-server/prisma/schema.prisma
+	@echo "📦 Installing server dependencies..."
+	@cd kimina-lean-server && uv pip install -q prisma fastapi uvicorn psutil google-cloud-logging
+	@echo "🔧 Generating Prisma types..."
+	@cd kimina-lean-server && uv run prisma generate
+	@echo "🧪 Running integration tests..."
 	@uv run python -m pytest tests/test_kimina_agents.py -v --cov --cov-config=pyproject.toml --cov-append --cov-report=xml
 
 .PHONY: test-all

@@ -86,8 +86,15 @@ jobs:
       - name: Set up the environment
         uses: ./.github/actions/setup-python-env
 
+      - name: Install server dependencies
+        run: |
+          cd kimina-lean-server
+          uv pip install prisma fastapi uvicorn psutil
+
       - name: Generate prisma types
-        run: uv run prisma generate --schema=kimina-lean-server/prisma/schema.prisma
+        run: |
+          cd kimina-lean-server
+          uv run prisma generate
 
       - name: Restore Lean cache
         id: lean-cache
