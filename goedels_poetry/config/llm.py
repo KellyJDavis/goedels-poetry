@@ -1,3 +1,5 @@
+import warnings
+
 from langchain_ollama import ChatOllama
 from ollama import ResponseError, chat, pull
 from rich.console import Console
@@ -64,8 +66,14 @@ def _download_llms(llms: list[str]) -> None:
                 _download_llm(llm)
         except ConnectionError:
             # Ollama is not running (e.g., in CI/test environments)
-            # This is fine - we'll skip the download
-            pass
+            # Warn the user but allow import to succeed for testing
+            warnings.warn(
+                "Could not connect to Ollama. LLM functionality will not work until "
+                "Ollama is running. Download and start Ollama from https://ollama.com/download",
+                UserWarning,
+                stacklevel=2,
+            )
+            break  # Only warn once, not for each LLM
 
 
 # LLMS to download
@@ -88,6 +96,7 @@ def _create_llm_safe(**kwargs):  # type: ignore[no-untyped-def]
         return ChatOllama(**kwargs)
     except ConnectionError:
         # In test/CI environments without Ollama, create with validation disabled
+        # Note: A warning was already issued by _download_llms() above
         kwargs["validate_model_on_init"] = False
         return ChatOllama(**kwargs)
 
