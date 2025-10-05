@@ -60,6 +60,8 @@ def test_list_checkpoints_nonexistent_directory() -> None:
 
 def test_list_checkpoints_by_directory() -> None:
     """Test list_checkpoints lists checkpoints in a directory."""
+    import time
+
     with tempfile.TemporaryDirectory() as tmpdir:
         # Create some checkpoint files
         checkpoint_files = [
@@ -68,10 +70,14 @@ def test_list_checkpoints_by_directory() -> None:
             "goedels_poetry_state_20250101_140000_iter_0002.pkl",
         ]
 
-        for filename in checkpoint_files:
+        for i, filename in enumerate(checkpoint_files):
             filepath = os.path.join(tmpdir, filename)
             with open(filepath, "w") as f:
                 f.write("dummy")
+            # Set explicit modification times to ensure proper ordering
+            # Add 1 second for each subsequent file
+            mtime = time.time() - (len(checkpoint_files) - i - 1)
+            os.utime(filepath, (mtime, mtime))
 
         # Create a non-checkpoint file that should be ignored
         with open(os.path.join(tmpdir, "other_file.txt"), "w") as f:
@@ -83,7 +89,7 @@ def test_list_checkpoints_by_directory() -> None:
         assert len(checkpoints) == 3
 
         # Should be sorted by modification time (newest first)
-        # Since they were created in order, newest should be last in creation
+        # iter_0002.pkl was given the most recent modification time
         assert checkpoints[0].endswith("iter_0002.pkl")
 
 
@@ -200,6 +206,7 @@ def test_save_and_load() -> None:
 
 def test_load_latest() -> None:
     """Test loading the latest checkpoint."""
+    import time
     import uuid
 
     theorem = f"Test Load Latest Theorem {uuid.uuid4()}"
@@ -212,11 +219,14 @@ def test_load_latest() -> None:
         state = GoedelsPoetryState(formal_theorem=theorem)
 
         # Save multiple times with different state
+        # Add small delays to ensure different timestamps in fast CI environments
         state.action_history = ["first"]
         state.save()
+        time.sleep(0.01)  # 10ms delay
 
         state.action_history = ["first", "second"]
         state.save()
+        time.sleep(0.01)  # 10ms delay
 
         state.action_history = ["first", "second", "third"]
         state.save()
