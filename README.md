@@ -60,6 +60,41 @@ To finalize the set-up for publishing to PyPI, see [here](https://fpgmaas.github
 For activating the automatic documentation with MkDocs, see [here](https://fpgmaas.github.io/cookiecutter-uv/features/mkdocs/#enabling-the-documentation-on-github).
 To enable the code coverage reports, see [here](https://fpgmaas.github.io/cookiecutter-uv/features/codecov/).
 
+## Testing
+
+This project includes both unit tests and integration tests:
+
+### Unit Tests
+
+Run the standard unit tests with:
+
+```bash
+make test
+```
+
+### Integration Tests
+
+Integration tests verify the Kimina Lean server integration. These require a Lean installation and are run separately:
+
+```bash
+# First, set up Lean (only needed once)
+cd kimina-lean-server && bash setup.sh && cd ..
+
+# Run integration tests
+make test-integration
+
+# Or run all tests (unit + integration)
+make test-all
+```
+
+The integration tests are automatically run in CI and verify the following agent factories that interact with the Kimina Lean server:
+- `ProofCheckerAgentFactory` - validates formal proofs
+- `ProofParserAgentFactory` - parses formal proofs into ASTs
+- `SketchCheckerAgentFactory` - checks proof sketch syntax
+- `SketchParserAgentFactory` - parses proof sketches into ASTs
+- `FormalTheoremSyntaxAgentFactory` - validates formal theorem syntax
+- `InformalTheoremSyntaxAgentFactory` - validates formal theorems from informal input
+
 ## Releasing a new version
 
 - Create an API Token on [PyPI](https://pypi.org/).
