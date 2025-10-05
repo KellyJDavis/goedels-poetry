@@ -13,14 +13,14 @@ class AST:
     Class representing Lean code's abstract syntax tree (AST).
     """
 
-    def __init__(self, ast: str):
+    def __init__(self, ast: dict[str, Any]):
         """
-        Constructs an AST using the AST string representation provided by the Kimin server.
+        Constructs an AST using the AST dict[str, Any] representation provided by the Kimin server.
 
         Parameters
         ----------
-        ast: str
-            The AST string representation provided by the Kimin server.
+        ast: dict[str, Any]
+            The AST representation provided by the Kimin server.
         """
         self._ast: dict[str, Any] = ast
 

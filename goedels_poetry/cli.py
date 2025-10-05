@@ -9,7 +9,7 @@ console = Console()
 
 
 @app.command()
-def main():
+def main() -> None:
     informal_statement = "Prove that 3 cannot be written as the sum of two cubes."
 
     config = GoedelsPoetryConfig()
