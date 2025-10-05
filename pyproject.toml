@@ -26,6 +26,7 @@ dependencies = [
     "ollama>=0.6.0",
     "rich>=14.1.0",
     "tqdm>=4.67.1",
+    "typer>=0.19.2",
     "typing-extensions>=4.15.0",
 ]
 
@@ -33,6 +34,9 @@ dependencies = [
 Homepage = "https://KellyJDavis.github.io/goedels-poetry/"
 Repository = "https://github.com/KellyJDavis/goedels-poetry"
 Documentation = "https://KellyJDavis.github.io/goedels-poetry/"
+
+[project.scripts]
+goedels_poetry = "goedels_poetry.cli:app"
 
 [dependency-groups]
 dev = [

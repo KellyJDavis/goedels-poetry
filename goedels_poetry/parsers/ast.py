@@ -1,4 +1,3 @@
-import json
 from typing import Any
 
 from goedels_poetry.parsers.util import (
@@ -23,7 +22,7 @@ class AST:
         ast: str
             The AST string representation provided by the Kimin server.
         """
-        self._ast: dict[str, Any] | list[Any] = json.loads(ast, strict=False)
+        self._ast: dict[str, Any] = ast
 
     def get_ast(self) -> dict[str, Any] | list[Any]:
         """
