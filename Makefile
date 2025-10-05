@@ -16,9 +16,29 @@ check: ## Run code quality tools.
 	@uv run deptry .
 
 .PHONY: test
-test: ## Test the code with pytest
+test: ## Test the code with pytest (excludes integration tests)
 	@echo "🚀 Testing code: Running pytest"
-	@uv run python -m pytest --cov --cov-config=pyproject.toml --cov-report=xml
+	@uv run python -m pytest --ignore=tests/test_kimina_agents.py --cov --cov-config=pyproject.toml --cov-report=xml
+
+.PHONY: test-integration
+test-integration: ## Run integration tests (requires Lean installation)
+	@echo "🚀 Running integration tests (requires Lean)"
+	@if ! command -v lake > /dev/null; then \
+		echo "❌ Error: Lean (lake) is not installed. Run 'cd kimina-lean-server && bash setup.sh' first."; \
+		exit 1; \
+	fi
+	@echo "📦 Installing server dependencies..."
+	@cd kimina-lean-server && uv pip install -q prisma fastapi uvicorn psutil google-cloud-logging
+	@echo "🔧 Generating Prisma types..."
+	@cd kimina-lean-server && uv run prisma generate
+	@echo "🧪 Running integration tests..."
+	@uv run python -m pytest tests/test_kimina_agents.py -v --cov --cov-config=pyproject.toml --cov-append --cov-report=xml
+
+.PHONY: test-all
+test-all: ## Run all tests including integration tests
+	@echo "🚀 Running all tests"
+	@$(MAKE) test
+	@$(MAKE) test-integration
 
 .PHONY: build
 build: clean-build ## Build wheel file

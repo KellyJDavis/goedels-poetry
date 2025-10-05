@@ -68,6 +68,65 @@ jobs:
         env:
           CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
 
+  integration-tests:
+    runs-on: ubuntu-latest
+    env:
+      BASE: ${{ github.workspace }}
+      LEAN_SERVER_LEAN_VERSION: v4.15.0
+    steps:
+      - name: Check out
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          fetch-depth: 0
+
+      - name: Show submodule status
+        run: git submodule status
+
+      - name: Set up the environment
+        uses: ./.github/actions/setup-python-env
+
+      - name: Install server dependencies
+        run: |
+          cd kimina-lean-server
+          uv pip install prisma fastapi uvicorn psutil
+
+      - name: Generate prisma types
+        run: |
+          cd kimina-lean-server
+          uv run prisma generate
+
+      - name: Restore Lean cache
+        id: lean-cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.elan
+            kimina-lean-server/repl
+            kimina-lean-server/mathlib4
+          key: ${{ runner.os }}-lean-${{ env.LEAN_SERVER_LEAN_VERSION }}
+          restore-keys: ${{ runner.os }}-lean-
+
+      - name: Run Lean setup
+        if: steps.lean-cache.outputs.cache-hit != 'true'
+        run: |
+          cd kimina-lean-server
+          bash setup.sh
+
+      - name: Add lake binary to PATH
+        run: echo "$HOME/.elan/bin" >> $GITHUB_PATH
+
+      - name: Verify lake
+        run: which lake
+
+      - name: Run integration tests
+        run: uv run python -m pytest tests/test_kimina_agents.py -v --cov --cov-config=pyproject.toml --cov-append --cov-report=xml
+
+      - name: Upload coverage reports to Codecov
+        uses: codecov/codecov-action@v4
+        env:
+          CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
+
   check-docs:
     runs-on: ubuntu-latest
     steps:
