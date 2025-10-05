@@ -147,4 +147,5 @@ exclude = [
     "\\.venv/.*",
     "dist/.*",
     "site/.*",
+    "tests/.*",
 ]
