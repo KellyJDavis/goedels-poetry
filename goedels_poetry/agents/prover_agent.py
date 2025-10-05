@@ -103,7 +103,7 @@ def _prover(llm: BaseChatModel, state: FormalTheoremProofState) -> FormalTheorem
     # Check if errors is None
     if state["errors"] is None:
         # If it is, load the prompt in use when not correcting a previous proof
-        prompt = load_prompt("goedel-prover-v2-initial", formal_statement=str(state["proof_history"][-1].content))
+        prompt = load_prompt("goedel-prover-v2-initial", formal_statement=state["formal_theorem"])
 
         # Put the prompt in the final message
         state["proof_history"] += [HumanMessage(content=prompt)]
