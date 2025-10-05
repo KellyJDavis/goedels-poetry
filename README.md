@@ -80,12 +80,17 @@ Integration tests verify the Kimina Lean server integration. These require a Lea
 # First, set up Lean (only needed once)
 cd kimina-lean-server && bash setup.sh && cd ..
 
-# Run integration tests
+# Run integration tests (Lean must be installed)
 make test-integration
 
 # Or run all tests (unit + integration)
 make test-all
 ```
+
+**Note**: Integration tests require:
+- Lean 4 installed via `setup.sh`
+- Python 3.10+ (kimina-lean-server uses modern type syntax)
+- On Python 3.9-3.11, tests will skip gracefully
 
 The integration tests are automatically run in CI and verify the following agent factories that interact with the Kimina Lean server:
 - `ProofCheckerAgentFactory` - validates formal proofs

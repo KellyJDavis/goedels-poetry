@@ -87,9 +87,7 @@ jobs:
         uses: ./.github/actions/setup-python-env
 
       - name: Generate prisma types
-        run: |
-          cd kimina-lean-server
-          uv run prisma generate
+        run: uv run prisma generate --schema=kimina-lean-server/prisma/schema.prisma
 
       - name: Restore Lean cache
         id: lean-cache

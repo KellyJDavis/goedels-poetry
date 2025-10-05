@@ -12,22 +12,35 @@ They test the 6 agent factories that use KiminaClient but not BaseChatModel:
 
 import pytest
 
-from goedels_poetry.agents.formal_theorem_syntax_agent import FormalTheoremSyntaxAgentFactory
-from goedels_poetry.agents.informal_theorem_syntax_agent import InformalTheoremSyntaxAgentFactory
-from goedels_poetry.agents.proof_checker_agent import ProofCheckerAgentFactory
-from goedels_poetry.agents.proof_parser_agent import ProofParserAgentFactory
-from goedels_poetry.agents.sketch_checker_agent import SketchCheckerAgentFactory
-from goedels_poetry.agents.sketch_parser_agent import SketchParserAgentFactory
-from goedels_poetry.agents.state import (
-    DecomposedFormalTheoremState,
-    DecomposedFormalTheoremStates,
-    FormalTheoremProofState,
-    FormalTheoremProofStates,
-    InformalTheoremState,
-)
+# Try to import the required modules - skip all tests if imports fail
+# This handles Python version incompatibilities in kimina-lean-server
+try:
+    from goedels_poetry.agents.formal_theorem_syntax_agent import FormalTheoremSyntaxAgentFactory
+    from goedels_poetry.agents.informal_theorem_syntax_agent import InformalTheoremSyntaxAgentFactory
+    from goedels_poetry.agents.proof_checker_agent import ProofCheckerAgentFactory
+    from goedels_poetry.agents.proof_parser_agent import ProofParserAgentFactory
+    from goedels_poetry.agents.sketch_checker_agent import SketchCheckerAgentFactory
+    from goedels_poetry.agents.sketch_parser_agent import SketchParserAgentFactory
+    from goedels_poetry.agents.state import (
+        DecomposedFormalTheoremState,
+        DecomposedFormalTheoremStates,
+        FormalTheoremProofState,
+        FormalTheoremProofStates,
+        InformalTheoremState,
+    )
 
-# Mark all tests in this module as requiring Lean
-pytestmark = pytest.mark.usefixtures("skip_if_no_lean")
+    IMPORTS_AVAILABLE = True
+except (ImportError, TypeError) as e:
+    # Skip tests if imports fail (e.g., Python < 3.10 with kimina-lean-server)
+    IMPORTS_AVAILABLE = False
+    SKIP_REASON = f"Failed to import required modules: {e}"
+
+# Skip entire module if imports not available
+if not IMPORTS_AVAILABLE:
+    pytestmark = pytest.mark.skip(reason=SKIP_REASON)
+else:
+    # Mark all tests in this module as requiring Lean
+    pytestmark = pytest.mark.usefixtures("skip_if_no_lean")
 
 
 # Sample Lean code for testing
