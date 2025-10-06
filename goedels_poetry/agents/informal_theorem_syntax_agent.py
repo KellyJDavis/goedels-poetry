@@ -85,11 +85,11 @@ def _check_syntax(server_url: str, server_max_retries: int, state: InformalTheor
         A InformalTheoremState indicating if the formal statement is syntactic
     """
     # Create a client to access the Kimina Server
-    kimina_client = KiminaClient(api_url=server_url, n_retries=server_max_retries)
+    kimina_client = KiminaClient(api_url=server_url, http_timeout=36000, n_retries=server_max_retries)
 
     # Check syntax of state["formal_theorem"] with DEFAULT_IMPORTS prefix
     code_with_imports = add_default_imports(str(state["formal_theorem"]))
-    check_response = kimina_client.check(code_with_imports)
+    check_response = kimina_client.check(code_with_imports, timeout=36000)
 
     # Parse check_response
     parsed_response = parse_kimina_check_response(check_response)

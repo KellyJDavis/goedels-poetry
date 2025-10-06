@@ -112,7 +112,7 @@ def _check_sketch(
 
     # Check the proof sketch state["proof_sketch"] with DEFAULT_IMPORTS prefix
     sketch_with_imports = add_default_imports(str(state["proof_sketch"]))
-    check_response = kimina_client.check(sketch_with_imports)
+    check_response = kimina_client.check(sketch_with_imports, timeout=36000)
 
     # Parse check_response
     parsed_response = parse_kimina_check_response(check_response)
