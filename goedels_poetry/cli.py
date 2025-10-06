@@ -11,7 +11,7 @@ console = Console()
 @app.command()
 def main() -> None:
     # informal_statement = "Prove that 3 cannot be written as the sum of two cubes."
-    formal_statement = "theorem theorem_af1bdc12cb92 : ¬∃ (a b : ℤ), a^3 + b^3 = 3 := by sorry"  # noqa: RUF001
+    formal_statement = "theorem u31 (O A C B D : ℂ) (hd₁ : ¬B = D) (hd₂ : ¬C = D) (hd₃ : ¬O = A) (hd₄ : ¬O = B) (hd₅ : ¬O = C) (hd₆ : ¬O = D) : ‖O - A‖ * ‖D - B‖ = ‖A - C‖ * ‖B - O‖ → ((O - A) / (C - A)).im = 0 → ((O - B) / (D - B)).im = 0 → ¬((A - B) / (C - B)).im = 0 → ((O.re - A.re) * (C.re - A.re) - (-O.im + A.im) * (C.im - A.im)).sign = ((O.re - B.re) * (D.re - B.re) - (-O.im + B.im) * (D.im - B.im)).sign → ((A - B) / (C - D)).im = 0 := sorry"  # noqa: RUF001
 
     config = GoedelsPoetryConfig()
     initial_state = GoedelsPoetryState(formal_theorem=formal_statement)

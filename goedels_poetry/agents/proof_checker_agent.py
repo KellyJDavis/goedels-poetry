@@ -110,7 +110,7 @@ def _check_proof(server_url: str, server_max_retries: int, state: FormalTheoremP
 
     # Check the formal proof state["formal_proof"] with DEFAULT_IMPORTS prefix
     proof_with_imports = add_default_imports(str(state["formal_proof"]))
-    check_response = kimina_client.check(proof_with_imports)
+    check_response = kimina_client.check(proof_with_imports, timeout=36000)
 
     # Parse check_response
     parsed_response = parse_kimina_check_response(check_response)
