@@ -11,6 +11,7 @@ from goedels_poetry.agents.proof_corrector_agent import ProofCorrectorAgentFacto
 from goedels_poetry.agents.proof_parser_agent import ProofParserAgentFactory
 from goedels_poetry.agents.proof_sketcher_agent import ProofSketcherAgentFactory
 from goedels_poetry.agents.prover_agent import ProverAgentFactory
+from goedels_poetry.agents.sketch_backtrack_agent import SketchBacktrackAgentFactory
 from goedels_poetry.agents.sketch_checker_agent import SketchCheckerAgentFactory
 from goedels_poetry.agents.sketch_corrector_agent import SketchCorrectorAgentFactory
 from goedels_poetry.agents.sketch_decomposition_agent import SketchDecompositionAgentFactory
@@ -237,6 +238,20 @@ class GoedelsPoetryFramework:
         decomposed_states = self._state_manager.get_sketches_to_correct()
         decomposed_states = cast(DecomposedFormalTheoremStates, corrector_agent.invoke(decomposed_states))
         self._state_manager.set_corrected_sketches(decomposed_states)
+
+    def request_proof_sketches_backtrack(self) -> None:
+        """
+        Requests re-sketching for proof sketches whose children failed to prove. This is a
+        different type of correction than syntax corrections - we're asking for a completely
+        different decomposition approach because the previous one didn't work out.
+        """
+        # Create backtrack agent with specialized prompts
+        backtrack_agent = SketchBacktrackAgentFactory.create_agent()
+
+        # Get decomposed formal theorem states that need backtracking and request new sketches
+        decomposed_states = self._state_manager.get_sketches_to_backtrack()
+        decomposed_states = cast(DecomposedFormalTheoremStates, backtrack_agent.invoke(decomposed_states))
+        self._state_manager.set_backtracked_sketches(decomposed_states)
 
     def parse_proof_sketches(self) -> None:
         """
