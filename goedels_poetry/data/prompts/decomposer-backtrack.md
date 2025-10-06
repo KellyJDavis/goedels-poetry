@@ -10,4 +10,3 @@ Before producing the new Lean 4 code to sketch a proof, provide:
 1. A brief analysis of why the previous decomposition might have been too difficult
 2. A description of the new strategy you will try
 3. An explanation of how this new approach differs from the previous one
-

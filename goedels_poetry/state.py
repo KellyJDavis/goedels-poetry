@@ -319,9 +319,7 @@ class GoedelsPoetryStateManager:
         # that update the state have logic to save checkpoints.
         self._state = state
 
-    def _find_backtrackable_ancestor(
-        self, node: DecomposedFormalTheoremState
-    ) -> DecomposedFormalTheoremState | None:
+    def _find_backtrackable_ancestor(self, node: DecomposedFormalTheoremState) -> DecomposedFormalTheoremState | None:
         """
         Find the nearest ancestor (closest to the failed node) that has decomposition_attempts
         less than DECOMPOSER_AGENT_MAX_RETRIES. Returns None if no such ancestor exists.
@@ -370,6 +368,48 @@ class GoedelsPoetryStateManager:
                 descendants.extend(self._collect_all_descendants(child))
         return descendants
 
+    def _remove_proof_node_from_queues(self, proof_node: FormalTheoremProofState) -> None:
+        """
+        Remove a proof node from all proof queues.
+
+        Parameters
+        ----------
+        proof_node : FormalTheoremProofState
+            The proof node to remove
+        """
+        if proof_node in self._state.proof_syntax_queue:
+            self._state.proof_syntax_queue.remove(proof_node)
+        if proof_node in self._state.proof_prove_queue:
+            self._state.proof_prove_queue.remove(proof_node)
+        if proof_node in self._state.proof_validate_queue:
+            self._state.proof_validate_queue.remove(proof_node)
+        if proof_node in self._state.proof_correct_queue:
+            self._state.proof_correct_queue.remove(proof_node)
+        if proof_node in self._state.proof_ast_queue:
+            self._state.proof_ast_queue.remove(proof_node)
+
+    def _remove_decomposition_node_from_queues(self, decomp_node: DecomposedFormalTheoremState) -> None:
+        """
+        Remove a decomposition node from all decomposition queues.
+
+        Parameters
+        ----------
+        decomp_node : DecomposedFormalTheoremState
+            The decomposition node to remove
+        """
+        if decomp_node in self._state.decomposition_sketch_queue:
+            self._state.decomposition_sketch_queue.remove(decomp_node)
+        if decomp_node in self._state.decomposition_validate_queue:
+            self._state.decomposition_validate_queue.remove(decomp_node)
+        if decomp_node in self._state.decomposition_correct_queue:
+            self._state.decomposition_correct_queue.remove(decomp_node)
+        if decomp_node in self._state.decomposition_backtrack_queue:
+            self._state.decomposition_backtrack_queue.remove(decomp_node)
+        if decomp_node in self._state.decomposition_ast_queue:
+            self._state.decomposition_ast_queue.remove(decomp_node)
+        if decomp_node in self._state.decomposition_decompose_queue:
+            self._state.decomposition_decompose_queue.remove(decomp_node)
+
     def _remove_nodes_from_all_queues(self, nodes: list[TreeNode]) -> None:
         """
         Remove the specified nodes from all proof and decomposition queues.
@@ -382,35 +422,11 @@ class GoedelsPoetryStateManager:
         for node in nodes:
             # Try to remove from proof queues
             if isinstance(node, dict) and "formal_proof" in node:
-                proof_node = cast(FormalTheoremProofState, node)
-                # Remove from all proof queues
-                if proof_node in self._state.proof_syntax_queue:
-                    self._state.proof_syntax_queue.remove(proof_node)
-                if proof_node in self._state.proof_prove_queue:
-                    self._state.proof_prove_queue.remove(proof_node)
-                if proof_node in self._state.proof_validate_queue:
-                    self._state.proof_validate_queue.remove(proof_node)
-                if proof_node in self._state.proof_correct_queue:
-                    self._state.proof_correct_queue.remove(proof_node)
-                if proof_node in self._state.proof_ast_queue:
-                    self._state.proof_ast_queue.remove(proof_node)
+                self._remove_proof_node_from_queues(cast(FormalTheoremProofState, node))
 
             # Try to remove from decomposition queues
             if isinstance(node, dict) and "children" in node:
-                decomp_node = cast(DecomposedFormalTheoremState, node)
-                # Remove from all decomposition queues
-                if decomp_node in self._state.decomposition_sketch_queue:
-                    self._state.decomposition_sketch_queue.remove(decomp_node)
-                if decomp_node in self._state.decomposition_validate_queue:
-                    self._state.decomposition_validate_queue.remove(decomp_node)
-                if decomp_node in self._state.decomposition_correct_queue:
-                    self._state.decomposition_correct_queue.remove(decomp_node)
-                if decomp_node in self._state.decomposition_backtrack_queue:
-                    self._state.decomposition_backtrack_queue.remove(decomp_node)
-                if decomp_node in self._state.decomposition_ast_queue:
-                    self._state.decomposition_ast_queue.remove(decomp_node)
-                if decomp_node in self._state.decomposition_decompose_queue:
-                    self._state.decomposition_decompose_queue.remove(decomp_node)
+                self._remove_decomposition_node_from_queues(cast(DecomposedFormalTheoremState, node))
 
     def _prepare_node_for_resketching(self, node: DecomposedFormalTheoremState) -> None:
         """

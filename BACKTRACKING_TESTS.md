@@ -121,4 +121,3 @@ uv run python -m pytest tests/test_backtracking.py -v
 - Tests follow existing patterns from `test_state.py`
 - Tests use proper fixtures for state management
 - All tests include comprehensive docstrings
-

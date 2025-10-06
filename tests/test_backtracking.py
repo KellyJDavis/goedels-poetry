@@ -425,9 +425,7 @@ def test_backtracking_with_valid_sketches(temp_state: GoedelsPoetryState) -> Non
 
     from goedels_poetry.agents.state import DecomposedFormalTheoremStates
 
-    validated_sketches = DecomposedFormalTheoremStates(
-        inputs=[], outputs=[valid_sketch, failed_sketch]
-    )
+    validated_sketches = DecomposedFormalTheoremStates(inputs=[], outputs=[valid_sketch, failed_sketch])
 
     manager.set_validated_sketches(validated_sketches)
 
@@ -443,8 +441,9 @@ def test_backtracking_with_valid_sketches(temp_state: GoedelsPoetryState) -> Non
 
 def test_backtracking_preserves_history(temp_state: GoedelsPoetryState) -> None:
     """Test that backtracking preserves decomposition_history."""
-    from goedels_poetry.config.llm import DECOMPOSER_AGENT_MAX_RETRIES
     from langchain_core.messages import HumanMessage
+
+    from goedels_poetry.config.llm import DECOMPOSER_AGENT_MAX_RETRIES
 
     manager = GoedelsPoetryStateManager(temp_state)
 
@@ -492,4 +491,3 @@ def test_backtracking_preserves_history(temp_state: GoedelsPoetryState) -> None:
 
     # decomposition_attempts should be preserved (not incremented by backtracking itself)
     assert parent["decomposition_attempts"] == 0
-

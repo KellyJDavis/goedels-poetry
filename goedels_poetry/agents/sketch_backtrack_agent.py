@@ -95,4 +95,3 @@ def _backtrack(state: DecomposedFormalTheoremState) -> DecomposedFormalTheoremSt
 
     # Return a DecomposedFormalTheoremStates with state added to its outputs
     return {"outputs": [state]}  # type: ignore[typeddict-item]
-

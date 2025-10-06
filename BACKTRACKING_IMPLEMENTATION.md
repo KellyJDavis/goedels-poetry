@@ -117,7 +117,7 @@ Root (attempts: 0)
   └─ Node A (attempts: 5, MAX_RETRIES reached)
        └─ Child 1 (can't prove)
        └─ Child 2 (can't prove)
-       
+
 System: is_finished = True
 ```
 
@@ -175,4 +175,3 @@ When testing the backtracking feature:
 ## Summary
 
 The backtracking implementation provides a robust mechanism for recovering from failed proof attempts by exploring alternative decomposition strategies at appropriate levels in the proof tree. The implementation follows the existing patterns in the codebase and integrates seamlessly with the multi-agent workflow.
-
