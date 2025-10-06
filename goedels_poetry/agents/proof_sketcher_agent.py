@@ -8,7 +8,7 @@ from langgraph.graph.state import CompiledStateGraph
 from langgraph.types import Send
 
 from goedels_poetry.agents.state import DecomposedFormalTheoremState, DecomposedFormalTheoremStates
-from goedels_poetry.agents.util.common import DEFAULT_IMPORTS, load_prompt
+from goedels_poetry.agents.util.common import add_default_imports, load_prompt, remove_default_imports
 
 
 class ProofSketcherAgentFactory:
@@ -103,7 +103,9 @@ def _proof_sketcher(llm: BaseChatModel, state: DecomposedFormalTheoremState) -> 
     # Check if errors is None
     if state["errors"] is None:
         # If it is, load the prompt used when not correcting a previous proof sketch
-        prompt = load_prompt("decomposer-initial", formal_theorem=state["formal_theorem"])
+        # Add DEFAULT_IMPORTS prefix to the formal_theorem for the prompt
+        formal_theorem_with_imports = add_default_imports(state["formal_theorem"])
+        prompt = load_prompt("decomposer-initial", formal_theorem=formal_theorem_with_imports)
 
         # Put the prompt in the final message
         state["decomposition_history"] += [HumanMessage(content=prompt)]
@@ -126,7 +128,7 @@ def _proof_sketcher(llm: BaseChatModel, state: DecomposedFormalTheoremState) -> 
 
 def _parse_proof_sketcher_response(response: str) -> str:
     """
-    Extract the final lean code snippet from the passed string.
+    Extract the final lean code snippet from the passed string and remove DEFAULT_IMPORTS.
 
     Parameters
     ----------
@@ -136,11 +138,13 @@ def _parse_proof_sketcher_response(response: str) -> str:
     Returns
     -------
     str
-        A string containing the lean code snippet if found, otherwise None.
+        A string containing the lean code snippet if found, otherwise empty string.
     """
     # TODO: Figure out if this algorithm works for the non-Goedel LLM
     pattern = r"```lean4?\n(.*?)\n?```"
     matches = re.findall(pattern, response, re.DOTALL)
-    proof_sketch = matches[-1].strip() if matches else None
-    proof_sketch = DEFAULT_IMPORTS + str(proof_sketch)  # TODO: Figure out global policy for DEFAULT_IMPORTS
+    proof_sketch = matches[-1].strip() if matches else ""
+    # Remove DEFAULT_IMPORTS if present
+    if proof_sketch:
+        proof_sketch = remove_default_imports(proof_sketch)
     return proof_sketch

@@ -9,7 +9,7 @@ from langgraph.graph import END, START, StateGraph
 from langgraph.graph.state import CompiledStateGraph
 
 from goedels_poetry.agents.state import InformalTheoremState
-from goedels_poetry.agents.util.common import load_prompt
+from goedels_poetry.agents.util.common import load_prompt, remove_default_imports
 
 
 class FormalizerAgentFactory:
@@ -98,6 +98,10 @@ def _formalizer(llm: BaseChatModel, state: InformalTheoremState) -> InformalTheo
 
     # Parse formalizer response
     formal_statement = _parser_formalizer_response(str(response_content))
+
+    # Remove DEFAULT_IMPORTS from the formal_statement
+    if formal_statement:
+        formal_statement = remove_default_imports(formal_statement)
 
     # Return InformalTheoremState with the formal theorem
     return {"formal_theorem": formal_statement}  # type: ignore[typeddict-item]

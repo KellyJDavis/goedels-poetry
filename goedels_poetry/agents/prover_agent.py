@@ -8,7 +8,7 @@ from langgraph.graph.state import CompiledStateGraph
 from langgraph.types import Send
 
 from goedels_poetry.agents.state import FormalTheoremProofState, FormalTheoremProofStates
-from goedels_poetry.agents.util.common import DEFAULT_IMPORTS, load_prompt
+from goedels_poetry.agents.util.common import add_default_imports, load_prompt, remove_default_imports
 
 
 class ProverAgentFactory:
@@ -103,7 +103,9 @@ def _prover(llm: BaseChatModel, state: FormalTheoremProofState) -> FormalTheorem
     # Check if errors is None
     if state["errors"] is None:
         # If it is, load the prompt in use when not correcting a previous proof
-        prompt = load_prompt("goedel-prover-v2-initial", formal_statement=state["formal_theorem"])
+        # Add DEFAULT_IMPORTS prefix to the formal_theorem for the prompt
+        formal_statement_with_imports = add_default_imports(state["formal_theorem"])
+        prompt = load_prompt("goedel-prover-v2-initial", formal_statement=formal_statement_with_imports)
 
         # Put the prompt in the final message
         state["proof_history"] += [HumanMessage(content=prompt)]
@@ -126,7 +128,7 @@ def _prover(llm: BaseChatModel, state: FormalTheoremProofState) -> FormalTheorem
 
 def _parse_prover_response(response: str) -> str:
     """
-    Extract the final lean code snippet from the passed string.
+    Extract the final lean code snippet from the passed string and remove DEFAULT_IMPORTS.
 
     Parameters
     ----------
@@ -136,10 +138,12 @@ def _parse_prover_response(response: str) -> str:
     Returns
     -------
     str
-        A string containing the lean code snippet if found, otherwise None.
+        A string containing the lean code snippet if found, otherwise empty string.
     """
     pattern = r"```lean4?\n(.*?)\n?```"
     matches = re.findall(pattern, response, re.DOTALL)
-    formal_proof = matches[-1].strip() if matches else None
-    formal_proof = DEFAULT_IMPORTS + str(formal_proof)  # TODO: Figure out global policy for DEFAULT_IMPORTS
+    formal_proof = matches[-1].strip() if matches else ""
+    # Remove DEFAULT_IMPORTS if present
+    if formal_proof:
+        formal_proof = remove_default_imports(formal_proof)
     return formal_proof

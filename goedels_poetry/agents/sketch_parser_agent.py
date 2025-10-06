@@ -6,6 +6,7 @@ from langgraph.graph.state import CompiledStateGraph
 from langgraph.types import Send
 
 from goedels_poetry.agents.state import DecomposedFormalTheoremState, DecomposedFormalTheoremStates
+from goedels_poetry.agents.util.common import add_default_imports, remove_default_imports_from_ast
 from goedels_poetry.agents.util.kimina_server import parse_kimina_ast_code_response
 from goedels_poetry.parsers.ast import AST
 
@@ -110,14 +111,18 @@ def _parse_sketch(
     # Create a client to access the Kimina Server
     kimina_client = KiminaClient(api_url=server_url, http_timeout=36000, n_retries=server_max_retries)
 
-    # Parse formal proof sketch of the passed state
-    ast_code_response = kimina_client.ast_code(str(state["proof_sketch"]))
+    # Parse formal proof sketch of the passed state with DEFAULT_IMPORTS prefix
+    sketch_with_imports = add_default_imports(str(state["proof_sketch"]))
+    ast_code_response = kimina_client.ast_code(sketch_with_imports)
 
     # Parse ast_code_response
     parsed_response = parse_kimina_ast_code_response(ast_code_response)
 
-    # Set state["ast"] with the parsed_response
-    state["ast"] = AST(parsed_response["ast"])
+    # Remove DEFAULT_IMPORTS from the parsed AST
+    ast_without_imports = remove_default_imports_from_ast(parsed_response["ast"])
+
+    # Set state["ast"] with the parsed_response (without DEFAULT_IMPORTS)
+    state["ast"] = AST(ast_without_imports)
 
     # Return a DecomposedFormalTheoremStates with state added to its outputs
     return {"outputs": [state]}  # type: ignore[typeddict-item]

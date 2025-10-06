@@ -6,7 +6,7 @@ from langgraph.graph.state import CompiledStateGraph
 from langgraph.types import Send
 
 from goedels_poetry.agents.state import FormalTheoremProofState, FormalTheoremProofStates
-from goedels_poetry.agents.util.common import get_error_str
+from goedels_poetry.agents.util.common import add_default_imports, get_error_str
 from goedels_poetry.agents.util.kimina_server import parse_kimina_check_response
 
 
@@ -108,8 +108,9 @@ def _check_proof(server_url: str, server_max_retries: int, state: FormalTheoremP
     # Create a client to access the Kimina Server
     kimina_client = KiminaClient(api_url=server_url, http_timeout=36000, n_retries=server_max_retries)
 
-    # Check the formal proof state["formal_proof"]
-    check_response = kimina_client.check(str(state["formal_proof"]))
+    # Check the formal proof state["formal_proof"] with DEFAULT_IMPORTS prefix
+    proof_with_imports = add_default_imports(str(state["formal_proof"]))
+    check_response = kimina_client.check(proof_with_imports)
 
     # Parse check_response
     parsed_response = parse_kimina_check_response(check_response)
@@ -118,7 +119,8 @@ def _check_proof(server_url: str, server_max_retries: int, state: FormalTheoremP
     state["proved"] = parsed_response["pass"]
 
     # Update the state with the error string formatted for Goedel-Prover-V2 use
-    state["errors"] = get_error_str(str(state["formal_proof"]), parsed_response.get("errors", []), False)
+    # Note: get_error_str expects the code with DEFAULT_IMPORTS for proper line number handling
+    state["errors"] = get_error_str(proof_with_imports, parsed_response.get("errors", []), False)
 
     # Return a FormalTheoremProofStates with state added to its outputs
     return {"outputs": [state]}  # type: ignore[typeddict-item]

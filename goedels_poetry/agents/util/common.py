@@ -1,4 +1,7 @@
+from __future__ import annotations
+
 import os
+from typing import Any
 
 from jinja2 import Environment, FileSystemLoader, select_autoescape
 
@@ -14,6 +17,96 @@ _env = Environment(
 DEFAULT_IMPORTS = (
     "import Mathlib\nimport Aesop\n\nset_option maxHeartbeats 0\n\nopen BigOperators Real Nat Topology Rat\n\n"
 )
+
+
+def add_default_imports(code: str) -> str:
+    """
+    Add DEFAULT_IMPORTS prefix to the given code.
+
+    Parameters
+    ----------
+    code: str
+        The code to add DEFAULT_IMPORTS to.
+
+    Returns
+    -------
+    str
+        The code with DEFAULT_IMPORTS prefix.
+    """
+    return DEFAULT_IMPORTS + code
+
+
+def remove_default_imports(code: str) -> str:
+    """
+    Remove DEFAULT_IMPORTS prefix from the given code (up to whitespace).
+
+    Parameters
+    ----------
+    code: str
+        The code to remove DEFAULT_IMPORTS from.
+
+    Returns
+    -------
+    str
+        The code without DEFAULT_IMPORTS prefix.
+    """
+    # Normalize both strings by stripping and comparing
+    normalized_imports = DEFAULT_IMPORTS.strip()
+    normalized_code = code.strip()
+
+    if normalized_code.startswith(normalized_imports):
+        # Remove the imports and strip any leading/trailing whitespace
+        return normalized_code[len(normalized_imports) :].strip()
+
+    return code
+
+
+def remove_default_imports_from_ast(ast: dict[str, Any] | None) -> dict[str, Any]:
+    """
+    Remove DEFAULT_IMPORTS related nodes from the parsed AST.
+
+    The AST returned by Kimina includes all the declarations from DEFAULT_IMPORTS.
+    We need to remove the import statements and declarations that come from DEFAULT_IMPORTS.
+
+    Parameters
+    ----------
+    ast: dict[str, Any] | None
+        The AST to remove DEFAULT_IMPORTS from.
+
+    Returns
+    -------
+    dict[str, Any]
+        The AST without DEFAULT_IMPORTS nodes. If None, returns empty dict.
+    """
+    if ast is None:
+        return {}
+
+    # The AST is a dict. If it contains a list of commands, we need to skip
+    # the ones that correspond to DEFAULT_IMPORTS.
+    # DEFAULT_IMPORTS contains:
+    # 1. import Mathlib
+    # 2. import Aesop
+    # 3. set_option maxHeartbeats 0
+    # 4. open BigOperators Real Nat Topology Rat
+    # So we skip the first 4 commands
+
+    # Check if the AST is a list at the top level (older format)
+    if isinstance(ast, list):
+        num_imports_to_skip = 4
+        if len(ast) > num_imports_to_skip:
+            return {"commands": ast[num_imports_to_skip:]}
+        return {"commands": ast}
+
+    # If it's a dict with a "commands" key, filter that
+    if "commands" in ast and isinstance(ast["commands"], list):
+        num_imports_to_skip = 4
+        filtered_ast = ast.copy()
+        if len(ast["commands"]) > num_imports_to_skip:
+            filtered_ast["commands"] = ast["commands"][num_imports_to_skip:]
+        return filtered_ast
+
+    # Otherwise, return as-is (might be a different AST structure or already filtered)
+    return ast
 
 
 def load_prompt(name: str, **kwargs: str) -> str:
