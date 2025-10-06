@@ -6,7 +6,7 @@ from langgraph.graph.state import CompiledStateGraph
 from langgraph.types import Send
 
 from goedels_poetry.agents.state import DecomposedFormalTheoremState, DecomposedFormalTheoremStates
-from goedels_poetry.agents.util.common import get_error_str
+from goedels_poetry.agents.util.common import add_default_imports, get_error_str
 from goedels_poetry.agents.util.kimina_server import parse_kimina_check_response
 
 
@@ -110,8 +110,9 @@ def _check_sketch(
     # Create a client to access the Kimina Server
     kimina_client = KiminaClient(api_url=server_url, http_timeout=36000, n_retries=server_max_retries)
 
-    # Check the proof sketch state["proof_sketch"]
-    check_response = kimina_client.check(str(state["proof_sketch"]))
+    # Check the proof sketch state["proof_sketch"] with DEFAULT_IMPORTS prefix
+    sketch_with_imports = add_default_imports(str(state["proof_sketch"]))
+    check_response = kimina_client.check(sketch_with_imports)
 
     # Parse check_response
     parsed_response = parse_kimina_check_response(check_response)
@@ -120,7 +121,8 @@ def _check_sketch(
     state["syntactic"] = parsed_response["pass"]
 
     # Update the state with the formatted error string
-    state["errors"] = get_error_str(str(state["proof_sketch"]), parsed_response.get("errors", []), False)
+    # Note: get_error_str expects the code with DEFAULT_IMPORTS for proper line number handling
+    state["errors"] = get_error_str(sketch_with_imports, parsed_response.get("errors", []), False)
 
     # Return a DecomposedFormalTheoremStates with state added to its outputs
     return {"outputs": [state]}  # type: ignore[typeddict-item]

@@ -5,7 +5,7 @@ from langgraph.graph import END, START, StateGraph
 from langgraph.graph.state import CompiledStateGraph
 
 from goedels_poetry.agents.state import InformalTheoremState
-from goedels_poetry.agents.util.common import load_prompt
+from goedels_poetry.agents.util.common import add_default_imports, load_prompt
 from goedels_poetry.agents.util.kimina_server import parse_semantic_check_response
 
 
@@ -81,10 +81,11 @@ def _check_semantics(llm: BaseChatModel, state: InformalTheoremState) -> Informa
         A InformalTheoremState containing a bool semantic indicating if the semantics of the
         informal and formal statements are the same.
     """
-    # Construct prompt
+    # Construct prompt with DEFAULT_IMPORTS prefix added to formal_statement
+    formal_statement_with_imports = add_default_imports(str(state["formal_theorem"]))
     prompt = load_prompt(
         "goedel-semiotician-v2",
-        formal_statement=str(state["formal_theorem"]),
+        formal_statement=formal_statement_with_imports,
         informal_statement=str(state["informal_theorem"]),
     )
 
