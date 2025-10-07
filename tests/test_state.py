@@ -1337,3 +1337,336 @@ def test_extract_have_name_multiline_signature() -> None:
     finally:
         with suppress(Exception):
             GoedelsPoetryState.clear_theorem_directory(theorem)
+
+
+def test_extract_have_name_with_apostrophes() -> None:
+    """Test _extract_have_name with identifiers containing apostrophes."""
+    import uuid
+
+    from goedels_poetry.state import GoedelsPoetryStateManager
+
+    theorem = f"theorem test_apostrophes_{uuid.uuid4()} : True"
+
+    with suppress(Exception):
+        GoedelsPoetryState.clear_theorem_directory(theorem)
+
+    try:
+        state = GoedelsPoetryState(formal_theorem=theorem)
+        manager = GoedelsPoetryStateManager(state)
+
+        # Test single apostrophe
+        name1 = manager._extract_have_name("lemma helper' : 1 = 1 := by sorry")
+        assert name1 == "helper'", f'Expected "helper\'", got "{name1}"'
+
+        # Test double apostrophe
+        name2 = manager._extract_have_name("lemma helper'' : 2 = 2 := by sorry")
+        assert name2 == "helper''", f'Expected "helper\'\'", got "{name2}"'
+
+        # Test apostrophe in middle
+        name3 = manager._extract_have_name("lemma my'Lemma : 3 = 3 := by sorry")
+        assert name3 == "my'Lemma", f'Expected "my\'Lemma", got "{name3}"'
+
+        # Test multiple apostrophes
+        name4 = manager._extract_have_name("theorem proof'_step'_1 : True := by sorry")
+        assert name4 == "proof'_step'_1", f'Expected "proof\'_step\'_1", got "{name4}"'
+
+        # Test with have keyword
+        name5 = manager._extract_have_name("have h' : Q := by sorry")
+        assert name5 == "h'", f'Expected "h\'", got "{name5}"'
+
+        # Test with parentheses after name with apostrophe
+        name6 = manager._extract_have_name("lemma helper'(x : Nat) : True := by sorry")
+        assert name6 == "helper'", f'Expected "helper\'", got "{name6}"'
+
+        # Test with colon after name with apostrophe
+        name7 = manager._extract_have_name("lemma helper' : VeryLongType := by sorry")
+        assert name7 == "helper'", f'Expected "helper\'", got "{name7}"'
+
+    finally:
+        with suppress(Exception):
+            GoedelsPoetryState.clear_theorem_directory(theorem)
+
+
+def test_reconstruct_proof_with_apostrophe_identifiers() -> None:
+    """Test proof reconstruction with identifiers containing apostrophes."""
+    import uuid
+    from typing import cast
+
+    from goedels_poetry.agents.state import DecomposedFormalTheoremState, FormalTheoremProofState
+    from goedels_poetry.agents.util.common import DEFAULT_IMPORTS
+    from goedels_poetry.state import GoedelsPoetryStateManager
+    from goedels_poetry.util.tree import TreeNode
+
+    theorem = f"theorem test_apostrophe_proof_{uuid.uuid4()} : P"
+
+    with suppress(Exception):
+        GoedelsPoetryState.clear_theorem_directory(theorem)
+
+    try:
+        state = GoedelsPoetryState(formal_theorem=theorem)
+
+        # Create a decomposed state with apostrophe in helper name
+        sketch = f"""{theorem} := by
+  have helper' : Q := by sorry
+  exact helper'"""
+
+        decomposed = DecomposedFormalTheoremState(
+            parent=None,
+            children=[],
+            depth=0,
+            formal_theorem=theorem,
+            proof_sketch=sketch,
+            syntactic=True,
+            errors=None,
+            ast=None,
+            decomposition_attempts=1,
+            decomposition_history=[],
+        )
+
+        # Create child proof with apostrophe in name
+        child = FormalTheoremProofState(
+            parent=cast(TreeNode, decomposed),
+            depth=1,
+            formal_theorem="lemma helper' : Q",
+            syntactic=True,
+            formal_proof="lemma helper' : Q := by\n  constructor",
+            proved=True,
+            errors=None,
+            ast=None,
+            proof_attempts=1,
+            proof_history=[],
+        )
+
+        decomposed["children"].append(cast(TreeNode, child))
+        state.formal_theorem_proof = cast(TreeNode, decomposed)
+        manager = GoedelsPoetryStateManager(state)
+
+        result = manager.reconstruct_complete_proof()
+
+        # Should contain DEFAULT_IMPORTS
+        assert result.startswith(DEFAULT_IMPORTS)
+
+        # Should contain have with apostrophe
+        assert "have helper' : Q := by" in result
+        assert "constructor" in result
+
+        # Should NOT contain sorry
+        result_no_imports = result[len(DEFAULT_IMPORTS) :]
+        assert "sorry" not in result_no_imports
+
+    finally:
+        with suppress(Exception):
+            GoedelsPoetryState.clear_theorem_directory(theorem)
+
+
+def test_replace_main_body_sorry_multiline_have() -> None:
+    """Test that _replace_main_body_sorry correctly handles multiline have statements."""
+    import uuid
+
+    from goedels_poetry.state import GoedelsPoetryStateManager
+
+    theorem = f"theorem test_multiline_have_{uuid.uuid4()} : True"
+
+    with suppress(Exception):
+        GoedelsPoetryState.clear_theorem_directory(theorem)
+
+    try:
+        state = GoedelsPoetryState(formal_theorem=theorem)
+        manager = GoedelsPoetryStateManager(state)
+
+        # Test case 1: Multiline have with := and by on separate lines
+        sketch1 = """theorem test : True := by
+  have h : VeryLongType :=
+    by sorry
+  sorry"""
+
+        # The first sorry (in have) should NOT be replaced, only the last one
+        result1 = manager._replace_main_body_sorry(sketch1, "exact trivial")
+        assert "have h : VeryLongType :=" in result1
+        assert "by sorry" in result1  # The have's sorry should remain
+        assert "exact trivial" in result1  # Main body sorry should be replaced
+        # Count sorries - should have exactly one (in the have statement)
+        assert result1.count("sorry") == 1
+
+        # Test case 2: Multiline have with newline before by
+        sketch2 = """theorem test : True := by
+  have h' : Type
+    := by
+      sorry
+  sorry"""
+
+        result2 = manager._replace_main_body_sorry(sketch2, "done")
+        assert "have h' : Type" in result2
+        assert "sorry" in result2  # The have's sorry should remain
+        assert "done" in result2  # Main body sorry should be replaced
+
+        # Test case 3: Multiple lines between := and by
+        sketch3 = """theorem test : True := by
+  have helper :
+    LongType →
+    AnotherLongType :=
+    by
+      sorry
+  sorry"""
+
+        result3 = manager._replace_main_body_sorry(sketch3, "apply helper")
+        assert "have helper :" in result3
+        assert result3.count("sorry") == 1  # Only the have's sorry should remain
+        assert "apply helper" in result3
+
+    finally:
+        with suppress(Exception):
+            GoedelsPoetryState.clear_theorem_directory(theorem)
+
+
+def test_reconstruct_proof_multiline_have_sorry() -> None:
+    """Test complete proof reconstruction with multiline have statements."""
+    import uuid
+    from typing import cast
+
+    from goedels_poetry.agents.state import DecomposedFormalTheoremState, FormalTheoremProofState
+    from goedels_poetry.agents.util.common import DEFAULT_IMPORTS
+    from goedels_poetry.state import GoedelsPoetryStateManager
+    from goedels_poetry.util.tree import TreeNode
+
+    theorem = f"theorem test_multiline_recon_{uuid.uuid4()} : P"
+
+    with suppress(Exception):
+        GoedelsPoetryState.clear_theorem_directory(theorem)
+
+    try:
+        state = GoedelsPoetryState(formal_theorem=theorem)
+
+        # Create a decomposed state with multiline have
+        sketch = f"""{theorem} := by
+  have helper :
+    VeryLongType := by
+    sorry
+  sorry"""
+
+        decomposed = DecomposedFormalTheoremState(
+            parent=None,
+            children=[],
+            depth=0,
+            formal_theorem=theorem,
+            proof_sketch=sketch,
+            syntactic=True,
+            errors=None,
+            ast=None,
+            decomposition_attempts=1,
+            decomposition_history=[],
+        )
+
+        # Create child proof for the have
+        child_have = FormalTheoremProofState(
+            parent=cast(TreeNode, decomposed),
+            depth=1,
+            formal_theorem="lemma helper : VeryLongType",
+            syntactic=True,
+            formal_proof="lemma helper : VeryLongType := by\n  constructor",
+            proved=True,
+            errors=None,
+            ast=None,
+            proof_attempts=1,
+            proof_history=[],
+        )
+
+        # Create child proof for main body
+        child_main = FormalTheoremProofState(
+            parent=cast(TreeNode, decomposed),
+            depth=1,
+            formal_theorem="theorem main_body : P",
+            syntactic=True,
+            formal_proof="theorem main_body : P := by\n  exact helper",
+            proved=True,
+            errors=None,
+            ast=None,
+            proof_attempts=1,
+            proof_history=[],
+        )
+
+        decomposed["children"].extend([cast(TreeNode, child_have), cast(TreeNode, child_main)])
+        state.formal_theorem_proof = cast(TreeNode, decomposed)
+        manager = GoedelsPoetryStateManager(state)
+
+        result = manager.reconstruct_complete_proof()
+
+        # Should contain DEFAULT_IMPORTS
+        assert result.startswith(DEFAULT_IMPORTS)
+
+        # Should contain the have statement
+        assert "have helper :" in result
+        assert "VeryLongType" in result
+
+        # Should contain both proofs
+        assert "constructor" in result
+        assert "exact helper" in result
+
+        # Should NOT contain any sorry
+        result_no_imports = result[len(DEFAULT_IMPORTS) :]
+        assert "sorry" not in result_no_imports
+
+    finally:
+        with suppress(Exception):
+            GoedelsPoetryState.clear_theorem_directory(theorem)
+
+
+def test_replace_main_body_sorry_edge_cases() -> None:
+    """Test edge cases for _replace_main_body_sorry with various whitespace and formatting."""
+    import uuid
+
+    from goedels_poetry.state import GoedelsPoetryStateManager
+
+    theorem = f"theorem test_edge_cases_{uuid.uuid4()} : True"
+
+    with suppress(Exception):
+        GoedelsPoetryState.clear_theorem_directory(theorem)
+
+    try:
+        state = GoedelsPoetryState(formal_theorem=theorem)
+        manager = GoedelsPoetryStateManager(state)
+
+        # Test case 1: Have with lots of whitespace
+        sketch1 = """theorem test : True := by
+  have   h'   :   Type   :=
+
+    by
+      sorry
+  sorry"""
+
+        result1 = manager._replace_main_body_sorry(sketch1, "done")
+        assert "done" in result1
+        assert result1.count("sorry") == 1  # Only have's sorry remains
+
+        # Test case 2: Multiple haves with multiline patterns
+        sketch2 = """theorem test : True := by
+  have h1 :=
+    by sorry
+  have h2 : Type :=
+    by
+      sorry
+  sorry"""
+
+        result2 = manager._replace_main_body_sorry(sketch2, "trivial")
+        assert "trivial" in result2
+        assert result2.count("sorry") == 2  # Both have's sorries remain
+
+        # Test case 3: Empty lines between have and sorry
+        sketch3 = """theorem test : True := by
+  have helper : Q :=
+
+    by
+
+      sorry
+
+  sorry"""
+
+        result3 = manager._replace_main_body_sorry(sketch3, "constructor")
+        assert "constructor" in result3
+        # The have's sorry should remain, main body replaced
+        assert "by" in result3
+        assert result3.count("sorry") == 1
+
+    finally:
+        with suppress(Exception):
+            GoedelsPoetryState.clear_theorem_directory(theorem)

@@ -29,6 +29,14 @@ from goedels_poetry.util.tree import TreeNode
 _OUTPUT_DIR = os.environ.get("GOEDELS_POETRY_DIR", os.path.expanduser("~/.goedels_poetry"))
 
 # Configuration constants for proof reconstruction
+# PROOF_BODY_INDENT_SPACES: Number of spaces to indent proof bodies in Lean4 code.
+# Set to 2 to follow Lean4's standard indentation convention, where tactics inside
+# a 'by' block are indented 2 spaces relative to the containing statement.
+# Example:
+#   theorem foo : P := by
+#     have h : Q := by  -- indented 2 spaces
+#       constructor     -- indented 4 spaces (2 from 'have', 2 more from 'by')
+#     exact h
 PROOF_BODY_INDENT_SPACES = 2
 
 
@@ -1333,8 +1341,11 @@ class GoedelsPoetryStateManager:
         """
         # Pattern: (lemma|have|theorem) followed by whitespace, then a name (identifier),
         # then followed by whitespace, colon, or opening paren
-        # This properly matches at word boundaries and handles arbitrary whitespace
-        pattern = r"\b(lemma|have|theorem)\s+(\w+)\s*[:(]"
+        # Lean4 identifiers can contain alphanumeric characters, underscores, and apostrophes
+        # (e.g., helper', myLemma'', h₁')
+        # We use [\w']+ to match these, and make the ending delimiter optional with (?:...)?
+        # to handle edge cases where the name is at the end of a line
+        pattern = r"\b(lemma|have|theorem)\s+([\w']+)(?:\s*[:(])?"
         match = re.search(pattern, formal_theorem)
 
         if match:
@@ -1394,10 +1405,59 @@ class GoedelsPoetryStateManager:
 
         return result
 
+    def _is_sorry_part_of_have(self, lines: list[str], sorry_idx: int) -> bool:
+        """
+        Checks if a sorry at the given line index is part of a have statement.
+
+        Parameters
+        ----------
+        lines : list[str]
+            The lines of the proof sketch
+        sorry_idx : int
+            The index of the sorry line to check
+
+        Returns
+        -------
+        bool
+            True if the sorry is part of a have statement, False otherwise
+        """
+        # Look back up to 5 lines to see if we're in a have statement
+        lookback_limit = min(5, sorry_idx)
+        sorry_indent = len(lines[sorry_idx]) - len(lines[sorry_idx].lstrip())
+
+        for j in range(1, lookback_limit + 1):
+            prev_idx = sorry_idx - j
+            prev_line = lines[prev_idx]
+
+            # Pattern: "have <name> : <type> := <whitespace/newline> by <whitespace/newline> sorry"
+            # Note: Lean4 identifiers can include apostrophes
+            if re.search(r"\bhave\s+[\w']+\s*:", prev_line):
+                # Found a have statement - now check if our sorry is part of its proof body
+                have_indent = len(prev_line) - len(prev_line.lstrip())
+
+                # Check lines between the have and our sorry for ":= by" pattern
+                between_text = "\n".join(lines[prev_idx:sorry_idx])
+
+                # If there's a ":= by" pattern in the lines from have to (but not including) sorry,
+                # and our sorry is indented MORE than the have line, it's part of the have
+                if re.search(r":=\s*by", between_text, re.MULTILINE | re.DOTALL) and sorry_indent > have_indent:
+                    return True
+
+            # If we hit an empty line, stop looking back
+            if not prev_line.strip():
+                break
+
+        return False
+
     def _replace_main_body_sorry(self, parent_sketch: str, child_proof_body: str) -> str:
         """
         Replaces a standalone sorry (not part of a have statement) with the actual proof body.
         This handles the main proof body after all have statements.
+
+        This method handles both single-line and multiline patterns:
+        - Single-line: "have h : Type := by sorry" (skip this)
+        - Multiline: "have h : Type :=\n  by sorry" (skip this)
+        - Main body: standalone "sorry" after all have statements (replace this)
 
         Parameters
         ----------
@@ -1412,22 +1472,28 @@ class GoedelsPoetryStateManager:
             The modified sketch with the main body sorry replaced
         """
         # Find a standalone sorry that's not part of a have statement
-        # This pattern looks for sorry that's not preceded by ":= <whitespace> by" on the same logical line
         # We need to find the last sorry in the sketch that's at the end after all have statements
 
         # Split into lines to find standalone sorry
         lines = parent_sketch.split("\n")
 
         # Find the last line that contains just "sorry" (possibly with indentation)
-        # that is NOT on the same line as ":= by" (with any whitespace between := and by)
+        # that is NOT part of a have statement (checking previous lines for multiline patterns)
         last_sorry_idx = -1
         for i in range(len(lines) - 1, -1, -1):
             stripped = lines[i].strip()
-            # Check if this is not part of a ":=\s*by sorry" pattern on the SAME line
-            # by checking if this line contains the pattern before the sorry
-            if stripped == "sorry" and not re.search(r":=\s*by", lines[i]):
-                last_sorry_idx = i
-                break
+
+            # Check if this line is just "sorry"
+            if stripped == "sorry":
+                # Check if this is part of a ":= by sorry" pattern (single-line)
+                if re.search(r":=\s*by", lines[i]):
+                    continue
+
+                # Check if this is part of a multiline ":= ... by ... sorry" pattern
+                if not self._is_sorry_part_of_have(lines, i):
+                    # This is a standalone sorry (main body)
+                    last_sorry_idx = i
+                    break
 
         if last_sorry_idx == -1:
             # No standalone sorry found
