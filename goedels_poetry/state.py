@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import pickle
+import re
 from datetime import datetime
 from hashlib import sha256
 from pathlib import Path
@@ -26,6 +27,9 @@ from goedels_poetry.util.tree import TreeNode
 
 # Global configuration for output directory
 _OUTPUT_DIR = os.environ.get("GOEDELS_POETRY_DIR", os.path.expanduser("~/.goedels_poetry"))
+
+# Configuration constants for proof reconstruction
+PROOF_BODY_INDENT_SPACES = 2
 
 
 class GoedelsPoetryState:
@@ -1242,8 +1246,6 @@ class GoedelsPoetryStateManager:
         str
             The tactic sequence (indented appropriately)
         """
-        import re
-
         # Match ':=' followed by any whitespace (including newlines), then 'by'
         # This handles all variations: ':= by', ':=by', ':=  by', ':=\nby', etc.
         match = re.search(r":=\s*by", proof)
@@ -1285,8 +1287,6 @@ class GoedelsPoetryStateManager:
         str
             The parent sketch with the child proof inlined
         """
-        import re
-
         # Get the child's theorem name from formal_theorem
         child_formal_theorem = ""
         if isinstance(child, dict) and "formal_theorem" in child:
@@ -1331,8 +1331,6 @@ class GoedelsPoetryStateManager:
         str
             The name of the have/lemma
         """
-        import re
-
         # Pattern: (lemma|have|theorem) followed by whitespace, then a name (identifier),
         # then followed by whitespace, colon, or opening paren
         # This properly matches at word boundaries and handles arbitrary whitespace
@@ -1367,8 +1365,6 @@ class GoedelsPoetryStateManager:
         str
             The modified sketch with sorry replaced
         """
-        import re
-
         # Pattern to match: "have <name> : ... := by sorry" in the parent's original text
         # The parent sketch has the original signature without extra parameters
         pattern = rf"(have\s+{re.escape(have_name)}\s*:.*?:=\s*by\s*)sorry"
@@ -1382,12 +1378,13 @@ class GoedelsPoetryStateManager:
         # Determine the indentation level of the have statement
         start_pos = match.start()
         # Find the start of the line containing this have
+        # Note: rfind returns -1 if not found, so +1 makes it 0 (start of string)
         line_start = parent_sketch.rfind("\n", 0, start_pos) + 1
         have_line = parent_sketch[line_start:start_pos]
         base_indent = len(have_line) - len(have_line.lstrip())
 
-        # Add two spaces for the indentation of the proof body
-        proof_indent = " " * (base_indent + 2)
+        # Add spaces for the indentation of the proof body
+        proof_indent = " " * (base_indent + PROOF_BODY_INDENT_SPACES)
 
         # Indent the child proof body
         indented_proof = self._indent_proof_body(child_proof_body, proof_indent)
@@ -1414,8 +1411,6 @@ class GoedelsPoetryStateManager:
         str
             The modified sketch with the main body sorry replaced
         """
-        import re
-
         # Find a standalone sorry that's not part of a have statement
         # This pattern looks for sorry that's not preceded by ":= <whitespace> by" on the same logical line
         # We need to find the last sorry in the sketch that's at the end after all have statements

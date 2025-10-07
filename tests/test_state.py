@@ -1156,3 +1156,184 @@ def test_reconstruct_complete_proof_whitespace_robustness() -> None:
     finally:
         with suppress(Exception):
             GoedelsPoetryState.clear_theorem_directory(theorem)
+
+
+def test_reconstruct_complete_proof_multiline_type_signatures() -> None:
+    """Test that reconstruct handles multiline type signatures."""
+    import uuid
+    from typing import cast
+
+    from goedels_poetry.agents.state import DecomposedFormalTheoremState, FormalTheoremProofState
+    from goedels_poetry.agents.util.common import DEFAULT_IMPORTS
+    from goedels_poetry.state import GoedelsPoetryStateManager
+    from goedels_poetry.util.tree import TreeNode
+
+    theorem = f"theorem test_multiline_{uuid.uuid4()} : P"
+
+    with suppress(Exception):
+        GoedelsPoetryState.clear_theorem_directory(theorem)
+
+    try:
+        state = GoedelsPoetryState(formal_theorem=theorem)
+
+        # Create a decomposed state with multiline type signatures
+        sketch = f"""{theorem} := by
+  have helper1 :
+    VeryLongType →
+    AnotherType := by sorry
+  have helper2 : SimpleType
+    := by sorry
+  exact combine helper1 helper2"""
+
+        decomposed = DecomposedFormalTheoremState(
+            parent=None,
+            children=[],
+            depth=0,
+            formal_theorem=theorem,
+            proof_sketch=sketch,
+            syntactic=True,
+            errors=None,
+            ast=None,
+            decomposition_attempts=1,
+            decomposition_history=[],
+        )
+
+        # Create first child proof with multiline type signature
+        child1 = FormalTheoremProofState(
+            parent=cast(TreeNode, decomposed),
+            depth=1,
+            formal_theorem="""lemma helper1 :
+  VeryLongType →
+  AnotherType""",
+            syntactic=True,
+            formal_proof="""lemma helper1 :
+  VeryLongType →
+  AnotherType := by
+  intro x
+  constructor""",
+            proved=True,
+            errors=None,
+            ast=None,
+            proof_attempts=1,
+            proof_history=[],
+        )
+
+        # Create second child proof with := on different line
+        child2 = FormalTheoremProofState(
+            parent=cast(TreeNode, decomposed),
+            depth=1,
+            formal_theorem="lemma helper2 : SimpleType",
+            syntactic=True,
+            formal_proof="""lemma helper2 : SimpleType
+  := by
+  constructor""",
+            proved=True,
+            errors=None,
+            ast=None,
+            proof_attempts=1,
+            proof_history=[],
+        )
+
+        decomposed["children"].extend([cast(TreeNode, child1), cast(TreeNode, child2)])
+        state.formal_theorem_proof = cast(TreeNode, decomposed)
+        manager = GoedelsPoetryStateManager(state)
+
+        result = manager.reconstruct_complete_proof()
+
+        # Should contain DEFAULT_IMPORTS
+        assert result.startswith(DEFAULT_IMPORTS)
+
+        # Should contain both haves with inline proofs
+        assert "have helper1 :" in result
+        assert "intro x" in result
+        assert "have helper2 : SimpleType" in result
+
+        # Both constructors should be present
+        assert result.count("constructor") == 2
+
+        # Should NOT contain sorry
+        result_no_imports = result[len(DEFAULT_IMPORTS) :]
+        assert "sorry" not in result_no_imports
+
+    finally:
+        with suppress(Exception):
+            GoedelsPoetryState.clear_theorem_directory(theorem)
+
+
+def test_extract_tactics_after_by_multiline_variations() -> None:
+    """Test _extract_tactics_after_by with multiline ':= by' patterns."""
+    import uuid
+
+    from goedels_poetry.state import GoedelsPoetryStateManager
+
+    theorem = f"theorem test_multiline_by_{uuid.uuid4()} : True"
+
+    with suppress(Exception):
+        GoedelsPoetryState.clear_theorem_directory(theorem)
+
+    try:
+        state = GoedelsPoetryState(formal_theorem=theorem)
+        manager = GoedelsPoetryStateManager(state)
+
+        # Test with := on one line, by on the next
+        proof1 = """lemma h1 : VeryLongType →
+  AnotherType :=
+  by
+    intro x
+    constructor"""
+        tactics1 = manager._extract_tactics_after_by(proof1)
+        assert "intro x" in tactics1
+        assert "constructor" in tactics1
+
+        # Test with newline between := and by
+        proof2 = """lemma h2 : SimpleType :=
+by rfl"""
+        tactics2 = manager._extract_tactics_after_by(proof2)
+        assert tactics2.strip() == "rfl"
+
+        # Test with everything on one line but multiline type
+        proof3 = """lemma h3 :
+  Type1 →
+  Type2 := by exact h"""
+        tactics3 = manager._extract_tactics_after_by(proof3)
+        assert tactics3 == "exact h"
+
+    finally:
+        with suppress(Exception):
+            GoedelsPoetryState.clear_theorem_directory(theorem)
+
+
+def test_extract_have_name_multiline_signature() -> None:
+    """Test _extract_have_name with multiline type signatures."""
+    import uuid
+
+    from goedels_poetry.state import GoedelsPoetryStateManager
+
+    theorem = f"theorem test_name_extraction_{uuid.uuid4()} : True"
+
+    with suppress(Exception):
+        GoedelsPoetryState.clear_theorem_directory(theorem)
+
+    try:
+        state = GoedelsPoetryState(formal_theorem=theorem)
+        manager = GoedelsPoetryStateManager(state)
+
+        # Test with multiline before colon
+        name1 = manager._extract_have_name("""lemma helper1 :
+  VeryLongType → AnotherType := by sorry""")
+        assert name1 == "helper1"
+
+        # Test with multiline and spaces
+        name2 = manager._extract_have_name("""lemma   helper2   :
+  Type1 →
+  Type2 := by sorry""")
+        assert name2 == "helper2"
+
+        # Test with opening paren delimiter on multiline
+        name3 = manager._extract_have_name("""lemma helper3
+  (x : Nat) : True := by sorry""")
+        assert name3 == "helper3"
+
+    finally:
+        with suppress(Exception):
+            GoedelsPoetryState.clear_theorem_directory(theorem)

@@ -1,3 +1,4 @@
+import traceback
 from typing import cast
 
 from langchain_core.language_models.chat_models import BaseChatModel
@@ -298,8 +299,6 @@ class GoedelsPoetryFramework:
                 print("-" * 80)
                 print(complete_proof)
                 print("-" * 80)
-            except Exception as e:
+            except (AttributeError, KeyError, TypeError, ValueError) as e:
                 print(f"Error reconstructing proof: {e}")
-                import traceback
-
                 traceback.print_exc()
