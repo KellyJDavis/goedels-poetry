@@ -394,3 +394,707 @@ def test_save_increments_iteration() -> None:
         # Clean up
         with suppress(Exception):
             GoedelsPoetryState.clear_theorem_directory(theorem)
+
+
+# Tests for GoedelsPoetryStateManager
+
+
+def test_state_manager_reason_property() -> None:
+    """Test the reason property getter and setter."""
+    import uuid
+
+    from goedels_poetry.state import GoedelsPoetryStateManager
+
+    theorem = f"Test Reason Property {uuid.uuid4()}"
+
+    with suppress(Exception):
+        GoedelsPoetryState.clear_theorem_directory(theorem)
+
+    try:
+        state = GoedelsPoetryState(formal_theorem=theorem)
+        manager = GoedelsPoetryStateManager(state)
+
+        # Initial reason should be None
+        assert manager.reason is None
+
+        # Set a reason
+        manager.reason = "Test reason"
+        assert manager.reason == "Test reason"
+
+        # Update reason
+        manager.reason = "Updated reason"
+        assert manager.reason == "Updated reason"
+
+        # Set to None
+        manager.reason = None
+        assert manager.reason is None
+    finally:
+        with suppress(Exception):
+            GoedelsPoetryState.clear_theorem_directory(theorem)
+
+
+def test_reconstruct_complete_proof_no_proof() -> None:
+    """Test reconstruct_complete_proof when no proof exists."""
+    import uuid
+
+    from goedels_poetry.agents.util.common import DEFAULT_IMPORTS
+    from goedels_poetry.state import GoedelsPoetryStateManager
+
+    theorem = f"Test No Proof {uuid.uuid4()}"
+
+    with suppress(Exception):
+        GoedelsPoetryState.clear_theorem_directory(theorem)
+
+    try:
+        state = GoedelsPoetryState(informal_theorem=theorem)
+        manager = GoedelsPoetryStateManager(state)
+
+        # No proof tree exists
+        result = manager.reconstruct_complete_proof()
+        assert DEFAULT_IMPORTS in result
+        assert "No proof available" in result
+    finally:
+        with suppress(Exception):
+            GoedelsPoetryState.clear_theorem_directory(theorem)
+
+
+def test_reconstruct_complete_proof_simple_leaf() -> None:
+    """Test reconstruct_complete_proof with a simple FormalTheoremProofState."""
+    import uuid
+
+    from goedels_poetry.agents.state import FormalTheoremProofState
+    from goedels_poetry.agents.util.common import DEFAULT_IMPORTS
+    from goedels_poetry.state import GoedelsPoetryStateManager
+
+    theorem = f"Test Simple Leaf {uuid.uuid4()}"
+
+    with suppress(Exception):
+        GoedelsPoetryState.clear_theorem_directory(theorem)
+
+    try:
+        state = GoedelsPoetryState(formal_theorem=theorem)
+
+        # Create a simple proof
+        proof_state = FormalTheoremProofState(
+            parent=None,
+            depth=0,
+            formal_theorem=theorem,
+            syntactic=True,
+            formal_proof=f"{theorem} := by\n  trivial",
+            proved=True,
+            errors=None,
+            ast=None,
+            proof_attempts=1,
+            proof_history=[],
+        )
+
+        state.formal_theorem_proof = proof_state
+        manager = GoedelsPoetryStateManager(state)
+
+        result = manager.reconstruct_complete_proof()
+
+        # Should contain DEFAULT_IMPORTS
+        assert result.startswith(DEFAULT_IMPORTS)
+
+        # Should contain the proof
+        assert theorem in result
+        assert ":= by" in result
+        assert "trivial" in result
+    finally:
+        with suppress(Exception):
+            GoedelsPoetryState.clear_theorem_directory(theorem)
+
+
+def test_reconstruct_complete_proof_with_single_have() -> None:
+    """Test reconstruct_complete_proof with a decomposed state containing one have statement."""
+    import uuid
+    from typing import cast
+
+    from goedels_poetry.agents.state import DecomposedFormalTheoremState, FormalTheoremProofState
+    from goedels_poetry.agents.util.common import DEFAULT_IMPORTS
+    from goedels_poetry.state import GoedelsPoetryStateManager
+    from goedels_poetry.util.tree import TreeNode
+
+    theorem = f"theorem test_single_have_{uuid.uuid4()} : P"
+
+    with suppress(Exception):
+        GoedelsPoetryState.clear_theorem_directory(theorem)
+
+    try:
+        state = GoedelsPoetryState(formal_theorem=theorem)
+
+        # Create a decomposed state with sketch
+        sketch = f"""{theorem} := by
+  have helper : Q := by sorry
+  exact helper"""
+
+        decomposed = DecomposedFormalTheoremState(
+            parent=None,
+            children=[],
+            depth=0,
+            formal_theorem=theorem,
+            proof_sketch=sketch,
+            syntactic=True,
+            errors=None,
+            ast=None,
+            decomposition_attempts=1,
+            decomposition_history=[],
+        )
+
+        # Create child proof
+        child_proof = FormalTheoremProofState(
+            parent=cast(TreeNode, decomposed),
+            depth=1,
+            formal_theorem="lemma helper : Q",
+            syntactic=True,
+            formal_proof="lemma helper : Q := by\n  constructor",
+            proved=True,
+            errors=None,
+            ast=None,
+            proof_attempts=1,
+            proof_history=[],
+        )
+
+        decomposed["children"].append(cast(TreeNode, child_proof))
+        state.formal_theorem_proof = cast(TreeNode, decomposed)
+        manager = GoedelsPoetryStateManager(state)
+
+        result = manager.reconstruct_complete_proof()
+
+        # Should contain DEFAULT_IMPORTS
+        assert result.startswith(DEFAULT_IMPORTS)
+
+        # Should contain main theorem
+        assert theorem in result
+        assert ":= by" in result
+
+        # Should contain have with inline proof (not sorry)
+        assert "have helper : Q := by" in result
+        assert "constructor" in result
+
+        # Should NOT contain sorry for helper
+        lines = result.split("\n")
+        have_line_idx = None
+        for i, line in enumerate(lines):
+            if "have helper" in line:
+                have_line_idx = i
+                break
+
+        assert have_line_idx is not None
+        # Check lines after have for sorry - should not find it before next statement
+        for i in range(have_line_idx, min(have_line_idx + 5, len(lines))):
+            if "exact helper" in lines[i]:
+                break
+            if i > have_line_idx and "sorry" in lines[i]:
+                pytest.fail("Found sorry in have helper proof when it should be replaced")
+    finally:
+        with suppress(Exception):
+            GoedelsPoetryState.clear_theorem_directory(theorem)
+
+
+def test_reconstruct_complete_proof_with_multiple_haves() -> None:
+    """Test reconstruct_complete_proof with multiple have statements."""
+    import uuid
+    from typing import cast
+
+    from goedels_poetry.agents.state import DecomposedFormalTheoremState, FormalTheoremProofState
+    from goedels_poetry.agents.util.common import DEFAULT_IMPORTS
+    from goedels_poetry.state import GoedelsPoetryStateManager
+    from goedels_poetry.util.tree import TreeNode
+
+    theorem = f"theorem test_multi_{uuid.uuid4()} : P"
+
+    with suppress(Exception):
+        GoedelsPoetryState.clear_theorem_directory(theorem)
+
+    try:
+        state = GoedelsPoetryState(formal_theorem=theorem)
+
+        # Create a decomposed state with multiple haves
+        sketch = f"""{theorem} := by
+  have helper1 : Q := by sorry
+  have helper2 : R := by sorry
+  exact combine helper1 helper2"""
+
+        decomposed = DecomposedFormalTheoremState(
+            parent=None,
+            children=[],
+            depth=0,
+            formal_theorem=theorem,
+            proof_sketch=sketch,
+            syntactic=True,
+            errors=None,
+            ast=None,
+            decomposition_attempts=1,
+            decomposition_history=[],
+        )
+
+        # Create first child proof
+        child1 = FormalTheoremProofState(
+            parent=cast(TreeNode, decomposed),
+            depth=1,
+            formal_theorem="lemma helper1 : Q",
+            syntactic=True,
+            formal_proof="lemma helper1 : Q := by\n  intro x\n  constructor",
+            proved=True,
+            errors=None,
+            ast=None,
+            proof_attempts=1,
+            proof_history=[],
+        )
+
+        # Create second child proof (with dependency)
+        child2 = FormalTheoremProofState(
+            parent=cast(TreeNode, decomposed),
+            depth=1,
+            formal_theorem="lemma helper2 (helper1 : Q) : R",
+            syntactic=True,
+            formal_proof="lemma helper2 (helper1 : Q) : R := by\n  cases helper1\n  constructor",
+            proved=True,
+            errors=None,
+            ast=None,
+            proof_attempts=1,
+            proof_history=[],
+        )
+
+        decomposed["children"].extend([cast(TreeNode, child1), cast(TreeNode, child2)])
+        state.formal_theorem_proof = cast(TreeNode, decomposed)
+        manager = GoedelsPoetryStateManager(state)
+
+        result = manager.reconstruct_complete_proof()
+
+        # Should contain DEFAULT_IMPORTS
+        assert result.startswith(DEFAULT_IMPORTS)
+
+        # Should contain both haves with inline proofs
+        assert "have helper1 : Q := by" in result
+        assert "intro x" in result
+        assert "have helper2 : R := by" in result
+        assert "cases helper1" in result
+
+        # Should NOT contain sorry
+        result_no_imports = result[len(DEFAULT_IMPORTS) :]
+        assert "sorry" not in result_no_imports
+    finally:
+        with suppress(Exception):
+            GoedelsPoetryState.clear_theorem_directory(theorem)
+
+
+def test_reconstruct_complete_proof_with_main_body() -> None:
+    """Test reconstruct_complete_proof with main body proof replacement."""
+    import uuid
+    from typing import cast
+
+    from goedels_poetry.agents.state import DecomposedFormalTheoremState, FormalTheoremProofState
+    from goedels_poetry.agents.util.common import DEFAULT_IMPORTS
+    from goedels_poetry.state import GoedelsPoetryStateManager
+    from goedels_poetry.util.tree import TreeNode
+
+    theorem = f"theorem test_main_body_{uuid.uuid4()} : P"
+
+    with suppress(Exception):
+        GoedelsPoetryState.clear_theorem_directory(theorem)
+
+    try:
+        state = GoedelsPoetryState(formal_theorem=theorem)
+
+        # Create a decomposed state with have and main body sorry
+        sketch = f"""{theorem} := by
+  have helper : Q := by sorry
+  sorry"""
+
+        decomposed = DecomposedFormalTheoremState(
+            parent=None,
+            children=[],
+            depth=0,
+            formal_theorem=theorem,
+            proof_sketch=sketch,
+            syntactic=True,
+            errors=None,
+            ast=None,
+            decomposition_attempts=1,
+            decomposition_history=[],
+        )
+
+        # Create have proof
+        child_have = FormalTheoremProofState(
+            parent=cast(TreeNode, decomposed),
+            depth=1,
+            formal_theorem="lemma helper : Q",
+            syntactic=True,
+            formal_proof="lemma helper : Q := by\n  constructor",
+            proved=True,
+            errors=None,
+            ast=None,
+            proof_attempts=1,
+            proof_history=[],
+        )
+
+        # Create main body proof (no clear name, so it's the main body)
+        child_main = FormalTheoremProofState(
+            parent=cast(TreeNode, decomposed),
+            depth=1,
+            formal_theorem="theorem main_body : P",
+            syntactic=True,
+            formal_proof="theorem main_body : P := by\n  apply helper\n  done",
+            proved=True,
+            errors=None,
+            ast=None,
+            proof_attempts=1,
+            proof_history=[],
+        )
+
+        decomposed["children"].extend([cast(TreeNode, child_have), cast(TreeNode, child_main)])
+        state.formal_theorem_proof = cast(TreeNode, decomposed)
+        manager = GoedelsPoetryStateManager(state)
+
+        result = manager.reconstruct_complete_proof()
+
+        # Should contain DEFAULT_IMPORTS
+        assert result.startswith(DEFAULT_IMPORTS)
+
+        # Should contain have with inline proof
+        assert "have helper : Q := by" in result
+        assert "constructor" in result
+
+        # Should contain main body proof (not standalone sorry)
+        assert "apply helper" in result
+        assert "done" in result
+
+        # Should NOT contain standalone sorry
+        lines = result.split("\n")
+        for i, line in enumerate(lines):
+            if line.strip() == "sorry" and i > 0:
+                # Check this isn't part of a have statement
+                prev_lines = "\n".join(lines[max(0, i - 3) : i])
+                if ":= by" not in prev_lines:
+                    pytest.fail(f"Found standalone sorry at line {i}")
+    finally:
+        with suppress(Exception):
+            GoedelsPoetryState.clear_theorem_directory(theorem)
+
+
+def test_reconstruct_complete_proof_proper_indentation() -> None:
+    """Test that proof reconstruction maintains proper indentation."""
+    import uuid
+    from typing import cast
+
+    from goedels_poetry.agents.state import DecomposedFormalTheoremState, FormalTheoremProofState
+    from goedels_poetry.state import GoedelsPoetryStateManager
+    from goedels_poetry.util.tree import TreeNode
+
+    theorem = f"theorem test_indent_{uuid.uuid4()} : P"
+
+    with suppress(Exception):
+        GoedelsPoetryState.clear_theorem_directory(theorem)
+
+    try:
+        state = GoedelsPoetryState(formal_theorem=theorem)
+
+        # Create a decomposed state with indented have
+        sketch = f"""{theorem} := by
+  have helper : Q := by sorry
+  exact helper"""
+
+        decomposed = DecomposedFormalTheoremState(
+            parent=None,
+            children=[],
+            depth=0,
+            formal_theorem=theorem,
+            proof_sketch=sketch,
+            syntactic=True,
+            errors=None,
+            ast=None,
+            decomposition_attempts=1,
+            decomposition_history=[],
+        )
+
+        # Create child with multi-line proof
+        child = FormalTheoremProofState(
+            parent=cast(TreeNode, decomposed),
+            depth=1,
+            formal_theorem="lemma helper : Q",
+            syntactic=True,
+            formal_proof="lemma helper : Q := by\n  intro x\n  cases x\n  constructor",
+            proved=True,
+            errors=None,
+            ast=None,
+            proof_attempts=1,
+            proof_history=[],
+        )
+
+        decomposed["children"].append(cast(TreeNode, child))
+        state.formal_theorem_proof = cast(TreeNode, decomposed)
+        manager = GoedelsPoetryStateManager(state)
+
+        result = manager.reconstruct_complete_proof()
+
+        lines = result.split("\n")
+
+        # Find the have line
+        have_line_idx = None
+        for i, line in enumerate(lines):
+            if "have helper" in line:
+                have_line_idx = i
+                # have should be indented with 2 spaces
+                assert line.startswith("  have"), f"have line not properly indented: '{line}'"
+                break
+
+        assert have_line_idx is not None
+
+        # Check that proof body lines are indented with 4 spaces (2 more than have)
+        for i in range(have_line_idx + 1, min(have_line_idx + 5, len(lines))):
+            line = lines[i]
+            if line.strip() and "exact" not in line:
+                # This should be part of the have proof, indented with 4 spaces
+                assert line.startswith("    "), f"Proof body line not properly indented: '{line}'"
+    finally:
+        with suppress(Exception):
+            GoedelsPoetryState.clear_theorem_directory(theorem)
+
+
+def test_reconstruct_complete_proof_nested_decomposition() -> None:
+    """Test reconstruct_complete_proof with nested decomposed states."""
+    import uuid
+    from typing import cast
+
+    from goedels_poetry.agents.state import DecomposedFormalTheoremState, FormalTheoremProofState
+    from goedels_poetry.agents.util.common import DEFAULT_IMPORTS
+    from goedels_poetry.state import GoedelsPoetryStateManager
+    from goedels_poetry.util.tree import TreeNode
+
+    theorem = f"theorem test_nested_{uuid.uuid4()} : P"
+
+    with suppress(Exception):
+        GoedelsPoetryState.clear_theorem_directory(theorem)
+
+    try:
+        state = GoedelsPoetryState(formal_theorem=theorem)
+
+        # Create parent decomposed state
+        parent_sketch = f"""{theorem} := by
+  have helper1 : Q := by sorry
+  exact helper1"""
+
+        parent = DecomposedFormalTheoremState(
+            parent=None,
+            children=[],
+            depth=0,
+            formal_theorem=theorem,
+            proof_sketch=parent_sketch,
+            syntactic=True,
+            errors=None,
+            ast=None,
+            decomposition_attempts=1,
+            decomposition_history=[],
+        )
+
+        # Create child decomposed state (helper1 is also decomposed)
+        child_sketch = """lemma helper1 : Q := by
+  have subhelper : R := by sorry
+  exact subhelper"""
+
+        child_decomposed = DecomposedFormalTheoremState(
+            parent=cast(TreeNode, parent),
+            children=[],
+            depth=1,
+            formal_theorem="lemma helper1 : Q",
+            proof_sketch=child_sketch,
+            syntactic=True,
+            errors=None,
+            ast=None,
+            decomposition_attempts=1,
+            decomposition_history=[],
+        )
+
+        # Create grandchild proof
+        grandchild = FormalTheoremProofState(
+            parent=cast(TreeNode, child_decomposed),
+            depth=2,
+            formal_theorem="lemma subhelper : R",
+            syntactic=True,
+            formal_proof="lemma subhelper : R := by\n  constructor",
+            proved=True,
+            errors=None,
+            ast=None,
+            proof_attempts=1,
+            proof_history=[],
+        )
+
+        child_decomposed["children"].append(cast(TreeNode, grandchild))
+        parent["children"].append(cast(TreeNode, child_decomposed))
+        state.formal_theorem_proof = cast(TreeNode, parent)
+        manager = GoedelsPoetryStateManager(state)
+
+        result = manager.reconstruct_complete_proof()
+
+        # Should contain DEFAULT_IMPORTS
+        assert result.startswith(DEFAULT_IMPORTS)
+
+        # Should contain main theorem
+        assert theorem in result
+        assert ":= by" in result
+
+        # Should contain nested have statements
+        assert "have helper1 : Q := by" in result
+        assert "have subhelper : R := by" in result
+
+        # Should contain the deepest proof
+        assert "constructor" in result
+
+        # Should NOT contain sorry
+        result_no_imports = result[len(DEFAULT_IMPORTS) :]
+        assert "sorry" not in result_no_imports
+    finally:
+        with suppress(Exception):
+            GoedelsPoetryState.clear_theorem_directory(theorem)
+
+
+def test_reconstruct_complete_proof_with_dependencies_in_signature() -> None:
+    """Test that reconstruction works when child has dependencies added to signature."""
+    import uuid
+    from typing import cast
+
+    from goedels_poetry.agents.state import DecomposedFormalTheoremState, FormalTheoremProofState
+    from goedels_poetry.agents.util.common import DEFAULT_IMPORTS
+    from goedels_poetry.state import GoedelsPoetryStateManager
+    from goedels_poetry.util.tree import TreeNode
+
+    theorem = f"theorem test_deps_{uuid.uuid4()} : P"
+
+    with suppress(Exception):
+        GoedelsPoetryState.clear_theorem_directory(theorem)
+
+    try:
+        state = GoedelsPoetryState(formal_theorem=theorem)
+
+        # Create a decomposed state
+        sketch = f"""{theorem} := by
+  have cube_mod9 : ∀ (a : ℤ), (a^3) % 9 ∈ {{0, 1, 8}} := by sorry
+  have sum_not_3 : ∀ (s1 s2 : ℤ), s1 ∈ {{0, 1, 8}} → s2 ∈ {{0, 1, 8}} → (s1 + s2) % 9 ≠ 3 := by sorry
+  sorry"""  # noqa: RUF001
+
+        decomposed = DecomposedFormalTheoremState(
+            parent=None,
+            children=[],
+            depth=0,
+            formal_theorem=theorem,
+            proof_sketch=sketch,
+            syntactic=True,
+            errors=None,
+            ast=None,
+            decomposition_attempts=1,
+            decomposition_history=[],
+        )
+
+        # Create first child
+        child1 = FormalTheoremProofState(
+            parent=cast(TreeNode, decomposed),
+            depth=1,
+            formal_theorem="lemma cube_mod9 : ∀ (a : ℤ), (a^3) % 9 ∈ {0, 1, 8}",  # noqa: RUF001
+            syntactic=True,
+            formal_proof="lemma cube_mod9 : ∀ (a : ℤ), (a^3) % 9 ∈ {0, 1, 8} := by\n  intro a\n  omega",  # noqa: RUF001
+            proved=True,
+            errors=None,
+            ast=None,
+            proof_attempts=1,
+            proof_history=[],
+        )
+
+        # Create second child WITH DEPENDENCY in signature (as AST.get_named_subgoal_code does)
+        child2 = FormalTheoremProofState(
+            parent=cast(TreeNode, decomposed),
+            depth=1,
+            formal_theorem="lemma sum_not_3 (cube_mod9 : ∀ (a : ℤ), (a^3) % 9 ∈ {0, 1, 8}) : ∀ (s1 s2 : ℤ), s1 ∈ {0, 1, 8} → s2 ∈ {0, 1, 8} → (s1 + s2) % 9 ≠ 3",  # noqa: RUF001
+            syntactic=True,
+            formal_proof="lemma sum_not_3 (cube_mod9 : ∀ (a : ℤ), (a^3) % 9 ∈ {0, 1, 8}) : ∀ (s1 s2 : ℤ), s1 ∈ {0, 1, 8} → s2 ∈ {0, 1, 8} → (s1 + s2) % 9 ≠ 3 := by\n  intro s1 s2\n  omega",  # noqa: RUF001
+            proved=True,
+            errors=None,
+            ast=None,
+            proof_attempts=1,
+            proof_history=[],
+        )
+
+        # Create main body
+        child3 = FormalTheoremProofState(
+            parent=cast(TreeNode, decomposed),
+            depth=1,
+            formal_theorem="theorem main_body (cube_mod9 : ∀ (a : ℤ), (a^3) % 9 ∈ {0, 1, 8}) (sum_not_3 : ∀ (s1 s2 : ℤ), s1 ∈ {0, 1, 8} → s2 ∈ {0, 1, 8} → (s1 + s2) % 9 ≠ 3) : P",  # noqa: RUF001
+            syntactic=True,
+            formal_proof="theorem main_body (cube_mod9 : ...) (sum_not_3 : ...) : P := by\n  apply sum_not_3\n  omega",
+            proved=True,
+            errors=None,
+            ast=None,
+            proof_attempts=1,
+            proof_history=[],
+        )
+
+        decomposed["children"].extend([cast(TreeNode, child1), cast(TreeNode, child2), cast(TreeNode, child3)])
+        state.formal_theorem_proof = cast(TreeNode, decomposed)
+        manager = GoedelsPoetryStateManager(state)
+
+        result = manager.reconstruct_complete_proof()
+
+        # Should contain DEFAULT_IMPORTS
+        assert result.startswith(DEFAULT_IMPORTS)
+
+        # Should properly match cube_mod9 by name only
+        assert "have cube_mod9" in result
+        assert "intro a" in result
+
+        # Should properly match sum_not_3 by name only (despite dependency in child signature)
+        assert "have sum_not_3" in result
+        assert "intro s1 s2" in result
+
+        # Should NOT contain sorry
+        result_no_imports = result[len(DEFAULT_IMPORTS) :]
+        assert "sorry" not in result_no_imports
+    finally:
+        with suppress(Exception):
+            GoedelsPoetryState.clear_theorem_directory(theorem)
+
+
+def test_reconstruct_complete_proof_empty_proof() -> None:
+    """Test reconstruct_complete_proof when formal_proof is None."""
+    import uuid
+
+    from goedels_poetry.agents.state import FormalTheoremProofState
+    from goedels_poetry.agents.util.common import DEFAULT_IMPORTS
+    from goedels_poetry.state import GoedelsPoetryStateManager
+
+    theorem = f"theorem test_empty_{uuid.uuid4()} : True"
+
+    with suppress(Exception):
+        GoedelsPoetryState.clear_theorem_directory(theorem)
+
+    try:
+        state = GoedelsPoetryState(formal_theorem=theorem)
+
+        # Create a proof state without formal_proof
+        proof_state = FormalTheoremProofState(
+            parent=None,
+            depth=0,
+            formal_theorem=theorem,
+            syntactic=True,
+            formal_proof=None,  # No proof yet
+            proved=False,
+            errors=None,
+            ast=None,
+            proof_attempts=0,
+            proof_history=[],
+        )
+
+        state.formal_theorem_proof = proof_state
+        manager = GoedelsPoetryStateManager(state)
+
+        result = manager.reconstruct_complete_proof()
+
+        # Should contain DEFAULT_IMPORTS
+        assert result.startswith(DEFAULT_IMPORTS)
+
+        # Should contain theorem with sorry fallback
+        assert theorem in result
+        assert ":= by sorry" in result
+    finally:
+        with suppress(Exception):
+            GoedelsPoetryState.clear_theorem_directory(theorem)

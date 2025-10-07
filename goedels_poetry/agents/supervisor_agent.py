@@ -80,6 +80,7 @@ class SupervisorAgent:
 
         # No action is pending, we are finished
         self._state_manager.is_finished = True
+        self._state_manager.reason = "Proof completed successfully."
 
         # Return the final action "finish"
         return "finish"

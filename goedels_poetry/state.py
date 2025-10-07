@@ -39,6 +39,9 @@ class GoedelsPoetryState:
         # Introduce a bool to indicate if the proof is finished unable to be finished
         self.is_finished: bool = False
 
+        # Introduce a string to hold the reason for finishing
+        self.reason: str | None = None
+
         # Introduce a list of strings to hold the action history
         self.action_history: list[str] = []
 
@@ -463,6 +466,7 @@ class GoedelsPoetryStateManager:
         if backtrack_target is None:
             # No backtrackable ancestor found - we've exhausted all options
             self._state.is_finished = True
+            self._state.reason = "Proof failed: Unable to decompose theorem - all decomposition attempts exhausted."
             return
 
         # We found an ancestor to backtrack to - perform the backtracking
@@ -496,6 +500,30 @@ class GoedelsPoetryStateManager:
             New is_finished value
         """
         self._state.is_finished = is_finished
+
+    @property
+    def reason(self) -> str | None:
+        """
+        A string indicating the reason for finishing
+
+        Returns
+        -------
+        str | None
+            The reason for finishing, or None if not finished
+        """
+        return self._state.reason
+
+    @reason.setter
+    def reason(self, reason: str | None) -> None:
+        """
+        Setter for the reason string
+
+        Parameters
+        ----------
+        reason: str | None
+            The reason for finishing
+        """
+        self._state.reason = reason
 
     def add_action(self, action: str) -> None:
         """
@@ -577,6 +605,10 @@ class GoedelsPoetryStateManager:
 
         # Set is_finished appropriately
         self._state.is_finished = validated_informal_theorem["formalization_attempts"] >= FORMALIZER_AGENT_MAX_RETRIES
+        if self._state.is_finished:
+            self._state.reason = (
+                "Proof failed: Unable to formalize informal theorem - maximum formalization attempts exceeded."
+            )
 
     def get_informal_theorem_to_check_semantics_of(self) -> InformalTheoremState | None:
         """
@@ -668,6 +700,8 @@ class GoedelsPoetryStateManager:
 
         # Unsucessfully validated theorems are user supplied; we can't fix them. So finish
         self._state.is_finished = any((not vt["syntactic"]) for vt in validated_theorems_outputs)
+        if self._state.is_finished:
+            self._state.reason = "Proof failed: User-supplied formal theorem is syntactically invalid."
 
     def get_theorems_to_prove(self) -> FormalTheoremProofStates:
         """
@@ -1101,3 +1135,347 @@ class GoedelsPoetryStateManager:
 
         # Flip is_finished appropriately
         self._state.is_finished = any((child["depth"] >= PROVER_AGENT_MAX_DEPTH) for child in all_children)
+        if self._state.is_finished:
+            self._state.reason = "Proof failed: Maximum proof tree depth exceeded."
+
+    def reconstruct_complete_proof(self) -> str:
+        """
+        Reconstructs the complete Lean4 proof from the proof tree.
+
+        Returns
+        -------
+        str
+            The complete Lean4 proof text with DEFAULT_IMPORTS prefix
+        """
+        from goedels_poetry.agents.util.common import DEFAULT_IMPORTS
+
+        if self._state.formal_theorem_proof is None:
+            return DEFAULT_IMPORTS + "-- No proof available\n"
+
+        proof_without_imports = self._reconstruct_node_proof(self._state.formal_theorem_proof)
+        return DEFAULT_IMPORTS + proof_without_imports
+
+    def _reconstruct_node_proof(self, node: TreeNode) -> str:
+        """
+        Recursively reconstructs the proof for a given node in the proof tree.
+
+        Parameters
+        ----------
+        node : TreeNode
+            The node to reconstruct proof for
+
+        Returns
+        -------
+        str
+            The proof text for this node and all its children (without DEFAULT_IMPORTS)
+        """
+        # Check if this is a FormalTheoremProofState (leaf node)
+        if isinstance(node, dict) and "formal_proof" in node and "children" not in node:
+            formal_proof_state = cast(FormalTheoremProofState, node)
+            if formal_proof_state["formal_proof"] is not None:
+                return str(formal_proof_state["formal_proof"])
+            else:
+                # No proof yet, return the theorem with sorry
+                return f"{formal_proof_state['formal_theorem']} := by sorry\n"
+
+        # Check if this is a DecomposedFormalTheoremState (internal node)
+        if isinstance(node, dict) and "children" in node:
+            decomposed_state = cast(DecomposedFormalTheoremState, node)
+
+            if decomposed_state["proof_sketch"] is None:
+                # Fallback if no sketch
+                return f"{decomposed_state['formal_theorem']} := by sorry\n"
+
+            # Start with the parent's proof sketch
+            sketch = str(decomposed_state["proof_sketch"])
+
+            # For each child, inline its proof into the parent's sketch
+            for child in decomposed_state["children"]:
+                child_proof_body = self._extract_proof_body(child)
+                sketch = self._inline_child_proof(sketch, child, child_proof_body)
+
+            return sketch
+
+        # Fallback for unexpected node types
+        return "-- Unable to reconstruct proof for this node\n"
+
+    def _extract_proof_body(self, child: TreeNode) -> str:
+        """
+        Extracts the proof body (tactics after 'by') from a child node.
+
+        Parameters
+        ----------
+        child : TreeNode
+            The child node to extract proof body from
+
+        Returns
+        -------
+        str
+            The proof body (tactic sequence)
+        """
+        if isinstance(child, dict) and "formal_proof" in child and "children" not in child:
+            # This is a FormalTheoremProofState (leaf)
+            formal_proof_state = cast(FormalTheoremProofState, child)
+            if formal_proof_state["formal_proof"] is not None:
+                proof = str(formal_proof_state["formal_proof"])
+                # Extract just the tactics after "by"
+                return self._extract_tactics_after_by(proof)
+            return "sorry"
+        elif isinstance(child, dict) and "children" in child:
+            # This is a DecomposedFormalTheoremState (internal)
+            # Recursively reconstruct this child first
+            child_complete = self._reconstruct_node_proof(child)
+            return self._extract_tactics_after_by(child_complete)
+        return "sorry"
+
+    def _extract_tactics_after_by(self, proof: str) -> str:
+        """
+        Extracts the tactic sequence after 'by' from a proof.
+
+        Parameters
+        ----------
+        proof : str
+            The complete proof text
+
+        Returns
+        -------
+        str
+            The tactic sequence (indented appropriately)
+        """
+        # Find the := by pattern
+        by_pattern = ":= by"
+        idx = proof.find(by_pattern)
+        if idx == -1:
+            # Try alternative patterns
+            by_pattern = ":=by"
+            idx = proof.find(by_pattern)
+
+        if idx == -1:
+            # Can't find 'by', return the whole proof
+            return proof.strip()
+
+        # Extract everything after 'by'
+        tactics = proof[idx + len(by_pattern) :].strip()
+        return tactics
+
+    def _inline_child_proof(self, parent_sketch: str, child: TreeNode, child_proof_body: str) -> str:
+        """
+        Inlines a child's proof body into the parent's sketch by replacing the corresponding sorry.
+
+        Important: The child's formal_theorem may differ from what appears in the parent sketch
+        because AST.get_named_subgoal_code() adds earlier dependencies as explicit parameters.
+        For example:
+          - Parent sketch has: "have sum_not_3 : ... := by sorry"
+          - Child formal_theorem: "lemma sum_not_3 (cube_mod9 : ...) : ... := by ..."
+
+        We handle this by:
+          1. Extracting just the name from the child (e.g., "sum_not_3")
+          2. Searching for that name in the parent sketch (which has the original signature)
+          3. Replacing the sorry in the parent's original have statement
+
+        Parameters
+        ----------
+        parent_sketch : str
+            The parent's proof sketch with sorry placeholders
+        child : TreeNode
+            The child node whose proof we're inlining
+        child_proof_body : str
+            The proof body to inline
+
+        Returns
+        -------
+        str
+            The parent sketch with the child proof inlined
+        """
+        import re
+
+        # Get the child's theorem name from formal_theorem
+        child_formal_theorem = ""
+        if isinstance(child, dict) and "formal_theorem" in child:
+            child_formal_theorem = str(child["formal_theorem"])
+
+        # Extract the have/lemma name from the child's theorem
+        # This strips away any added parameters to get just the name
+        have_name = self._extract_have_name(child_formal_theorem)
+
+        if not have_name:
+            # Can't identify the have name, might be the main body
+            # Try to replace a standalone sorry (not part of a have statement)
+            return self._replace_main_body_sorry(parent_sketch, child_proof_body)
+
+        # Check if this name actually appears as a "have" statement in the parent sketch
+        # Pattern: "have <name> : ..."
+        have_pattern = rf"have\s+{re.escape(have_name)}\s*:"
+        if re.search(have_pattern, parent_sketch):
+            # Find the "have <name> : ... := by sorry" pattern in the parent sketch
+            # Note: The parent sketch still has the original signature without extra parameters
+            return self._replace_sorry_for_have(parent_sketch, have_name, child_proof_body)
+        else:
+            # This name doesn't appear as a "have" statement, so it's the main body
+            return self._replace_main_body_sorry(parent_sketch, child_proof_body)
+
+    def _extract_have_name(self, formal_theorem: str) -> str:
+        """
+        Extracts the name from a have/lemma declaration.
+
+        Note: The child's formal_theorem may have dependencies added as explicit parameters
+        by AST.get_named_subgoal_code(), e.g.:
+          lemma sum_not_3 (cube_mod9 : ...) : result_type := ...
+        We need to extract just the name "sum_not_3", not including the parameters.
+
+        Parameters
+        ----------
+        formal_theorem : str
+            The formal theorem text
+
+        Returns
+        -------
+        str
+            The name of the have/lemma
+        """
+        # Pattern: "lemma name" or "have name" followed by space, colon, or opening paren
+        for keyword in ["lemma ", "have ", "theorem "]:
+            if keyword in formal_theorem:
+                start = formal_theorem.find(keyword) + len(keyword)
+                rest = formal_theorem[start:].strip()
+
+                # Find the first delimiter: space, colon, or opening paren
+                # The name ends at whichever comes first
+                delimiters = [" ", ":", "("]
+                end_positions = [rest.find(d) for d in delimiters if rest.find(d) != -1]
+
+                if end_positions:
+                    end = min(end_positions)
+                    return rest[:end].strip()
+        return ""
+
+    def _replace_sorry_for_have(self, parent_sketch: str, have_name: str, child_proof_body: str) -> str:
+        """
+        Replaces the sorry in a specific have statement with the actual proof body.
+
+        Note: We search by name only in the parent sketch, which contains the original
+        "have <name> : ... := by sorry" without any added parameters. The child's
+        formal_theorem may have dependencies added as parameters, but we don't use
+        that here - we only search in the parent's original text.
+
+        Parameters
+        ----------
+        parent_sketch : str
+            The parent's proof sketch (with original signatures, no added parameters)
+        have_name : str
+            The name of the have statement to replace
+        child_proof_body : str
+            The proof body to insert
+
+        Returns
+        -------
+        str
+            The modified sketch with sorry replaced
+        """
+        import re
+
+        # Pattern to match: "have <name> : ... := by sorry" in the parent's original text
+        # The parent sketch has the original signature without extra parameters
+        pattern = rf"(have\s+{re.escape(have_name)}\s*:.*?:=\s*by\s*)sorry"
+
+        # Find the match to determine indentation
+        match = re.search(pattern, parent_sketch, re.DOTALL)
+        if not match:
+            # Pattern not found, return unchanged
+            return parent_sketch
+
+        # Determine the indentation level of the have statement
+        start_pos = match.start()
+        # Find the start of the line containing this have
+        line_start = parent_sketch.rfind("\n", 0, start_pos) + 1
+        have_line = parent_sketch[line_start:start_pos]
+        base_indent = len(have_line) - len(have_line.lstrip())
+
+        # Add two spaces for the indentation of the proof body
+        proof_indent = " " * (base_indent + 2)
+
+        # Indent the child proof body
+        indented_proof = self._indent_proof_body(child_proof_body, proof_indent)
+
+        # Replace sorry with the indented proof
+        result = re.sub(pattern, rf"\1\n{indented_proof}", parent_sketch, count=1, flags=re.DOTALL)
+
+        return result
+
+    def _replace_main_body_sorry(self, parent_sketch: str, child_proof_body: str) -> str:
+        """
+        Replaces a standalone sorry (not part of a have statement) with the actual proof body.
+        This handles the main proof body after all have statements.
+
+        Parameters
+        ----------
+        parent_sketch : str
+            The parent's proof sketch
+        child_proof_body : str
+            The proof body to insert
+
+        Returns
+        -------
+        str
+            The modified sketch with the main body sorry replaced
+        """
+
+        # Find a standalone sorry that's not part of a have statement
+        # This pattern looks for sorry that's not preceded by ":= by" on the same logical line
+        # We need to find the last sorry in the sketch that's at the end after all have statements
+
+        # Split into lines to find standalone sorry
+        lines = parent_sketch.split("\n")
+
+        # Find the last line that contains just "sorry" (possibly with indentation)
+        # that is NOT on the same line as ":= by"
+        last_sorry_idx = -1
+        for i in range(len(lines) - 1, -1, -1):
+            stripped = lines[i].strip()
+            # Check if this is not part of a ":= by sorry" pattern on the SAME line
+            # by checking if this line contains ":= by" before the sorry
+            if stripped == "sorry" and ":= by" not in lines[i]:
+                last_sorry_idx = i
+                break
+
+        if last_sorry_idx == -1:
+            # No standalone sorry found
+            return parent_sketch
+
+        # Get the indentation of the sorry line
+        sorry_line = lines[last_sorry_idx]
+        base_indent = len(sorry_line) - len(sorry_line.lstrip())
+        indent_str = " " * base_indent
+
+        # Indent the child proof body to match the sorry's indentation
+        indented_proof = self._indent_proof_body(child_proof_body, indent_str)
+
+        # Replace the sorry line with the indented proof
+        lines[last_sorry_idx] = indented_proof
+
+        return "\n".join(lines)
+
+    def _indent_proof_body(self, proof_body: str, indent: str) -> str:
+        """
+        Indents each line of the proof body.
+
+        Parameters
+        ----------
+        proof_body : str
+            The proof body to indent
+        indent : str
+            The indentation string to add
+
+        Returns
+        -------
+        str
+            The indented proof body
+        """
+        lines = proof_body.split("\n")
+        indented_lines = []
+        for line in lines:
+            if line.strip():  # Only indent non-empty lines
+                indented_lines.append(indent + line)
+            else:
+                indented_lines.append(line)
+        return "\n".join(indented_lines)
