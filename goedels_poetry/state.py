@@ -1242,20 +1242,18 @@ class GoedelsPoetryStateManager:
         str
             The tactic sequence (indented appropriately)
         """
-        # Find the := by pattern
-        by_pattern = ":= by"
-        idx = proof.find(by_pattern)
-        if idx == -1:
-            # Try alternative patterns
-            by_pattern = ":=by"
-            idx = proof.find(by_pattern)
+        import re
 
-        if idx == -1:
-            # Can't find 'by', return the whole proof
+        # Match ':=' followed by any whitespace (including newlines), then 'by'
+        # This handles all variations: ':= by', ':=by', ':=  by', ':=\nby', etc.
+        match = re.search(r":=\s*by", proof)
+
+        if match is None:
+            # Can't find ':= by' pattern, return the whole proof
             return proof.strip()
 
         # Extract everything after 'by'
-        tactics = proof[idx + len(by_pattern) :].strip()
+        tactics = proof[match.end() :].strip()
         return tactics
 
     def _inline_child_proof(self, parent_sketch: str, child: TreeNode, child_proof_body: str) -> str:
@@ -1333,20 +1331,17 @@ class GoedelsPoetryStateManager:
         str
             The name of the have/lemma
         """
-        # Pattern: "lemma name" or "have name" followed by space, colon, or opening paren
-        for keyword in ["lemma ", "have ", "theorem "]:
-            if keyword in formal_theorem:
-                start = formal_theorem.find(keyword) + len(keyword)
-                rest = formal_theorem[start:].strip()
+        import re
 
-                # Find the first delimiter: space, colon, or opening paren
-                # The name ends at whichever comes first
-                delimiters = [" ", ":", "("]
-                end_positions = [rest.find(d) for d in delimiters if rest.find(d) != -1]
+        # Pattern: (lemma|have|theorem) followed by whitespace, then a name (identifier),
+        # then followed by whitespace, colon, or opening paren
+        # This properly matches at word boundaries and handles arbitrary whitespace
+        pattern = r"\b(lemma|have|theorem)\s+(\w+)\s*[:(]"
+        match = re.search(pattern, formal_theorem)
 
-                if end_positions:
-                    end = min(end_positions)
-                    return rest[:end].strip()
+        if match:
+            return match.group(2)  # Return the captured name (second group)
+
         return ""
 
     def _replace_sorry_for_have(self, parent_sketch: str, have_name: str, child_proof_body: str) -> str:
@@ -1419,22 +1414,23 @@ class GoedelsPoetryStateManager:
         str
             The modified sketch with the main body sorry replaced
         """
+        import re
 
         # Find a standalone sorry that's not part of a have statement
-        # This pattern looks for sorry that's not preceded by ":= by" on the same logical line
+        # This pattern looks for sorry that's not preceded by ":= <whitespace> by" on the same logical line
         # We need to find the last sorry in the sketch that's at the end after all have statements
 
         # Split into lines to find standalone sorry
         lines = parent_sketch.split("\n")
 
         # Find the last line that contains just "sorry" (possibly with indentation)
-        # that is NOT on the same line as ":= by"
+        # that is NOT on the same line as ":= by" (with any whitespace between := and by)
         last_sorry_idx = -1
         for i in range(len(lines) - 1, -1, -1):
             stripped = lines[i].strip()
-            # Check if this is not part of a ":= by sorry" pattern on the SAME line
-            # by checking if this line contains ":= by" before the sorry
-            if stripped == "sorry" and ":= by" not in lines[i]:
+            # Check if this is not part of a ":=\s*by sorry" pattern on the SAME line
+            # by checking if this line contains the pattern before the sorry
+            if stripped == "sorry" and not re.search(r":=\s*by", lines[i]):
                 last_sorry_idx = i
                 break
 

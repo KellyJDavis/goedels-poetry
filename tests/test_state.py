@@ -1098,3 +1098,61 @@ def test_reconstruct_complete_proof_empty_proof() -> None:
     finally:
         with suppress(Exception):
             GoedelsPoetryState.clear_theorem_directory(theorem)
+
+
+def test_reconstruct_complete_proof_whitespace_robustness() -> None:
+    """Test that reconstruct handles various whitespace variations in ':= by' patterns."""
+    import uuid
+
+    from goedels_poetry.state import GoedelsPoetryStateManager
+
+    theorem = f"theorem whitespace_test_{uuid.uuid4()} : True"
+
+    with suppress(Exception):
+        GoedelsPoetryState.clear_theorem_directory(theorem)
+
+    try:
+        state = GoedelsPoetryState(formal_theorem=theorem)
+
+        # Create child proofs with various whitespace patterns
+        child1_proof = "lemma h1 : 1 = 1 :=  by rfl"  # Two spaces
+        child2_proof = "lemma h2 : 2 = 2 :=by rfl"  # No space
+
+        # Test _extract_tactics_after_by with various patterns
+        manager = GoedelsPoetryStateManager(state)
+
+        # Test with two spaces
+        tactics1 = manager._extract_tactics_after_by(child1_proof)
+        assert tactics1 == "rfl", f"Expected 'rfl', got '{tactics1}'"
+
+        # Test with no space
+        tactics2 = manager._extract_tactics_after_by(child2_proof)
+        assert tactics2 == "rfl", f"Expected 'rfl', got '{tactics2}'"
+
+        # Test with newline (unlikely but should handle)
+        proof_with_newline = "lemma h3 : 3 = 3 :=\n  by rfl"
+        tactics3 = manager._extract_tactics_after_by(proof_with_newline)
+        assert tactics3 == "rfl", f"Expected 'rfl', got '{tactics3}'"
+
+        # Test _extract_have_name with various whitespace patterns
+        name1 = manager._extract_have_name("lemma  h1  : 1 = 1 := by sorry")  # Multiple spaces
+        assert name1 == "h1", f"Expected 'h1', got '{name1}'"
+
+        name2 = manager._extract_have_name("have\th2\t: 2 = 2 := by sorry")  # Tabs
+        assert name2 == "h2", f"Expected 'h2', got '{name2}'"
+
+        name3 = manager._extract_have_name("theorem my_theorem(x : Nat) : True := by sorry")  # Paren delimiter
+        assert name3 == "my_theorem", f"Expected 'my_theorem', got '{name3}'"
+
+        # Test _replace_main_body_sorry doesn't get confused by ":=  by" with multiple spaces
+        sketch_for_test = """theorem test : True := by
+  have h : 1 = 1 :=  by rfl
+  sorry"""
+        result = manager._replace_main_body_sorry(sketch_for_test, "exact trivial")
+        assert "exact trivial" in result
+        # Should only replace the standalone sorry, not the one in "have"
+        assert result.count("rfl") == 1
+
+    finally:
+        with suppress(Exception):
+            GoedelsPoetryState.clear_theorem_directory(theorem)
