@@ -71,6 +71,8 @@ class SupervisorAgent:
             return "check_proof_sketches_syntax"
         if self._state_manager.get_sketches_to_correct()["inputs"]:
             return "request_proof_sketches_corrections"
+        if self._state_manager.get_sketches_to_backtrack()["inputs"]:
+            return "request_proof_sketches_backtrack"
         if self._state_manager.get_sketches_to_parse()["inputs"]:
             return "parse_proof_sketches"
         if self._state_manager.get_sketches_to_decompose()["inputs"]:
