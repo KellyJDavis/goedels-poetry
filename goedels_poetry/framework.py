@@ -1,3 +1,4 @@
+import traceback
 from typing import cast
 
 from langchain_core.language_models.chat_models import BaseChatModel
@@ -284,4 +285,20 @@ class GoedelsPoetryFramework:
         """
         Finishes the proof process.
         """
-        print("Finished")  # TODO Print out details on the final state
+        # Print the reason for finishing
+        reason = self._state_manager.reason if self._state_manager.reason else "Unknown reason"
+        print(f"\n{'=' * 80}")
+        print(f"Proof process completed: {reason}")
+        print(f"{'=' * 80}\n")
+
+        # If successful, print the complete proof
+        if self._state_manager.reason == "Proof completed successfully.":
+            try:
+                complete_proof = self._state_manager.reconstruct_complete_proof()
+                print("Complete Lean4 Proof:")
+                print("-" * 80)
+                print(complete_proof)
+                print("-" * 80)
+            except (AttributeError, KeyError, TypeError, ValueError) as e:
+                print(f"Error reconstructing proof: {e}")
+                traceback.print_exc()
