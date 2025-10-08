@@ -1,6 +1,7 @@
 import warnings
 
 from langchain_ollama import ChatOllama
+from langchain_openai import ChatOpenAI
 from ollama import ResponseError, chat, pull
 from rich.console import Console
 from tqdm import tqdm
@@ -81,7 +82,6 @@ _LLMS = [
     parsed_config.get(section="FORMALIZER_AGENT_LLM", option="model", fallback="kdavis/goedel-formalizer-v2:32b"),
     parsed_config.get(section="PROVER_AGENT_LLM", option="model", fallback="kdavis/Goedel-Prover-V2:32b"),
     parsed_config.get(section="SEMANTICS_AGENT_LLM", option="model", fallback="qwen3:30b"),
-    parsed_config.get(section="DECOMPOSER_AGENT_LLM", option="model", fallback="qwen3:30b"),
 ]
 
 
@@ -119,11 +119,12 @@ SEMANTICS_AGENT_LLM = _create_llm_safe(
     num_predict=50000,
     num_ctx=parsed_config.getint(section="SEMANTICS_AGENT_LLM", option="num_ctx", fallback=262144),
 )
-DECOMPOSER_AGENT_LLM = _create_llm_safe(
-    model=parsed_config.get(section="DECOMPOSER_AGENT_LLM", option="model", fallback="qwen3:30b"),
-    validate_model_on_init=True,
-    num_predict=50000,
-    num_ctx=parsed_config.getint(section="DECOMPOSER_AGENT_LLM", option="num_ctx", fallback=262144),
+DECOMPOSER_AGENT_LLM = ChatOpenAI(
+    model=parsed_config.get(section="DECOMPOSER_AGENT_LLM", option="model", fallback="gpt-5-2025-08-07"),
+    max_completion_tokens=parsed_config.getint(
+        section="DECOMPOSER_AGENT_LLM", option="max_completion_tokens", fallback=50000
+    ),
+    max_retries=parsed_config.getint(section="DECOMPOSER_AGENT_LLM", option="max_remote_retries", fallback=5),
 )
 
 # Create LLM configurations
