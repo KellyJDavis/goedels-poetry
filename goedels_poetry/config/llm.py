@@ -119,7 +119,33 @@ SEMANTICS_AGENT_LLM = _create_llm_safe(
     num_predict=50000,
     num_ctx=parsed_config.getint(section="SEMANTICS_AGENT_LLM", option="num_ctx", fallback=262144),
 )
-DECOMPOSER_AGENT_LLM = ChatOpenAI(
+
+
+def _create_openai_llm_safe(**kwargs):  # type: ignore[no-untyped-def]
+    """Create a ChatOpenAI instance, with error handling for missing API keys in test/CI environments."""
+    import os
+
+    try:
+        return ChatOpenAI(**kwargs)
+    except Exception:
+        # In test/CI environments without OPENAI_API_KEY, create with a dummy key
+        # This allows module imports to succeed for testing non-OpenAI functionality
+        if "OPENAI_API_KEY" not in os.environ or not os.environ["OPENAI_API_KEY"]:
+            warnings.warn(
+                "OPENAI_API_KEY not set. OpenAI LLM functionality will not work until "
+                "the API key is configured. Set the OPENAI_API_KEY environment variable.",
+                UserWarning,
+                stacklevel=2,
+            )
+            # Set a dummy key to allow module import
+            os.environ["OPENAI_API_KEY"] = "dummy-key-for-testing"
+            return ChatOpenAI(**kwargs)
+        else:
+            # Re-raise if it's a different error
+            raise
+
+
+DECOMPOSER_AGENT_LLM = _create_openai_llm_safe(
     model=parsed_config.get(section="DECOMPOSER_AGENT_LLM", option="model", fallback="gpt-5-2025-08-07"),
     max_completion_tokens=parsed_config.getint(
         section="DECOMPOSER_AGENT_LLM", option="max_completion_tokens", fallback=50000
