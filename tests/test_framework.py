@@ -1,4 +1,8 @@
-"""Tests for goedels_poetry.framework module."""
+"""Tests for goedels_poetry.framework module.
+
+Note: These tests require Python 3.10+ due to kimina-client dependency compatibility.
+Imports are deferred to test execution time to avoid collection errors on Python 3.9.
+"""
 
 import os
 import sys
@@ -10,16 +14,6 @@ from unittest.mock import patch
 
 import pytest
 
-# Skip this entire module on Python < 3.10 due to kimina-client dependency using
-# PEP 604 union syntax (X | Y) which is not available in Python 3.9
-pytestmark = pytest.mark.skipif(
-    sys.version_info < (3, 10),
-    reason="Requires Python 3.10+ due to kimina-client dependency syntax",
-)
-
-from goedels_poetry.framework import GoedelsPoetryConfig, GoedelsPoetryFramework  # noqa: E402
-from goedels_poetry.state import GoedelsPoetryState, GoedelsPoetryStateManager  # noqa: E402
-
 
 def test_finish_called_when_is_finished_set_in_action() -> None:
     """
@@ -29,6 +23,16 @@ def test_finish_called_when_is_finished_set_in_action() -> None:
     This is a unit test that simulates the bug scenario without requiring all the agent
     machinery or a real Lean server.
     """
+    # Skip on Python < 3.10 due to kimina-client dependency issues
+    if sys.version_info < (3, 10):
+        pytest.skip("Requires Python 3.10+ due to kimina-client dependency syntax")
+
+    # Import at test execution time to avoid collection errors on Python 3.9
+    from unittest.mock import MagicMock
+
+    from goedels_poetry.framework import GoedelsPoetryConfig, GoedelsPoetryFramework
+    from goedels_poetry.state import GoedelsPoetryState, GoedelsPoetryStateManager
+
     old_env = os.environ.get("GOEDELS_POETRY_DIR")
     theorem = f"theorem test_finish_{uuid.uuid4()} : True"
 
@@ -43,8 +47,14 @@ def test_finish_called_when_is_finished_set_in_action() -> None:
             # Clear all queues so supervisor would normally return "finish"
             manager._state.proof_syntax_queue.clear()
 
-            # Create framework
-            config = GoedelsPoetryConfig()
+            # Create framework with mocked LLMs (GitHub CI has no access to LLMs)
+            mock_llm = MagicMock()
+            config = GoedelsPoetryConfig(
+                formalizer_agent_llm=mock_llm,
+                prover_agent_llm=mock_llm,
+                semantics_agent_llm=mock_llm,
+                decomposer_agent_llm=mock_llm,
+            )
             framework = GoedelsPoetryFramework(config=config, state_manager=manager)
 
             # Create a custom action that sets is_finished=True mid-execution
@@ -100,6 +110,16 @@ def test_finish_not_called_twice_when_supervisor_returns_finish() -> None:
 
     This ensures our fix doesn't cause finish() to be called twice in the normal success case.
     """
+    # Skip on Python < 3.10 due to kimina-client dependency issues
+    if sys.version_info < (3, 10):
+        pytest.skip("Requires Python 3.10+ due to kimina-client dependency syntax")
+
+    # Import at test execution time to avoid collection errors on Python 3.9
+    from unittest.mock import MagicMock
+
+    from goedels_poetry.framework import GoedelsPoetryConfig, GoedelsPoetryFramework
+    from goedels_poetry.state import GoedelsPoetryState, GoedelsPoetryStateManager
+
     old_env = os.environ.get("GOEDELS_POETRY_DIR")
     theorem = f"theorem test_normal_finish_{uuid.uuid4()} : True"
 
@@ -114,7 +134,14 @@ def test_finish_not_called_twice_when_supervisor_returns_finish() -> None:
             # Clear all queues so supervisor returns finish immediately
             manager._state.proof_syntax_queue.clear()
 
-            config = GoedelsPoetryConfig()
+            # Create framework with mocked LLMs (GitHub CI has no access to LLMs)
+            mock_llm = MagicMock()
+            config = GoedelsPoetryConfig(
+                formalizer_agent_llm=mock_llm,
+                prover_agent_llm=mock_llm,
+                semantics_agent_llm=mock_llm,
+                decomposer_agent_llm=mock_llm,
+            )
             framework = GoedelsPoetryFramework(config=config, state_manager=manager)
 
             # Capture output
