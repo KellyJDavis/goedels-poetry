@@ -98,6 +98,12 @@ class GoedelsPoetryFramework:
             self._state_manager.add_action(action)
             getattr(self, action)()
 
+        # Ensure finish() is called if it wasn't the last action
+        # This handles cases where is_finished was set inside an action method
+        if self._state_manager._state.action_history and self._state_manager._state.action_history[-1] != "finish":
+            self._state_manager.add_action("finish")
+            self.finish()
+
     def formalize_informal_theorem(self) -> None:
         """
         Formalizes the pending informal theorem
