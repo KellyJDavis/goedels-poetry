@@ -1,14 +1,24 @@
 """Tests for goedels_poetry.framework module."""
 
 import os
+import sys
 import tempfile
 import uuid
 from contextlib import suppress
 from io import StringIO
 from unittest.mock import patch
 
-from goedels_poetry.framework import GoedelsPoetryConfig, GoedelsPoetryFramework
-from goedels_poetry.state import GoedelsPoetryState, GoedelsPoetryStateManager
+import pytest
+
+# Skip this entire module on Python < 3.10 due to kimina-client dependency using
+# PEP 604 union syntax (X | Y) which is not available in Python 3.9
+pytestmark = pytest.mark.skipif(
+    sys.version_info < (3, 10),
+    reason="Requires Python 3.10+ due to kimina-client dependency syntax",
+)
+
+from goedels_poetry.framework import GoedelsPoetryConfig, GoedelsPoetryFramework  # noqa: E402
+from goedels_poetry.state import GoedelsPoetryState, GoedelsPoetryStateManager  # noqa: E402
 
 
 def test_finish_called_when_is_finished_set_in_action() -> None:
