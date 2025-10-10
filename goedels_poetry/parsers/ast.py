@@ -15,7 +15,7 @@ class AST:
     Class representing Lean code's abstract syntax tree (AST).
     """
 
-    def __init__(self, ast: dict[str, Any]):
+    def __init__(self, ast: dict[str, Any], sorries: list[dict[str, Any]] | None = None):
         """
         Constructs an AST using the AST dict[str, Any] representation provided by the Kimin server.
 
@@ -23,8 +23,11 @@ class AST:
         ----------
         ast: dict[str, Any]
             The AST representation provided by the Kimin server.
+        sorries: list[dict[str, Any]] | None
+            Optional list of sorry entries from check response containing goal context with type information.
         """
         self._ast: dict[str, Any] = ast
+        self._sorries: list[dict[str, Any]] = sorries or []
 
     def get_ast(self) -> dict[str, Any] | list[Any]:
         """
@@ -81,5 +84,5 @@ class AST:
         str
             The Lean code of the named subgoal.
         """
-        rewritten_subgoal_ast = _get_named_subgoal_rewritten_ast(self._ast, subgoal_name)
+        rewritten_subgoal_ast = _get_named_subgoal_rewritten_ast(self._ast, subgoal_name, self._sorries)
         return str(_ast_to_code(rewritten_subgoal_ast))

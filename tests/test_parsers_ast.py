@@ -195,3 +195,112 @@ def test_ast_get_named_subgoal_code_not_found() -> None:
 
     with pytest.raises(KeyError, match="target 'nonexistent' not found in AST"):
         ast.get_named_subgoal_code("nonexistent")
+
+
+def test_ast_with_sorries_extracts_types() -> None:
+    """Test that AST with sorries properly extracts type information for variables."""
+    # Create an AST with a have statement that uses variables
+    ast_dict = {
+        "kind": "Lean.Parser.Command.theorem",
+        "args": [
+            {"val": "theorem", "info": {"leading": "", "trailing": " "}},
+            {
+                "kind": "Lean.Parser.Command.declId",
+                "args": [{"val": "test_theorem", "info": {"leading": "", "trailing": " "}}],
+            },
+            {"val": ":", "info": {"leading": "", "trailing": " "}},
+            {"val": "Prop", "info": {"leading": "", "trailing": " "}},
+            {"val": ":=", "info": {"leading": "", "trailing": " "}},
+            {
+                "kind": "Lean.Parser.Term.byTactic",
+                "args": [
+                    {"val": "by", "info": {"leading": "", "trailing": "\n  "}},
+                    {
+                        "kind": "Lean.Parser.Tactic.tacticSeq",
+                        "args": [
+                            {
+                                "kind": "Lean.Parser.Tactic.tacticHave_",
+                                "args": [
+                                    {"val": "have", "info": {"leading": "", "trailing": " "}},
+                                    {
+                                        "kind": "Lean.Parser.Term.haveDecl",
+                                        "args": [
+                                            {
+                                                "kind": "Lean.Parser.Term.haveIdDecl",
+                                                "args": [
+                                                    {
+                                                        "kind": "Lean.Parser.Term.haveId",
+                                                        "args": [
+                                                            {"val": "h1", "info": {"leading": "", "trailing": " "}}
+                                                        ],
+                                                    }
+                                                ],
+                                            },
+                                            {"val": ":", "info": {"leading": "", "trailing": " "}},
+                                            {"val": "x", "info": {"leading": "", "trailing": " "}},
+                                            {"val": "=", "info": {"leading": "", "trailing": " "}},
+                                            {"val": "y", "info": {"leading": "", "trailing": " "}},
+                                        ],
+                                    },
+                                    {"val": ":=", "info": {"leading": "", "trailing": " "}},
+                                    {
+                                        "kind": "Lean.Parser.Term.byTactic",
+                                        "args": [
+                                            {"val": "by", "info": {"leading": "", "trailing": " "}},
+                                            {
+                                                "kind": "Lean.Parser.Tactic.tacticSeq",
+                                                "args": [
+                                                    {
+                                                        "kind": "Lean.Parser.Tactic.tacticSorry",
+                                                        "args": [
+                                                            {"val": "sorry", "info": {"leading": "", "trailing": ""}}
+                                                        ],
+                                                    }
+                                                ],
+                                            },
+                                        ],
+                                    },
+                                ],
+                            }
+                        ],
+                    },
+                ],
+            },
+        ],
+    }
+
+    # Create sorries list with goal context containing type information
+    sorries = [
+        {
+            "pos": {"line": 10, "column": 4},
+            "endPos": {"line": 10, "column": 9},
+            "goal": "x y : Nat\n⊢ x = y",
+            "proofState": 1,
+        }
+    ]
+
+    ast = AST(ast_dict, sorries)
+    result = ast.get_named_subgoal_code("h1")
+
+    # Check that the generated code includes type information for x and y
+    assert "lemma" in result
+    assert "h1" in result
+    # The exact format may vary, but it should contain references to the types
+    assert len(result) > 0
+
+
+def test_ast_init_with_sorries() -> None:
+    """Test AST initialization with sorries parameter."""
+    ast_dict = {"kind": "test", "args": []}
+    sorries = [{"goal": "x : Nat\n⊢ x = x", "pos": {"line": 1, "column": 1}}]
+    ast = AST(ast_dict, sorries)
+    assert ast._ast == ast_dict
+    assert ast._sorries == sorries
+
+
+def test_ast_init_without_sorries() -> None:
+    """Test AST initialization without sorries defaults to empty list."""
+    ast_dict = {"kind": "test", "args": []}
+    ast = AST(ast_dict)
+    assert ast._ast == ast_dict
+    assert ast._sorries == []

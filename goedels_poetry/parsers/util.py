@@ -337,18 +337,126 @@ def __make_binder(name: str, type_ast: Optional[dict]) -> dict:
 # ---------------------------
 
 
-def _get_named_subgoal_rewritten_ast(ast: Node, target_name: str) -> dict:  # noqa: C901
+def __parse_goal_context(goal: str) -> dict[str, str]:
+    """
+    Parse the goal string to extract variable type declarations.
+
+    Example goal string:
+        "O A C B D : Complex
+        hd₁ : ¬B = D
+        hd₂ : ¬C = D
+        ⊢ some_goal"
+
+    Returns a dict mapping variable names to their types.
+    """
+    var_types: dict[str, str] = {}
+    lines = goal.split("\n")
+
+    for line in lines:
+        line = line.strip()
+        # Stop at the turnstile (goal separator)
+        if line.startswith("⊢"):
+            break
+
+        # Check if line contains a type declaration (has colon)
+        if ":" not in line:
+            continue
+
+        # Split at the last colon to separate name(s) from type
+        parts = line.rsplit(":", 1)
+        if len(parts) != 2:
+            continue
+
+        names_part = parts[0].strip()
+        type_part = parts[1].strip()
+
+        # Handle multiple variables with same type (e.g., "O A C B D : Complex")
+        names = names_part.split()
+        for name in names:
+            var_types[name] = type_part
+
+    return var_types
+
+
+def __make_binder_from_type_string(name: str, type_str: str) -> dict:
+    """
+    Create a binder AST node from a name and type string.
+    """
+    # Create a simple type AST node from the string
+    type_ast = {"val": type_str, "info": {"leading": " ", "trailing": " "}}
+    return __make_binder(name, type_ast)
+
+
+def __is_referenced_in(subtree: Node, name: str) -> bool:
+    """
+    Check if a variable name is referenced in the given subtree.
+    """
+    if isinstance(subtree, dict):
+        # Check if this node has a val that matches the name
+        if subtree.get("val") == name:
+            # Make sure it's not a binding occurrence
+            kind = subtree.get("kind", "")
+            if kind not in {
+                "Lean.Parser.Term.haveId",
+                "Lean.Parser.Command.declId",
+                "Lean.binderIdent",
+                "Lean.Parser.Term.binderIdent",
+            }:
+                return True
+        # Recurse into children
+        for v in subtree.values():
+            if __is_referenced_in(v, name):
+                return True
+    elif isinstance(subtree, list):
+        for item in subtree:
+            if __is_referenced_in(item, name):
+                return True
+    return False
+
+
+def _get_named_subgoal_rewritten_ast(ast: Node, target_name: str, sorries: list[dict[str, Any]] | None = None) -> dict:  # noqa: C901
     name_map = __collect_named_decls(ast)
     if target_name not in name_map:
         raise KeyError(f"target '{target_name}' not found in AST")  # noqa: TRY003
     target = deepcopy(name_map[target_name])
+
+    # Find the corresponding sorry entry with goal context
+    goal_var_types: dict[str, str] = {}
+    if sorries:
+        for sorry in sorries:
+            # We'll try to match sorries by looking for the target name in the goal context
+            goal = sorry.get("goal", "")
+            if goal:
+                # Parse all variable types from this goal
+                parsed_types = __parse_goal_context(goal)
+                # Check if this goal contains variables we need
+                # For now, we'll use the first sorry's context or try to find the most relevant one
+                if (not goal_var_types and parsed_types) or target_name in goal:
+                    goal_var_types = parsed_types
+
     deps = __find_dependencies(target, name_map)
     binders: list[dict] = []
     for d in sorted(deps):
-        dep_node = name_map.get(d)
-        dep_type_ast = __extract_type_ast(dep_node) if dep_node is not None else None
-        binder = __make_binder(d, dep_type_ast)
+        # Prioritize goal context types (from sorries) as they're more specific and complete
+        if d in goal_var_types:
+            binder = __make_binder_from_type_string(d, goal_var_types[d])
+        else:
+            # Fall back to AST extraction if no goal context available
+            dep_node = name_map.get(d)
+            dep_type_ast = __extract_type_ast(dep_node) if dep_node is not None else None
+            binder = __make_binder(d, dep_type_ast)
         binders.append(binder)
+
+    # Also add any variables from the goal context that aren't dependencies but are used
+    defined_in_target = __collect_defined_names(target)
+    for var_name in sorted(goal_var_types.keys()):
+        # Skip if already added as dependency or defined within target
+        if var_name not in set(deps) and var_name not in defined_in_target and var_name != target_name:
+            # Check if this variable is actually referenced in the target
+            referenced = __is_referenced_in(target, var_name)
+            if referenced:
+                binder = __make_binder_from_type_string(var_name, goal_var_types[var_name])
+                binders.append(binder)
 
     # find a proof node or fallback to minimal 'by ... sorry'
     proof_node = __find_first(
