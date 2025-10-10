@@ -1,7 +1,8 @@
 import traceback
-from typing import cast
+from typing import Optional, cast
 
 from langchain_core.language_models.chat_models import BaseChatModel
+from rich.console import Console
 
 from goedels_poetry.agents.formal_theorem_syntax_agent import FormalTheoremSyntaxAgentFactory
 from goedels_poetry.agents.formalizer_agent import FormalizerAgentFactory
@@ -82,9 +83,15 @@ class GoedelsPoetryFramework:
     multi-agent system. The framework will be controlled by a supervisor agent.
     """
 
-    def __init__(self, config: GoedelsPoetryConfig, state_manager: GoedelsPoetryStateManager):
+    def __init__(
+        self,
+        config: GoedelsPoetryConfig,
+        state_manager: GoedelsPoetryStateManager,
+        console: Optional[Console] = None,
+    ):
         self._config = config
         self._state_manager = state_manager
+        self._console = console if console is not None else Console()
 
     def run(self) -> None:
         """
@@ -293,18 +300,18 @@ class GoedelsPoetryFramework:
         """
         # Print the reason for finishing
         reason = self._state_manager.reason if self._state_manager.reason else "Unknown reason"
-        print(f"\n{'=' * 80}")
-        print(f"Proof process completed: {reason}")
-        print(f"{'=' * 80}\n")
+        self._console.print(f"\n{'=' * 80}")
+        self._console.print(f"Proof process completed: {reason}")
+        self._console.print(f"{'=' * 80}\n")
 
         # If successful, print the complete proof
         if self._state_manager.reason == "Proof completed successfully.":
             try:
                 complete_proof = self._state_manager.reconstruct_complete_proof()
-                print("Complete Lean4 Proof:")
-                print("-" * 80)
-                print(complete_proof)
-                print("-" * 80)
+                self._console.print("Complete Lean4 Proof:")
+                self._console.print("-" * 80)
+                self._console.print(complete_proof)
+                self._console.print("-" * 80)
             except (AttributeError, KeyError, TypeError, ValueError) as e:
-                print(f"Error reconstructing proof: {e}")
-                traceback.print_exc()
+                self._console.print(f"Error reconstructing proof: {e}")
+                self._console.print(traceback.format_exc())
