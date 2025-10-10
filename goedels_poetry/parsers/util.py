@@ -414,7 +414,9 @@ def __is_referenced_in(subtree: Node, name: str) -> bool:
     return False
 
 
-def _get_named_subgoal_rewritten_ast(ast: Node, target_name: str, sorries: list[dict[str, Any]] | None = None) -> dict:  # noqa: C901
+def _get_named_subgoal_rewritten_ast(  # noqa: C901
+    ast: Node, target_name: str, sorries: Optional[list[dict[str, Any]]] = None
+) -> dict:
     name_map = __collect_named_decls(ast)
     if target_name not in name_map:
         raise KeyError(f"target '{target_name}' not found in AST")  # noqa: TRY003
