@@ -22,6 +22,9 @@ from goedels_poetry.config.llm import (
     PROVER_AGENT_MAX_DEPTH,
     PROVER_AGENT_MAX_RETRIES,
 )
+
+# Note: FORMALIZER_AGENT_LLM and SEMANTICS_AGENT_LLM are intentionally NOT imported here
+# to allow lazy loading when processing formal theorems (which don't need these models)
 from goedels_poetry.functools import maybe_save
 from goedels_poetry.util.tree import TreeNode
 

@@ -23,11 +23,11 @@ from goedels_poetry.agents.supervisor_agent import SupervisorAgentFactory
 from goedels_poetry.config.kimina_server import KIMINA_LEAN_SERVER
 from goedels_poetry.config.llm import (
     DECOMPOSER_AGENT_LLM,
-    FORMALIZER_AGENT_LLM,
     FORMALIZER_AGENT_MAX_RETRIES,
     PROVER_AGENT_LLM,
     PROVER_AGENT_MAX_RETRIES,
-    SEMANTICS_AGENT_LLM,
+    get_formalizer_agent_llm,
+    get_semantics_agent_llm,
 )
 from goedels_poetry.state import GoedelsPoetryStateManager
 
@@ -38,14 +38,15 @@ class GoedelsPoetryConfig:
 
     Attributes
     ----------
-    formalizer_agent_llm : BaseChatModel
-        The language model that formalizes informal statements.
+    formalizer_agent_llm : BaseChatModel | None
+        The language model that formalizes informal statements. Lazy-loaded on first access.
     prover_agent_llm : BaseChatModel
         The language model that proves formal statements.
     prover_agent_max_retries : int
         The the max number of retries for the prover agent
-    semantics_agent_llm : BaseChatModel
-        The language model that judges if a formalization retains the informal statement's semantics
+    semantics_agent_llm : BaseChatModel | None
+        The language model that judges if a formalization retains the informal statement's semantics.
+        Lazy-loaded on first access.
     decomposer_agent_llm : BaseChatModel
         The language model that decomposes a formal statement into formal statement that entail the
         formal statement
@@ -58,23 +59,37 @@ class GoedelsPoetryConfig:
 
     def __init__(
         self,
-        formalizer_agent_llm: BaseChatModel = FORMALIZER_AGENT_LLM,
+        formalizer_agent_llm: Optional[BaseChatModel] = None,
         formalizer_agent_max_retries: int = FORMALIZER_AGENT_MAX_RETRIES,
         prover_agent_llm: BaseChatModel = PROVER_AGENT_LLM,
         prover_agent_max_retries: int = PROVER_AGENT_MAX_RETRIES,
-        semantics_agent_llm: BaseChatModel = SEMANTICS_AGENT_LLM,
+        semantics_agent_llm: Optional[BaseChatModel] = None,
         decomposer_agent_llm: BaseChatModel = DECOMPOSER_AGENT_LLM,
         kimina_lean_server_url: str = KIMINA_LEAN_SERVER["url"],
         kimina_lean_server_max_retries: int = KIMINA_LEAN_SERVER["max_retries"],
     ):
-        self.formalizer_agent_llm = formalizer_agent_llm
+        self._formalizer_agent_llm = formalizer_agent_llm
         self.formalizer_agent_max_retries = formalizer_agent_max_retries
         self.prover_agent_llm = prover_agent_llm
         self.prover_agent_max_retries = prover_agent_max_retries
-        self.semantics_agent_llm = semantics_agent_llm
+        self._semantics_agent_llm = semantics_agent_llm
         self.decomposer_agent_llm = decomposer_agent_llm
         self.kimina_lean_server_url = kimina_lean_server_url
         self.kimina_lean_server_max_retries = kimina_lean_server_max_retries
+
+    @property
+    def formalizer_agent_llm(self) -> BaseChatModel:
+        """Lazy-load the formalizer LLM on first access."""
+        if self._formalizer_agent_llm is None:
+            self._formalizer_agent_llm = get_formalizer_agent_llm()
+        return self._formalizer_agent_llm
+
+    @property
+    def semantics_agent_llm(self) -> BaseChatModel:
+        """Lazy-load the semantics LLM on first access."""
+        if self._semantics_agent_llm is None:
+            self._semantics_agent_llm = get_semantics_agent_llm()
+        return self._semantics_agent_llm
 
 
 class GoedelsPoetryFramework:
