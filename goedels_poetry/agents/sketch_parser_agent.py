@@ -7,6 +7,7 @@ from langgraph.types import Send
 
 from goedels_poetry.agents.state import DecomposedFormalTheoremState, DecomposedFormalTheoremStates
 from goedels_poetry.agents.util.common import add_default_imports, remove_default_imports_from_ast
+from goedels_poetry.agents.util.debug import log_kimina_response
 from goedels_poetry.agents.util.kimina_server import parse_kimina_ast_code_response
 from goedels_poetry.parsers.ast import AST
 
@@ -117,6 +118,9 @@ def _parse_sketch(
 
     # Parse ast_code_response
     parsed_response = parse_kimina_ast_code_response(ast_code_response)
+
+    # Log debug response
+    log_kimina_response("ast_code", parsed_response)
 
     # Remove DEFAULT_IMPORTS from the parsed AST
     ast_without_imports = remove_default_imports_from_ast(parsed_response["ast"])

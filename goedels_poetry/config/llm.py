@@ -80,7 +80,6 @@ def _download_llms(llms: list[str]) -> None:
 # LLMS to download
 _LLMS = [
     parsed_config.get(section="FORMALIZER_AGENT_LLM", option="model", fallback="kdavis/goedel-formalizer-v2:32b"),
-    parsed_config.get(section="PROVER_AGENT_LLM", option="model", fallback="kdavis/Goedel-Prover-V2:32b"),
     parsed_config.get(section="SEMANTICS_AGENT_LLM", option="model", fallback="qwen3:30b"),
 ]
 
@@ -99,26 +98,6 @@ def _create_llm_safe(**kwargs):  # type: ignore[no-untyped-def]
         # Note: A warning was already issued by _download_llms() above
         kwargs["validate_model_on_init"] = False
         return ChatOllama(**kwargs)
-
-
-FORMALIZER_AGENT_LLM = _create_llm_safe(
-    model=parsed_config.get(section="FORMALIZER_AGENT_LLM", option="model", fallback="kdavis/goedel-formalizer-v2:32b"),
-    validate_model_on_init=True,
-    num_predict=50000,
-    num_ctx=parsed_config.getint(section="FORMALIZER_AGENT_LLM", option="num_ctx", fallback=40960),
-)
-PROVER_AGENT_LLM = _create_llm_safe(
-    model=parsed_config.get(section="PROVER_AGENT_LLM", option="model", fallback="kdavis/Goedel-Prover-V2:32b"),
-    validate_model_on_init=True,
-    num_predict=50000,
-    num_ctx=parsed_config.getint(section="PROVER_AGENT_LLM", option="num_ctx", fallback=40960),
-)
-SEMANTICS_AGENT_LLM = _create_llm_safe(
-    model=parsed_config.get(section="SEMANTICS_AGENT_LLM", option="model", fallback="qwen3:30b"),
-    validate_model_on_init=True,
-    num_predict=50000,
-    num_ctx=parsed_config.getint(section="SEMANTICS_AGENT_LLM", option="num_ctx", fallback=262144),
-)
 
 
 def _create_openai_llm_safe(**kwargs):  # type: ignore[no-untyped-def]
@@ -145,6 +124,27 @@ def _create_openai_llm_safe(**kwargs):  # type: ignore[no-untyped-def]
             raise
 
 
+FORMALIZER_AGENT_LLM = _create_llm_safe(
+    model=parsed_config.get(section="FORMALIZER_AGENT_LLM", option="model", fallback="kdavis/goedel-formalizer-v2:32b"),
+    validate_model_on_init=True,
+    num_predict=50000,
+    num_ctx=parsed_config.getint(section="FORMALIZER_AGENT_LLM", option="num_ctx", fallback=40960),
+)
+PROVER_AGENT_LLM = _create_openai_llm_safe(
+    model=parsed_config.get(section="PROVER_AGENT_LLM", option="model", fallback="gpt-5-2025-08-07"),
+    max_completion_tokens=parsed_config.getint(
+        section="PROVER_AGENT_LLM", option="max_completion_tokens", fallback=50000
+    ),
+    max_retries=parsed_config.getint(section="PROVER_AGENT_LLM", option="max_remote_retries", fallback=5),
+)
+SEMANTICS_AGENT_LLM = _create_llm_safe(
+    model=parsed_config.get(section="SEMANTICS_AGENT_LLM", option="model", fallback="qwen3:30b"),
+    validate_model_on_init=True,
+    num_predict=50000,
+    num_ctx=parsed_config.getint(section="SEMANTICS_AGENT_LLM", option="num_ctx", fallback=262144),
+)
+
+
 DECOMPOSER_AGENT_LLM = _create_openai_llm_safe(
     model=parsed_config.get(section="DECOMPOSER_AGENT_LLM", option="model", fallback="gpt-5-2025-08-07"),
     max_completion_tokens=parsed_config.getint(
@@ -154,7 +154,7 @@ DECOMPOSER_AGENT_LLM = _create_openai_llm_safe(
 )
 
 # Create LLM configurations
-PROVER_AGENT_MAX_RETRIES = parsed_config.getint(section="PROVER_AGENT_LLM", option="max_retries", fallback=10)
+PROVER_AGENT_MAX_RETRIES = parsed_config.getint(section="PROVER_AGENT_LLM", option="max_retries", fallback=3)
 PROVER_AGENT_MAX_DEPTH = parsed_config.getint(section="PROVER_AGENT_LLM", option="max_depth", fallback=20)
-DECOMPOSER_AGENT_MAX_RETRIES = parsed_config.getint(section="DECOMPOSER_AGENT_LLM", option="max_retries", fallback=5)
+DECOMPOSER_AGENT_MAX_RETRIES = parsed_config.getint(section="DECOMPOSER_AGENT_LLM", option="max_retries", fallback=3)
 FORMALIZER_AGENT_MAX_RETRIES = parsed_config.getint(section="FORMALIZER_AGENT_LLM", option="max_retries", fallback=10)

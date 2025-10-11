@@ -6,6 +6,7 @@ from langgraph.graph.state import CompiledStateGraph
 
 from goedels_poetry.agents.state import InformalTheoremState
 from goedels_poetry.agents.util.common import add_default_imports, load_prompt
+from goedels_poetry.agents.util.debug import log_llm_response
 from goedels_poetry.agents.util.kimina_server import parse_semantic_check_response
 
 
@@ -91,6 +92,9 @@ def _check_semantics(llm: BaseChatModel, state: InformalTheoremState) -> Informa
 
     # Determine if the semantics of the informal and formal theorems are the same
     response_content = llm.invoke(prompt).content
+
+    # Log debug response
+    log_llm_response("SEMANTICS_AGENT_LLM", str(response_content))
 
     # Parse semantics checker response
     judgement = parse_semantic_check_response(str(response_content))

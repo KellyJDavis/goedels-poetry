@@ -9,6 +9,7 @@ from langgraph.types import Send
 
 from goedels_poetry.agents.state import FormalTheoremProofState, FormalTheoremProofStates
 from goedels_poetry.agents.util.common import add_default_imports, load_prompt, remove_default_imports
+from goedels_poetry.agents.util.debug import log_llm_response
 
 
 class ProverAgentFactory:
@@ -112,6 +113,9 @@ def _prover(llm: BaseChatModel, state: FormalTheoremProofState) -> FormalTheorem
 
     # Prove the formal statement
     response_content = llm.invoke(state["proof_history"]).content
+
+    # Log debug response
+    log_llm_response("PROVER_AGENT_LLM", str(response_content))
 
     # Parse prover response
     formal_proof = _parse_prover_response(str(response_content))
