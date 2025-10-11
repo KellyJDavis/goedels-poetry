@@ -77,17 +77,6 @@ def _download_llms(llms: list[str]) -> None:
             break  # Only warn once, not for each LLM
 
 
-# LLMS to download
-_LLMS = [
-    parsed_config.get(section="FORMALIZER_AGENT_LLM", option="model", fallback="kdavis/goedel-formalizer-v2:32b"),
-    parsed_config.get(section="SEMANTICS_AGENT_LLM", option="model", fallback="qwen3:30b"),
-]
-
-
-# Download LLMS
-_download_llms(_LLMS)
-
-
 # Create LLMS (with error handling for environments without Ollama)
 def _create_llm_safe(**kwargs):  # type: ignore[no-untyped-def]
     """Create a ChatOllama instance, catching connection errors in test/CI environments."""
@@ -124,12 +113,79 @@ def _create_openai_llm_safe(**kwargs):  # type: ignore[no-untyped-def]
             raise
 
 
-FORMALIZER_AGENT_LLM = _create_llm_safe(
-    model=parsed_config.get(section="FORMALIZER_AGENT_LLM", option="model", fallback="kdavis/goedel-formalizer-v2:32b"),
-    validate_model_on_init=True,
-    num_predict=50000,
-    num_ctx=parsed_config.getint(section="FORMALIZER_AGENT_LLM", option="num_ctx", fallback=40960),
-)
+# ============================================================================
+# Lazy-loaded LLMs (for informal theorem processing only)
+# ============================================================================
+# These LLMs are only needed when processing informal theorems. By lazy-loading
+# them, we avoid downloading/initializing large Ollama models during startup
+# when processing formal theorems.
+
+_FORMALIZER_AGENT_LLM = None  # Cache for lazy-loaded formalizer LLM
+_SEMANTICS_AGENT_LLM = None  # Cache for lazy-loaded semantics LLM
+
+
+def get_formalizer_agent_llm():  # type: ignore[no-untyped-def]
+    """
+    Lazy-load and return the FORMALIZER_AGENT_LLM.
+
+    Only downloads and creates the LLM on first access, which speeds up
+    startup when processing formal theorems that don't need formalization.
+
+    Returns
+    -------
+    ChatOllama
+        The formalizer agent LLM instance
+    """
+    global _FORMALIZER_AGENT_LLM
+    if _FORMALIZER_AGENT_LLM is None:
+        model = parsed_config.get(
+            section="FORMALIZER_AGENT_LLM", option="model", fallback="kdavis/goedel-formalizer-v2:32b"
+        )
+        # Download the model if needed
+        _download_llms([model])
+        # Create the LLM instance
+        _FORMALIZER_AGENT_LLM = _create_llm_safe(
+            model=model,
+            validate_model_on_init=True,
+            num_predict=50000,
+            num_ctx=parsed_config.getint(section="FORMALIZER_AGENT_LLM", option="num_ctx", fallback=40960),
+        )
+    return _FORMALIZER_AGENT_LLM
+
+
+def get_semantics_agent_llm():  # type: ignore[no-untyped-def]
+    """
+    Lazy-load and return the SEMANTICS_AGENT_LLM.
+
+    Only downloads and creates the LLM on first access, which speeds up
+    startup when processing formal theorems that don't need semantic checking.
+
+    Returns
+    -------
+    ChatOllama
+        The semantics agent LLM instance
+    """
+    global _SEMANTICS_AGENT_LLM
+    if _SEMANTICS_AGENT_LLM is None:
+        model = parsed_config.get(section="SEMANTICS_AGENT_LLM", option="model", fallback="qwen3:30b")
+        # Download the model if needed
+        _download_llms([model])
+        # Create the LLM instance
+        _SEMANTICS_AGENT_LLM = _create_llm_safe(
+            model=model,
+            validate_model_on_init=True,
+            num_predict=50000,
+            num_ctx=parsed_config.getint(section="SEMANTICS_AGENT_LLM", option="num_ctx", fallback=262144),
+        )
+    return _SEMANTICS_AGENT_LLM
+
+
+# ============================================================================
+# Eagerly-loaded LLMs (needed for all theorem processing)
+# ============================================================================
+# These LLMs are used for both formal and informal theorems, so we load them
+# immediately at module import time.
+
 PROVER_AGENT_LLM = _create_openai_llm_safe(
     model=parsed_config.get(section="PROVER_AGENT_LLM", option="model", fallback="gpt-5-2025-08-07"),
     max_completion_tokens=parsed_config.getint(
@@ -137,13 +193,6 @@ PROVER_AGENT_LLM = _create_openai_llm_safe(
     ),
     max_retries=parsed_config.getint(section="PROVER_AGENT_LLM", option="max_remote_retries", fallback=5),
 )
-SEMANTICS_AGENT_LLM = _create_llm_safe(
-    model=parsed_config.get(section="SEMANTICS_AGENT_LLM", option="model", fallback="qwen3:30b"),
-    validate_model_on_init=True,
-    num_predict=50000,
-    num_ctx=parsed_config.getint(section="SEMANTICS_AGENT_LLM", option="num_ctx", fallback=262144),
-)
-
 
 DECOMPOSER_AGENT_LLM = _create_openai_llm_safe(
     model=parsed_config.get(section="DECOMPOSER_AGENT_LLM", option="model", fallback="gpt-5-2025-08-07"),
