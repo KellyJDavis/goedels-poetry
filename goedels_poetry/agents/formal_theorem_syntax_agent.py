@@ -7,6 +7,7 @@ from langgraph.types import Send
 
 from goedels_poetry.agents.state import FormalTheoremProofState, FormalTheoremProofStates
 from goedels_poetry.agents.util.common import add_default_imports
+from goedels_poetry.agents.util.debug import log_kimina_response
 from goedels_poetry.agents.util.kimina_server import parse_kimina_check_response
 
 
@@ -114,6 +115,9 @@ def _check_syntax(server_url: str, server_max_retries: int, state: FormalTheorem
 
     # Parse check_response
     parsed_response = parse_kimina_check_response(check_response)
+
+    # Log debug response
+    log_kimina_response("check", parsed_response)
 
     # Get the response from the server
     syntactic = parsed_response["pass"]

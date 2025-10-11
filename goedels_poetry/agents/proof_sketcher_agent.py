@@ -9,6 +9,7 @@ from langgraph.types import Send
 
 from goedels_poetry.agents.state import DecomposedFormalTheoremState, DecomposedFormalTheoremStates
 from goedels_poetry.agents.util.common import add_default_imports, load_prompt, remove_default_imports
+from goedels_poetry.agents.util.debug import log_llm_response
 
 
 class ProofSketcherAgentFactory:
@@ -112,6 +113,9 @@ def _proof_sketcher(llm: BaseChatModel, state: DecomposedFormalTheoremState) -> 
 
     # Sketch the proof of the formal theorem
     response_content = llm.invoke(state["decomposition_history"]).content
+
+    # Log debug response
+    log_llm_response("DECOMPOSER_AGENT_LLM", str(response_content))
 
     # Parse sketcher response
     proof_sketch = _parse_proof_sketcher_response(str(response_content))

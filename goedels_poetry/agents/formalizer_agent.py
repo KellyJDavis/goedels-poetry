@@ -10,6 +10,7 @@ from langgraph.graph.state import CompiledStateGraph
 
 from goedels_poetry.agents.state import InformalTheoremState
 from goedels_poetry.agents.util.common import load_prompt, remove_default_imports
+from goedels_poetry.agents.util.debug import log_llm_response
 
 
 class FormalizerAgentFactory:
@@ -95,6 +96,9 @@ def _formalizer(llm: BaseChatModel, state: InformalTheoremState) -> InformalTheo
 
     # Formalize informal statement
     response_content = llm.invoke(prompt).content
+
+    # Log debug response
+    log_llm_response("FORMALIZER_AGENT_LLM", str(response_content))
 
     # Parse formalizer response
     formal_statement = _parser_formalizer_response(str(response_content))

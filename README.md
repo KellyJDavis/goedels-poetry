@@ -228,6 +228,37 @@ For batch processing, the tool will:
 uv run goedels_poetry --help
 ```
 
+#### Enable Debug Mode
+
+To see detailed LLM and Kimina server responses during execution, set the `GOEDELS_POETRY_DEBUG` environment variable:
+
+**On Linux/macOS**:
+```bash
+export GOEDELS_POETRY_DEBUG=1
+uv run goedels_poetry --formal-theorem "theorem example : 1 + 1 = 2 := by sorry"
+```
+
+**On Windows (Command Prompt)**:
+```cmd
+set GOEDELS_POETRY_DEBUG=1
+uv run goedels_poetry --formal-theorem "theorem example : 1 + 1 = 2 := by sorry"
+```
+
+**On Windows (PowerShell)**:
+```powershell
+$env:GOEDELS_POETRY_DEBUG=1
+uv run goedels_poetry --formal-theorem "theorem example : 1 + 1 = 2 := by sorry"
+```
+
+When debug mode is enabled, all responses from:
+- **FORMALIZER_AGENT_LLM** - Formalization responses
+- **PROVER_AGENT_LLM** - Proof generation responses
+- **SEMANTICS_AGENT_LLM** - Semantic checking responses
+- **DECOMPOSER_AGENT_LLM** - Proof sketching/decomposition responses
+- **KIMINA_SERVER** - Lean 4 verification and AST parsing responses
+
+will be printed to the console with rich formatting for easy debugging and inspection.
+
 ---
 
 ## Examples
