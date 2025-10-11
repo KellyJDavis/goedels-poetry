@@ -154,7 +154,7 @@ DECOMPOSER_AGENT_LLM = _create_openai_llm_safe(
 )
 
 # Create LLM configurations
-PROVER_AGENT_MAX_RETRIES = parsed_config.getint(section="PROVER_AGENT_LLM", option="max_retries", fallback=10)
+PROVER_AGENT_MAX_RETRIES = parsed_config.getint(section="PROVER_AGENT_LLM", option="max_retries", fallback=3)
 PROVER_AGENT_MAX_DEPTH = parsed_config.getint(section="PROVER_AGENT_LLM", option="max_depth", fallback=20)
-DECOMPOSER_AGENT_MAX_RETRIES = parsed_config.getint(section="DECOMPOSER_AGENT_LLM", option="max_retries", fallback=5)
+DECOMPOSER_AGENT_MAX_RETRIES = parsed_config.getint(section="DECOMPOSER_AGENT_LLM", option="max_retries", fallback=3)
 FORMALIZER_AGENT_MAX_RETRIES = parsed_config.getint(section="FORMALIZER_AGENT_LLM", option="max_retries", fallback=10)
