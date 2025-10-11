@@ -388,8 +388,9 @@ num_ctx = 40960
 max_retries = 10
 
 [PROVER_AGENT_LLM]
-model = kdavis/Goedel-Prover-V2:32b
-num_ctx = 40960
+model = gpt-5-2025-08-07
+max_completion_tokens = 50000
+max_remote_retries = 5
 max_retries = 10
 max_depth = 20
 
@@ -417,7 +418,8 @@ max_retries = 5
 
 **Prover Agent**:
 - `model`: The LLM used to generate proofs
-- `num_ctx`: Context window size (tokens)
+- `max_completion_tokens`: Maximum tokens in generated response
+- `max_remote_retries`: Retry attempts for API calls
 - `max_retries`: Maximum proof generation attempts
 - `max_depth`: Maximum recursion depth for proof decomposition
 
