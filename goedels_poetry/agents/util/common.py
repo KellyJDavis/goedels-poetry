@@ -19,6 +19,86 @@ DEFAULT_IMPORTS = (
 )
 
 
+def _is_lean_declaration_line(s: str) -> bool:
+    """Check if a line is a Lean declaration."""
+    return (
+        s.startswith("theorem ")
+        or s.startswith("def ")
+        or s.startswith("lemma ")
+        or s.startswith("example ")
+        or s.startswith("axiom ")
+        or s.startswith("inductive ")
+        or s.startswith("structure ")
+        or s.startswith("class ")
+    )
+
+
+def _is_preamble_line(s: str) -> bool:
+    """Check if a line is a preamble line (import, open, etc.)."""
+    return (
+        s.startswith("import ")
+        or s.startswith("open ")
+        or s.startswith("set_option ")
+        or s.startswith("noncomputable ")
+        or s == ""
+    )
+
+
+def _has_additional_preamble(remainder: str) -> bool:
+    """Check if remainder starts with additional preamble lines."""
+    return any(
+        remainder.startswith(prefix) for prefix in ["import ", "open ", "set_option ", "noncomputable ", "--", "/-"]
+    )
+
+
+def _is_doc_comment(lines: list[str], i: int) -> bool:
+    """Check if a comment at line i is a doc comment (precedes a declaration)."""
+    for j in range(i + 1, len(lines)):
+        next_stripped = lines[j].strip()
+        if next_stripped != "":
+            return _is_lean_declaration_line(next_stripped)
+    return False
+
+
+def _find_preamble_end(lines: list[str]) -> int:
+    """Find the line index where the preamble ends."""
+    skip_until = 0
+    in_multiline_comment = False
+
+    for i, line in enumerate(lines):
+        stripped = line.strip()
+
+        # Handle multiline comments
+        if stripped.startswith("/-"):
+            in_multiline_comment = True
+            skip_until = i + 1
+            continue
+        if in_multiline_comment:
+            if stripped.endswith("-/") or stripped == "-/":
+                in_multiline_comment = False
+            skip_until = i + 1
+            continue
+
+        # Check if this is actual Lean code
+        if _is_lean_declaration_line(stripped):
+            break
+
+        # Check if this is a doc comment
+        if stripped.startswith("--"):
+            if _is_doc_comment(lines, i):
+                break
+            skip_until = i + 1
+            continue
+
+        # Check if this is a preamble line
+        if _is_preamble_line(stripped):
+            skip_until = i + 1
+        else:
+            break
+
+    return skip_until
+
+
 def add_default_imports(code: str) -> str:
     """
     Add DEFAULT_IMPORTS prefix to the given code.
@@ -39,6 +119,7 @@ def add_default_imports(code: str) -> str:
 def remove_default_imports(code: str) -> str:
     """
     Remove DEFAULT_IMPORTS prefix from the given code (up to whitespace).
+    Also removes common variations of import preambles that LLMs might generate.
 
     Parameters
     ----------
@@ -50,13 +131,24 @@ def remove_default_imports(code: str) -> str:
     str
         The code without DEFAULT_IMPORTS prefix.
     """
-    # Normalize both strings by stripping and comparing
     normalized_imports = DEFAULT_IMPORTS.strip()
     normalized_code = code.strip()
 
+    # First, try exact match with DEFAULT_IMPORTS only if there's nothing after it
+    # that looks like additional preamble
     if normalized_code.startswith(normalized_imports):
-        # Remove the imports and strip any leading/trailing whitespace
-        return normalized_code[len(normalized_imports) :].strip()
+        remainder = normalized_code[len(normalized_imports) :].strip()
+        if remainder and not _has_additional_preamble(remainder):
+            return remainder
+
+    # Try to remove all preamble patterns
+    lines = normalized_code.split("\n")
+    skip_until = _find_preamble_end(lines)
+
+    if skip_until > 0:
+        result = "\n".join(lines[skip_until:]).strip()
+        if result and not result.startswith("--"):
+            return result
 
     return code
 

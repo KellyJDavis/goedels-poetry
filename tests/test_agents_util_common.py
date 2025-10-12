@@ -1,6 +1,12 @@
 """Tests for goedels_poetry.agents.util.common module."""
 
-from goedels_poetry.agents.util.common import DEFAULT_IMPORTS, get_error_str, load_prompt
+from goedels_poetry.agents.util.common import (
+    DEFAULT_IMPORTS,
+    add_default_imports,
+    get_error_str,
+    load_prompt,
+    remove_default_imports,
+)
 
 
 def test_default_imports() -> None:
@@ -222,3 +228,123 @@ def test_get_error_str_next_line_included() -> None:
 
     # Line after error (line3 = line at index 3 = pos.line + 2 + 1)
     assert "line3" in result
+
+
+def test_add_default_imports() -> None:
+    """Test that add_default_imports correctly adds the preamble."""
+    code = "theorem test : True := by trivial"
+    result = add_default_imports(code)
+    assert result.startswith(DEFAULT_IMPORTS)
+    assert code in result
+
+
+def test_remove_default_imports_exact_match() -> None:
+    """Test remove_default_imports with exact DEFAULT_IMPORTS prefix."""
+    code = "theorem test : True := by trivial"
+    code_with_imports = DEFAULT_IMPORTS + code
+    result = remove_default_imports(code_with_imports)
+    assert result == code
+
+
+def test_remove_default_imports_no_imports() -> None:
+    """Test remove_default_imports when code has no imports."""
+    code = "theorem test : True := by trivial"
+    result = remove_default_imports(code)
+    assert result == code
+
+
+def test_remove_default_imports_chatgpt_style_preamble() -> None:
+    """Test remove_default_imports with ChatGPT/ChatOpenAI style preamble."""
+    preamble = """import Mathlib
+import Aesop
+
+set_option maxHeartbeats 0
+
+open BigOperators Real Nat Topology Rat
+
+noncomputable section
+open scoped Classical
+
+"""
+    code = "theorem test : True := by trivial"
+    code_with_preamble = preamble + code
+    result = remove_default_imports(code_with_preamble)
+    assert result == code
+
+
+def test_remove_default_imports_with_comments() -> None:
+    """Test remove_default_imports with preamble containing comments."""
+    preamble = """import Mathlib
+import Aesop
+
+-- This is a comment
+set_option maxHeartbeats 0
+
+open BigOperators Real Nat Topology Rat
+
+"""
+    code = "theorem test : True := by trivial"
+    code_with_preamble = preamble + code
+    result = remove_default_imports(code_with_preamble)
+    assert result == code
+
+
+def test_remove_default_imports_with_multiline_comment() -> None:
+    """Test remove_default_imports with multiline comment in preamble."""
+    preamble = """import Mathlib
+import Aesop
+
+/-
+This is a multiline comment
+explaining the proof
+-/
+
+"""
+    code = "theorem test : True := by trivial"
+    code_with_preamble = preamble + code
+    result = remove_default_imports(code_with_preamble)
+    assert result == code
+
+
+def test_remove_default_imports_preserves_theorem_comments() -> None:
+    """Test that remove_default_imports doesn't remove comments that are part of the theorem."""
+    preamble = """import Mathlib
+import Aesop
+
+open BigOperators Real Nat Topology Rat
+
+"""
+    code = """-- This comment is part of the theorem
+theorem test : True := by trivial"""
+    code_with_preamble = preamble + code
+    result = remove_default_imports(code_with_preamble)
+    # The comment should be preserved as it's part of the theorem
+    assert "-- This comment is part of the theorem" in result
+    assert "theorem test : True := by trivial" in result
+
+
+def test_remove_default_imports_empty_lines() -> None:
+    """Test remove_default_imports handles multiple empty lines in preamble."""
+    preamble = """import Mathlib
+import Aesop
+
+
+set_option maxHeartbeats 0
+
+
+open BigOperators Real Nat Topology Rat
+
+
+"""
+    code = "theorem test : True := by trivial"
+    code_with_preamble = preamble + code
+    result = remove_default_imports(code_with_preamble)
+    assert result == code
+
+
+def test_remove_default_imports_round_trip() -> None:
+    """Test that add_default_imports and remove_default_imports are inverses."""
+    code = "theorem test : True := by trivial"
+    with_imports = add_default_imports(code)
+    without_imports = remove_default_imports(with_imports)
+    assert without_imports == code
