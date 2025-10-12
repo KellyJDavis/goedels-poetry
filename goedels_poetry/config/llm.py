@@ -186,12 +186,16 @@ def get_semantics_agent_llm():  # type: ignore[no-untyped-def]
 # These LLMs are used for both formal and informal theorems, so we load them
 # immediately at module import time.
 
-PROVER_AGENT_LLM = _create_openai_llm_safe(
-    model=parsed_config.get(section="PROVER_AGENT_LLM", option="model", fallback="gpt-5-2025-08-07"),
-    max_completion_tokens=parsed_config.getint(
-        section="PROVER_AGENT_LLM", option="max_completion_tokens", fallback=50000
-    ),
-    max_retries=parsed_config.getint(section="PROVER_AGENT_LLM", option="max_remote_retries", fallback=5),
+# Download prover model if needed
+_PROVER_MODEL = parsed_config.get(section="PROVER_AGENT_LLM", option="model", fallback="kdavis/Goedel-Prover-V2:32b")
+_download_llms([_PROVER_MODEL])
+
+# Create prover LLM
+PROVER_AGENT_LLM = _create_llm_safe(
+    model=_PROVER_MODEL,
+    validate_model_on_init=True,
+    num_predict=50000,
+    num_ctx=parsed_config.getint(section="PROVER_AGENT_LLM", option="num_ctx", fallback=40960),
 )
 
 DECOMPOSER_AGENT_LLM = _create_openai_llm_safe(
