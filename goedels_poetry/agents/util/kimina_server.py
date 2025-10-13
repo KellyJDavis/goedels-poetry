@@ -69,7 +69,7 @@ def parse_semantic_check_response(response: str) -> str:
     pattern = r"Judgement:\s*(.+)"
     matches = re.findall(pattern, response, re.IGNORECASE)
     if not matches:
-        raise LLMParsingError(f"Failed to extract judgement from LLM response: {response}")
+        raise LLMParsingError("Failed to extract judgement from LLM response", response)  # noqa: TRY003
     return matches[-1].strip()
 
 

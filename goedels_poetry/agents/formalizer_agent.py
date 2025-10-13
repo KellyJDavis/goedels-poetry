@@ -168,6 +168,6 @@ def _parser_formalizer_response(response: str) -> str:
     pattern = r"```lean4?\n(.*?)\n?```"
     matches = re.findall(pattern, response, re.DOTALL)
     if not matches:
-        raise LLMParsingError(f"Failed to extract code block from LLM response: {response}")
+        raise LLMParsingError("Failed to extract code block from LLM response", response)  # noqa: TRY003
     formal_statement = matches[-1].strip()
     return formal_statement

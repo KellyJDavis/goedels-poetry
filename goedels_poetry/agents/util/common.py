@@ -14,7 +14,20 @@ class LLMParsingError(Exception):
     (e.g., missing code blocks or malformed responses).
     """
 
-    pass
+    def __init__(self, message: str, response: str) -> None:
+        """
+        Initialize the LLMParsingError.
+
+        Parameters
+        ----------
+        message : str
+            A short description of what failed to parse
+        response : str
+            The full LLM response that failed to parse
+        """
+        self.response = response
+        super().__init__(f"{message}: {response}")
+
 
 # Create Environment for loading prompts
 _env = Environment(
