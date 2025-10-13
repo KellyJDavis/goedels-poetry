@@ -1,5 +1,6 @@
 import re
 from functools import partial
+from typing import cast
 
 from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.messages import AIMessage, HumanMessage
@@ -8,7 +9,7 @@ from langgraph.graph.state import CompiledStateGraph
 from langgraph.types import Send
 
 from goedels_poetry.agents.state import DecomposedFormalTheoremState, DecomposedFormalTheoremStates
-from goedels_poetry.agents.util.common import add_default_imports, load_prompt, remove_default_imports
+from goedels_poetry.agents.util.common import LLMParsingError, add_default_imports, load_prompt, remove_default_imports
 from goedels_poetry.agents.util.debug import log_llm_response
 
 
@@ -142,12 +143,19 @@ def _parse_proof_sketcher_response(response: str) -> str:
     Returns
     -------
     str
-        A string containing the lean code snippet if found, otherwise empty string.
+        A string containing the lean code snippet if found.
+
+    Raises
+    ------
+    LLMParsingError
+        If no code block is found in the response.
     """
     # TODO: Figure out if this algorithm works for the non-Goedel LLM
     pattern = r"```lean4?\n(.*?)\n?```"
     matches = re.findall(pattern, response, re.DOTALL)
-    proof_sketch = matches[-1].strip() if matches else ""
+    if not matches:
+        raise LLMParsingError("Failed to extract code block from LLM response", response)  # noqa: TRY003
+    proof_sketch = cast(str, matches[-1]).strip()
     # Remove DEFAULT_IMPORTS if present
     if proof_sketch:
         proof_sketch = remove_default_imports(proof_sketch)
