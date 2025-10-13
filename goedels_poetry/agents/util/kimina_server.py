@@ -70,7 +70,7 @@ def parse_semantic_check_response(response: str) -> str:
     matches = re.findall(pattern, response, re.IGNORECASE)
     if not matches:
         raise LLMParsingError("Failed to extract judgement from LLM response", response)  # noqa: TRY003
-    return matches[-1].strip()
+    return cast(str, matches[-1]).strip()
 
 
 def parse_kimina_ast_code_response(ast_code_response: AstModuleResponse) -> dict:

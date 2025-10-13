@@ -3,6 +3,7 @@ from __future__ import annotations
 import re
 from functools import partial
 from hashlib import sha256
+from typing import cast
 
 from langchain_core.language_models.chat_models import BaseChatModel
 from langgraph.graph import END, START, StateGraph
@@ -169,5 +170,5 @@ def _parser_formalizer_response(response: str) -> str:
     matches = re.findall(pattern, response, re.DOTALL)
     if not matches:
         raise LLMParsingError("Failed to extract code block from LLM response", response)  # noqa: TRY003
-    formal_statement = matches[-1].strip()
+    formal_statement = cast(str, matches[-1]).strip()
     return formal_statement

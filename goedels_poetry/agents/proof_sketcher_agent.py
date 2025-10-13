@@ -1,5 +1,6 @@
 import re
 from functools import partial
+from typing import cast
 
 from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.messages import AIMessage, HumanMessage
@@ -154,7 +155,7 @@ def _parse_proof_sketcher_response(response: str) -> str:
     matches = re.findall(pattern, response, re.DOTALL)
     if not matches:
         raise LLMParsingError("Failed to extract code block from LLM response", response)  # noqa: TRY003
-    proof_sketch = matches[-1].strip()
+    proof_sketch = cast(str, matches[-1]).strip()
     # Remove DEFAULT_IMPORTS if present
     if proof_sketch:
         proof_sketch = remove_default_imports(proof_sketch)
