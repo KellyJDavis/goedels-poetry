@@ -5,6 +5,8 @@ from typing import cast
 
 from kimina_client.models import AstModuleResponse, CheckResponse, CommandResponse, Message
 
+from goedels_poetry.agents.util.common import LLMParsingError
+
 
 def parse_kimina_check_response(check_response: CheckResponse) -> dict:
     """
@@ -45,7 +47,7 @@ def parse_kimina_check_response(check_response: CheckResponse) -> dict:
     return parsed_response
 
 
-def parse_semantic_check_response(response: str) -> str | None:
+def parse_semantic_check_response(response: str) -> str:
     """
     Parses the passed symantic response into a string used by  Goedel-Prover-V2
 
@@ -58,10 +60,17 @@ def parse_semantic_check_response(response: str) -> str | None:
     -------
     str:
         The parsed judgement string.
+
+    Raises
+    ------
+    LLMParsingError
+        If no judgement is found in the response.
     """
     pattern = r"Judgement:\s*(.+)"
     matches = re.findall(pattern, response, re.IGNORECASE)
-    return matches[-1].strip() if matches else None
+    if not matches:
+        raise LLMParsingError(f"Failed to extract judgement from LLM response: {response}")
+    return matches[-1].strip()
 
 
 def parse_kimina_ast_code_response(ast_code_response: AstModuleResponse) -> dict:

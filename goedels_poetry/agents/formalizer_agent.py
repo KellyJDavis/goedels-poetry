@@ -9,7 +9,7 @@ from langgraph.graph import END, START, StateGraph
 from langgraph.graph.state import CompiledStateGraph
 
 from goedels_poetry.agents.state import InformalTheoremState
-from goedels_poetry.agents.util.common import load_prompt, remove_default_imports
+from goedels_poetry.agents.util.common import LLMParsingError, load_prompt, remove_default_imports
 from goedels_poetry.agents.util.debug import log_llm_response
 
 
@@ -146,7 +146,7 @@ def _normalize_informal_statement(informal_statement: str) -> str:
     return informal_statement.strip().lower()
 
 
-def _parser_formalizer_response(response: str) -> str | None:
+def _parser_formalizer_response(response: str) -> str:
     """
     Extract the final lean code snippet from the passed string.
 
@@ -158,9 +158,16 @@ def _parser_formalizer_response(response: str) -> str | None:
     Returns
     -------
     str
-        A string containing the lean code snippet if found, otherwise None.
+        A string containing the lean code snippet if found.
+
+    Raises
+    ------
+    LLMParsingError
+        If no code block is found in the response.
     """
     pattern = r"```lean4?\n(.*?)\n?```"
     matches = re.findall(pattern, response, re.DOTALL)
-    formal_statement = matches[-1].strip() if matches else None
+    if not matches:
+        raise LLMParsingError(f"Failed to extract code block from LLM response: {response}")
+    formal_statement = matches[-1].strip()
     return formal_statement

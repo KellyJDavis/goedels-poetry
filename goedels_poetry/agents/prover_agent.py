@@ -8,7 +8,7 @@ from langgraph.graph.state import CompiledStateGraph
 from langgraph.types import Send
 
 from goedels_poetry.agents.state import FormalTheoremProofState, FormalTheoremProofStates
-from goedels_poetry.agents.util.common import add_default_imports, load_prompt, remove_default_imports
+from goedels_poetry.agents.util.common import LLMParsingError, add_default_imports, load_prompt, remove_default_imports
 from goedels_poetry.agents.util.debug import log_llm_response
 
 
@@ -142,11 +142,18 @@ def _parse_prover_response(response: str) -> str:
     Returns
     -------
     str
-        A string containing the lean code snippet if found, otherwise empty string.
+        A string containing the lean code snippet if found.
+
+    Raises
+    ------
+    LLMParsingError
+        If no code block is found in the response.
     """
     pattern = r"```lean4?\n(.*?)\n?```"
     matches = re.findall(pattern, response, re.DOTALL)
-    formal_proof = matches[-1].strip() if matches else ""
+    if not matches:
+        raise LLMParsingError(f"Failed to extract code block from LLM response: {response}")
+    formal_proof = matches[-1].strip()
     # Remove DEFAULT_IMPORTS if present
     if formal_proof:
         formal_proof = remove_default_imports(formal_proof)
