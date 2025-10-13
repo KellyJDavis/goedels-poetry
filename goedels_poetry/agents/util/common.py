@@ -5,6 +5,30 @@ from typing import Any
 
 from jinja2 import Environment, FileSystemLoader, select_autoescape
 
+
+class LLMParsingError(Exception):
+    """
+    Exception raised when the LLM returns a response that cannot be parsed.
+
+    This typically occurs when the LLM fails to return code in the expected format
+    (e.g., missing code blocks or malformed responses).
+    """
+
+    def __init__(self, message: str, response: str) -> None:
+        """
+        Initialize the LLMParsingError.
+
+        Parameters
+        ----------
+        message : str
+            A short description of what failed to parse
+        response : str
+            The full LLM response that failed to parse
+        """
+        self.response = response
+        super().__init__(f"{message}: {response}")
+
+
 # Create Environment for loading prompts
 _env = Environment(
     loader=FileSystemLoader(os.path.join(os.path.dirname(__file__), "../../data/prompts")),
