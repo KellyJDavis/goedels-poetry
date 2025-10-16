@@ -15,8 +15,9 @@ num_ctx = 40960
 max_retries = 10
 
 [PROVER_AGENT_LLM]
-model = kdavis/Goedel-Prover-V2:32b
-num_ctx = 40960
+model = gpt-5-2025-08-07
+max_completion_tokens = 50000
+max_remote_retries = 5
 max_retries = 10
 max_depth = 20
 
@@ -58,7 +59,7 @@ export KIMINA_LEAN_SERVER__URL="http://localhost:9000"
 Override multiple values:
 ```bash
 export PROVER_AGENT_LLM__MODEL="custom-model"
-export PROVER_AGENT_LLM__NUM_CTX="8192"
+export PROVER_AGENT_LLM__MAX_RETRIES="20"
 export KIMINA_LEAN_SERVER__URL="http://custom-server:8888"
 ```
 
@@ -75,7 +76,7 @@ export KIMINA_LEAN_SERVER__URL="http://custom-server:8888"
 ```bash
 # Use a smaller model for faster testing
 export PROVER_AGENT_LLM__MODEL="llama2:7b"
-export PROVER_AGENT_LLM__NUM_CTX="4096"
+export FORMALIZER_AGENT_LLM__NUM_CTX="4096"
 ```
 
 **CI/CD Pipeline:**
