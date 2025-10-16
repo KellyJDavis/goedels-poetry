@@ -1,8 +1,6 @@
 """Test fixtures for goedels_poetry tests."""
 
-import sys
 from collections.abc import Generator
-from pathlib import Path
 
 import pytest
 
@@ -27,15 +25,14 @@ def kimina_server_url() -> Generator[str, None, None]:
         pytest.skip("fastapi not installed - skipping integration test")
         return  # type: ignore[unreachable]
 
-    # Add kimina-lean-server to path for imports
-    kimina_server_path = Path(__file__).parent.parent / "kimina-lean-server"
-    sys.path.insert(0, str(kimina_server_path))
-
+    # Try to import kimina-lean-server modules
+    # Note: kimina-lean-server is no longer a submodule. To run integration tests,
+    # you need to install and run a Kimina Lean Server separately.
     try:
-        from server.main import create_app
-        from server.settings import Environment, Settings
+        from server.main import create_app  # type: ignore[import-not-found]
+        from server.settings import Environment, Settings  # type: ignore[import-not-found]
     except ImportError:
-        pytest.skip("kimina-lean-server dependencies not installed - skipping integration test")
+        pytest.skip("kimina-lean-server not available - install separately to run integration tests")
         return  # type: ignore[unreachable]
 
     settings = Settings(

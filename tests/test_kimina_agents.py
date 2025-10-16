@@ -13,7 +13,7 @@ They test the 6 agent factories that use KiminaClient but not BaseChatModel:
 import pytest
 
 # Try to import the required modules - skip all tests if imports fail
-# This handles Python version incompatibilities in kimina-lean-server
+# Note: These tests require a separate Kimina Lean Server installation
 try:
     from goedels_poetry.agents.formal_theorem_syntax_agent import FormalTheoremSyntaxAgentFactory
     from goedels_poetry.agents.informal_theorem_syntax_agent import InformalTheoremSyntaxAgentFactory

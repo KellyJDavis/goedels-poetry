@@ -138,15 +138,9 @@ skip_empty = true
 branch = true
 source = ["goedels_poetry"]
 
-[tool.uv.workspace]
-members = [
-    "kimina-lean-server",
-]
-
 [tool.deptry]
 root = ["goedels_poetry"]
 exclude = [
-    "kimina-lean-server/.*",
     "\\.venv/.*",
     "dist/.*",
     "site/.*",

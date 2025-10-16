@@ -96,7 +96,7 @@ The tests cover:
 
 ## Running the Tests
 
-Due to a workspace configuration issue with the empty `kimina-lean-server` directory, the standard `make test` command may fail. Once the workspace issue is resolved, run:
+Run the backtracking tests with:
 
 ```bash
 make test

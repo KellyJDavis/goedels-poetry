@@ -21,16 +21,15 @@ test: ## Test the code with pytest (excludes integration tests)
 	@uv run python -m pytest --ignore=tests/test_kimina_agents.py --cov --cov-config=pyproject.toml --cov-report=xml
 
 .PHONY: test-integration
-test-integration: ## Run integration tests (requires Lean installation)
-	@echo "🚀 Running integration tests (requires Lean)"
+test-integration: ## Run integration tests (requires Lean and Kimina server installation)
+	@echo "⚠️  Integration tests require a Kimina Lean Server installation"
+	@echo "📝 Note: kimina-lean-server is no longer a submodule"
+	@echo "🔗 Install from: https://github.com/project-numina/kimina-lean-server"
+	@echo ""
 	@if ! command -v lake > /dev/null; then \
-		echo "❌ Error: Lean (lake) is not installed. Run 'cd kimina-lean-server && bash setup.sh' first."; \
+		echo "❌ Error: Lean (lake) is not installed."; \
 		exit 1; \
 	fi
-	@echo "📦 Installing server dependencies..."
-	@cd kimina-lean-server && uv pip install -q prisma fastapi uvicorn psutil google-cloud-logging
-	@echo "🔧 Generating Prisma types..."
-	@cd kimina-lean-server && uv run prisma generate
 	@echo "🧪 Running integration tests..."
 	@uv run python -m pytest tests/test_kimina_agents.py -v --cov --cov-config=pyproject.toml --cov-append --cov-report=xml
 
