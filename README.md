@@ -419,9 +419,8 @@ num_ctx = 40960
 max_retries = 10
 
 [PROVER_AGENT_LLM]
-model = gpt-5-2025-08-07
-max_completion_tokens = 50000
-max_remote_retries = 5
+model = kdavis/Goedel-Prover-V2:32b
+num_ctx = 40960
 max_retries = 10
 max_depth = 20
 
@@ -433,7 +432,7 @@ num_ctx = 262144
 model = gpt-5-2025-08-07
 max_completion_tokens = 50000
 max_remote_retries = 5
-max_retries = 5
+max_retries = 3
 
 [KIMINA_LEAN_SERVER]
 url = http://0.0.0.0:8000
@@ -449,8 +448,7 @@ max_retries = 5
 
 **Prover Agent**:
 - `model`: The LLM used to generate proofs
-- `max_completion_tokens`: Maximum tokens in generated response
-- `max_remote_retries`: Retry attempts for API calls
+- `num_ctx`: Context window size (tokens)
 - `max_retries`: Maximum proof generation attempts
 - `max_depth`: Maximum recursion depth for proof decomposition
 
@@ -468,24 +466,43 @@ max_retries = 5
 - `url`: Server endpoint for Lean verification
 - `max_retries`: Maximum retry attempts for server requests
 
-#### Modifying Configuration Without Reinstalling
+#### Overriding Configuration with Environment Variables
 
-You can override configuration without modifying the installed package:
+The **recommended** way to customize configuration is using environment variables. This approach doesn't require modifying files and works great for different environments (development, testing, production):
 
-1. **Copy the default config**:
-   ```bash
-   cp goedels_poetry/data/config.ini my-config.ini
-   ```
+**Format**: `SECTION__OPTION` (double underscore separator, uppercase)
 
-2. **Edit your copy** with desired parameters
+**Examples**:
 
-3. **Set the config path** before running:
-   ```bash
-   export GOEDELS_POETRY_CONFIG=/path/to/my-config.ini
-   uv run goedels_poetry --formal-theorem "..."
-   ```
+```bash
+# Use a different prover model
+export PROVER_AGENT_LLM__MODEL="custom-model:latest"
 
-Alternatively, you can modify the installed configuration directly:
+# Change the Kimina server URL
+export KIMINA_LEAN_SERVER__URL="http://localhost:9000"
+
+# Use a smaller context window for faster testing
+export PROVER_AGENT_LLM__NUM_CTX="8192"
+
+# Run with custom configuration
+uv run goedels_poetry --formal-theorem "theorem example : 1 + 1 = 2 := by sorry"
+```
+
+**Multiple overrides**:
+```bash
+export PROVER_AGENT_LLM__MODEL="kdavis/Goedel-Prover-V2:70b"
+export DECOMPOSER_AGENT_LLM__MODEL="gpt-5-pro"
+export KIMINA_LEAN_SERVER__MAX_RETRIES="10"
+uv run goedels_poetry --formal-theorem "..."
+```
+
+**Environment variables are optional** - if not set, the system uses values from `config.ini`.
+
+For more details and advanced configuration options, see [CONFIGURATION.md](./CONFIGURATION.md).
+
+#### Alternative: Modifying config.ini Directly
+
+If you prefer, you can still modify the configuration file directly:
 
 ```bash
 # Find the installation path
@@ -495,7 +512,7 @@ uv run python -c "import goedels_poetry; print(goedels_poetry.__file__)"
 # Typically: .venv/lib/python3.x/site-packages/goedels_poetry/data/config.ini
 ```
 
-**Note**: Changes to the installed config persist until you reinstall or update the package.
+**Note**: Direct file changes persist until you reinstall or update the package, while environment variables are more flexible and don't require reinstallation.
 
 ### Contributing
 
