@@ -483,8 +483,8 @@ export PROVER_AGENT_LLM__MODEL="custom-model:latest"
 # Change the Kimina server URL
 export KIMINA_LEAN_SERVER__URL="http://localhost:9000"
 
-# Use a smaller context window for faster testing
-export PROVER_AGENT_LLM__NUM_CTX="8192"
+# Increase max retries for more complex proofs
+export PROVER_AGENT_LLM__MAX_RETRIES="20"
 
 # Run with custom configuration
 uv run goedels_poetry --formal-theorem "theorem example : 1 + 1 = 2 := by sorry"
