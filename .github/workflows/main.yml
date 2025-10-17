@@ -101,12 +101,12 @@ jobs:
       - name: Install server dependencies
         run: |
           cd ${{ env.KIMINA_SERVER_PATH }}
-          uv pip install prisma fastapi uvicorn psutil
+          uv sync --no-dev
 
       - name: Generate prisma types
         run: |
           cd ${{ env.KIMINA_SERVER_PATH }}
-          uv run prisma generate
+          uv run python -m prisma generate
 
       - name: Add lake binary to PATH
         run: echo "$HOME/.elan/bin" >> $GITHUB_PATH
@@ -119,7 +119,7 @@ jobs:
       - name: Start Kimina server in background
         run: |
           cd ${{ env.KIMINA_SERVER_PATH }}
-          nohup python -m server > server.log 2>&1 &
+          nohup uv run python -m server > server.log 2>&1 &
           echo $! > server.pid
           # Wait for server to be ready
           sleep 10
