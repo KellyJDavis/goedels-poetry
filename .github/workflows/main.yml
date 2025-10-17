@@ -101,10 +101,10 @@ jobs:
       - name: Install server dependencies and generate Prisma types
         run: |
           cd ${{ env.KIMINA_SERVER_PATH }}
+          uv venv
+          source .venv/bin/activate
           uv pip install -r requirements.txt
           uv pip install .
-          # Generate Prisma client using pip-installed packages
-          source .venv/bin/activate
           prisma generate
 
       - name: Add lake binary to PATH
