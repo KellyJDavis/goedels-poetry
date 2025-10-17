@@ -203,7 +203,7 @@ Once installed, you can use the `goedels_poetry` command to prove theorems:
 #### Prove a Single Formal Theorem
 
 ```bash
-goedels_poetry --formal-theorem "theorem example : 1 + 1 = 2 := by sorry"
+goedels_poetry --formal-theorem "theorem theorem_54_43 : 1 + 1 = 2 := by sorry"
 ```
 
 #### Prove a Single Informal Theorem
@@ -242,19 +242,19 @@ To see detailed LLM and Kimina server responses during execution, set the `GOEDE
 **On Linux/macOS**:
 ```bash
 export GOEDELS_POETRY_DEBUG=1
-goedels_poetry --formal-theorem "theorem example : 1 + 1 = 2 := by sorry"
+goedels_poetry --formal-theorem "theorem theorem_54_43 : 1 + 1 = 2 := by sorry"
 ```
 
 **On Windows (Command Prompt)**:
 ```cmd
 set GOEDELS_POETRY_DEBUG=1
-goedels_poetry --formal-theorem "theorem example : 1 + 1 = 2 := by sorry"
+goedels_poetry --formal-theorem "theorem theorem_54_43 : 1 + 1 = 2 := by sorry"
 ```
 
 **On Windows (PowerShell)**:
 ```powershell
 $env:GOEDELS_POETRY_DEBUG=1
-goedels_poetry --formal-theorem "theorem example : 1 + 1 = 2 := by sorry"
+goedels_poetry --formal-theorem "theorem theorem_54_43 : 1 + 1 = 2 := by sorry"
 ```
 
 When debug mode is enabled, all responses from:
@@ -522,7 +522,7 @@ export KIMINA_LEAN_SERVER__URL="http://localhost:9000"
 export PROVER_AGENT_LLM__NUM_CTX="8192"
 
 # Run with custom configuration
-goedels_poetry --formal-theorem "theorem example : 1 + 1 = 2 := by sorry"
+goedels_poetry --formal-theorem "theorem theorem_54_43 : 1 + 1 = 2 := by sorry"
 ```
 
 **Multiple overrides**:
