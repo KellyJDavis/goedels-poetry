@@ -98,20 +98,12 @@ jobs:
           cd ${{ env.KIMINA_SERVER_PATH }}
           bash setup.sh
 
-      - name: Install server dependencies
+      - name: Install server dependencies and generate Prisma types
         run: |
           cd ${{ env.KIMINA_SERVER_PATH }}
-          uv sync --no-dev
-
-      - name: Debug - Check prisma installation
-        run: |
-          cd ${{ env.KIMINA_SERVER_PATH }}
-          ls -la .venv/bin/ | grep prisma || echo "No prisma in bin"
-          .venv/bin/python -c "import prisma; print(f'Prisma version: {prisma.__version__}')"
-
-      - name: Generate prisma types
-        run: |
-          cd ${{ env.KIMINA_SERVER_PATH }}
+          uv pip install -r requirements.txt
+          uv pip install .
+          # Generate Prisma client using pip-installed packages
           source .venv/bin/activate
           prisma generate
 
