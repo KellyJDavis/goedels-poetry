@@ -106,7 +106,7 @@ jobs:
       - name: Generate prisma types
         run: |
           cd ${{ env.KIMINA_SERVER_PATH }}
-          uv run python -m prisma generate
+          uv run prisma generate
 
       - name: Add lake binary to PATH
         run: echo "$HOME/.elan/bin" >> $GITHUB_PATH
