@@ -69,34 +69,40 @@ The system is designed for researchers, mathematicians, and AI practitioners int
 Before installing Gödel's Poetry, ensure you have:
 
 - **Python 3.9 or higher** (tested on Python 3.9-3.13)
-- **[uv](https://docs.astral.sh/uv/)** - Fast Python package installer (recommended)
+- **pip** (comes with Python)
+- **Lean 4** for the Kimina server (installation covered below)
+
+For development:
+- **[uv](https://docs.astral.sh/uv/)** - Fast Python package installer (optional, but recommended for development)
   ```bash
   curl -LsSf https://astral.sh/uv/install.sh | sh
   ```
 - **Git** for cloning the repository
-- **Lean 4** for the Kimina server (installation covered below)
 
 ### Installation
 
-#### Option 1: Install from Source (Recommended for Development)
+#### Option 1: Install from PyPI (Recommended)
+
+```bash
+# Install using pip
+pip install goedels-poetry
+
+# Verify installation
+goedels_poetry --help
+```
+
+#### Option 2: Install from Source (For Development)
 
 ```bash
 # Clone the repository
 git clone https://github.com/KellyJDavis/goedels-poetry.git
 cd goedels-poetry
 
-# Install the package and its dependencies
+# Install with uv (recommended) or pip
 uv sync
 
 # The command line tool is now available via:
 uv run goedels_poetry --help
-```
-
-#### Option 2: Install as a Package (Coming Soon)
-
-```bash
-# Once published to PyPI, you'll be able to install with:
-pip install goedels-poetry
 ```
 
 ### Running the Kimina Lean Server
@@ -105,8 +111,9 @@ The Kimina Lean Server is **required** for Gödel's Poetry to verify Lean 4 proo
 
 #### Setup Steps:
 
-1. **Navigate to the server directory**:
+1. **Clone the Kimina Lean Server** (separate repository):
    ```bash
+   git clone https://github.com/KellyJDavis/kimina-lean-server.git
    cd kimina-lean-server
    ```
 
@@ -157,7 +164,7 @@ cd kimina-lean-server
 docker compose up
 ```
 
-See the [Kimina Server README](./kimina-lean-server/README.md) for more deployment options.
+See the [Kimina Server README](https://github.com/KellyJDavis/kimina-lean-server/blob/main/README.md) for more deployment options.
 
 ### Setting Up Your OpenAI API Key
 
@@ -196,25 +203,25 @@ Once installed, you can use the `goedels_poetry` command to prove theorems:
 #### Prove a Single Formal Theorem
 
 ```bash
-uv run goedels_poetry --formal-theorem "theorem example : 1 + 1 = 2 := by sorry"
+goedels_poetry --formal-theorem "theorem example : 1 + 1 = 2 := by sorry"
 ```
 
 #### Prove a Single Informal Theorem
 
 ```bash
-uv run goedels_poetry --informal-theorem "Prove that the sum of two even numbers is even"
+goedels_poetry --informal-theorem "Prove that the sum of two even numbers is even"
 ```
 
 #### Batch Process Multiple Theorems
 
 Process all `.lean` files in a directory:
 ```bash
-uv run goedels_poetry --formal-theorems ./my-theorems/
+goedels_poetry --formal-theorems ./my-theorems/
 ```
 
 Process all `.txt` files containing informal theorems:
 ```bash
-uv run goedels_poetry --informal-theorems ./informal-theorems/
+goedels_poetry --informal-theorems ./informal-theorems/
 ```
 
 For batch processing, the tool will:
@@ -225,7 +232,7 @@ For batch processing, the tool will:
 #### Get Help
 
 ```bash
-uv run goedels_poetry --help
+goedels_poetry --help
 ```
 
 #### Enable Debug Mode
@@ -235,19 +242,19 @@ To see detailed LLM and Kimina server responses during execution, set the `GOEDE
 **On Linux/macOS**:
 ```bash
 export GOEDELS_POETRY_DEBUG=1
-uv run goedels_poetry --formal-theorem "theorem example : 1 + 1 = 2 := by sorry"
+goedels_poetry --formal-theorem "theorem example : 1 + 1 = 2 := by sorry"
 ```
 
 **On Windows (Command Prompt)**:
 ```cmd
 set GOEDELS_POETRY_DEBUG=1
-uv run goedels_poetry --formal-theorem "theorem example : 1 + 1 = 2 := by sorry"
+goedels_poetry --formal-theorem "theorem example : 1 + 1 = 2 := by sorry"
 ```
 
 **On Windows (PowerShell)**:
 ```powershell
 $env:GOEDELS_POETRY_DEBUG=1
-uv run goedels_poetry --formal-theorem "theorem example : 1 + 1 = 2 := by sorry"
+goedels_poetry --formal-theorem "theorem example : 1 + 1 = 2 := by sorry"
 ```
 
 When debug mode is enabled, all responses from:
@@ -266,14 +273,14 @@ will be printed to the console with rich formatting for easy debugging and inspe
 ### Example 1: Simple Arithmetic
 
 ```bash
-uv run goedels_poetry --formal-theorem \
+goedels_poetry --formal-theorem \
   "theorem add_comm_example : 3 + 5 = 5 + 3 := by sorry"
 ```
 
 ### Example 2: Informal Theorem
 
 ```bash
-uv run goedels_poetry --informal-theorem \
+goedels_poetry --informal-theorem \
   "Prove that for any natural numbers a and b, a + b = b + a"
 ```
 
@@ -285,7 +292,7 @@ mkdir theorems
 echo "theorem test1 : 2 + 2 = 4 := by sorry" > theorems/test1.lean
 echo "theorem test2 : 5 * 5 = 25 := by sorry" > theorems/test2.lean
 
-uv run goedels_poetry --formal-theorems ./theorems/
+goedels_poetry --formal-theorems ./theorems/
 ```
 
 Results will be saved as `test1.proof` and `test2.proof`.
@@ -358,19 +365,49 @@ make test
 
 This runs all tests except those requiring Lean installation.
 
-#### Integration Tests (Requires Lean)
+#### Integration Tests (Requires Lean Server)
 
-Integration tests verify the Kimina Lean Server integration:
+Integration tests verify the Kimina Lean Server integration. **These tests require a running Kimina Lean server.**
+
+**First-time setup:**
 
 ```bash
-# First-time setup: Install Lean
-cd kimina-lean-server && bash setup.sh && cd ..
+# Install integration test dependencies
+uv sync
 
-# Run integration tests
+# Clone the Kimina Lean Server (if not already cloned)
+cd .. && git clone https://github.com/KellyJDavis/kimina-lean-server.git
+cd kimina-lean-server
+
+# Install Lean and build dependencies (takes 15-30 minutes)
+bash setup.sh
+
+# Install server dependencies
+pip install -r requirements.txt
+pip install .
+prisma generate
+```
+
+**Run integration tests:**
+
+```bash
+# Terminal 1: Start the Kimina server
+cd ../kimina-lean-server
+python -m server
+
+# Terminal 2: Run the tests
+cd ../goedels-poetry
 make test-integration
 ```
 
-**Note**: Integration tests require Python 3.10+ due to modern type syntax in kimina-lean-server.
+The tests will automatically connect to `http://localhost:8000`. To use a different URL:
+
+```bash
+export KIMINA_SERVER_URL=http://localhost:9000
+make test-integration
+```
+
+**Note**: Integration tests require Python 3.10+ and a running Lean server with proper REPL configuration.
 
 #### All Tests
 
@@ -485,7 +522,7 @@ export KIMINA_LEAN_SERVER__URL="http://localhost:9000"
 export PROVER_AGENT_LLM__NUM_CTX="8192"
 
 # Run with custom configuration
-uv run goedels_poetry --formal-theorem "theorem example : 1 + 1 = 2 := by sorry"
+goedels_poetry --formal-theorem "theorem example : 1 + 1 = 2 := by sorry"
 ```
 
 **Multiple overrides**:
@@ -493,7 +530,7 @@ uv run goedels_poetry --formal-theorem "theorem example : 1 + 1 = 2 := by sorry"
 export PROVER_AGENT_LLM__MODEL="kdavis/Goedel-Prover-V2:70b"
 export DECOMPOSER_AGENT_LLM__MODEL="gpt-5-pro"
 export KIMINA_LEAN_SERVER__MAX_RETRIES="10"
-uv run goedels_poetry --formal-theorem "..."
+goedels_poetry --formal-theorem "..."
 ```
 
 **Environment variables are optional** - if not set, the system uses values from `config.ini`.
@@ -555,18 +592,20 @@ goedels-poetry/
 │   ├── cli.py                # Command-line interface
 │   ├── framework.py          # Core orchestration logic
 │   └── state.py              # State management
-├── kimina-lean-server/       # Lean 4 verification server
 ├── tests/                    # Test suite
 ├── Makefile                  # Development automation
 ├── pyproject.toml            # Package configuration
+├── CHANGELOG.md              # Version history
 └── README.md                 # This file
 ```
+
+**Note**: The [Kimina Lean Server](https://github.com/KellyJDavis/kimina-lean-server) is a separate repository that must be installed and run independently.
 
 ---
 
 ## License
 
-This project is licensed under the MIT License. See the [LICENSE](./LICENSE) file for details.
+This project is licensed under the Apache License 2.0. See the [LICENSE](./LICENSE) file for details.
 
 ---
 
@@ -619,5 +658,5 @@ For the Kimina Lean Server:
 **Ready to prove some theorems?** 🚀
 
 ```bash
-uv run goedels_poetry --informal-theorem "Prove that the sum of the first n natural numbers equals n(n+1)/2"
+goedels_poetry --informal-theorem "Prove that the sum of the first n natural numbers equals n(n+1)/2"
 ```

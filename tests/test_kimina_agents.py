@@ -44,24 +44,18 @@ else:
 
 
 # Sample Lean code for testing
+# Note: imports are handled by the agents, so we don't include them here
 VALID_LEAN_CODE = """
-import Mathlib
-import Aesop
-
 theorem test_theorem : True := by
   trivial
 """
 
 INVALID_LEAN_CODE = """
-import Mathlib
-
 theorem broken : False := by
   trivial
 """
 
 SIMPLE_THEOREM = """
-import Mathlib
-
 theorem simple : 1 + 1 = 2 := by
   rfl
 """

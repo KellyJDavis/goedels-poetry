@@ -60,6 +60,95 @@ jobs:
         env:
           CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
 
+  integration-tests:
+    runs-on: ubuntu-latest
+    env:
+      BASE: ${{ github.workspace }}
+      LEAN_SERVER_LEAN_VERSION: v4.15.0
+      KIMINA_REPO_URL: https://github.com/KellyJDavis/kimina-lean-server.git
+    steps:
+      - name: Check out goedels-poetry
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up the environment
+        uses: ./.github/actions/setup-python-env
+
+      - name: Clone kimina-lean-server
+        run: |
+          cd ${{ github.workspace }}
+          git clone --depth 1 ${{ env.KIMINA_REPO_URL }} kimina-lean-server-external
+          echo "KIMINA_SERVER_PATH=${{ github.workspace }}/kimina-lean-server-external" >> $GITHUB_ENV
+
+      - name: Restore Lean cache
+        id: lean-cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.elan
+            ${{ github.workspace }}/kimina-lean-server-external/repl
+            ${{ github.workspace }}/kimina-lean-server-external/mathlib4
+            ${{ github.workspace }}/kimina-lean-server-external/ast_export
+          key: ${{ runner.os }}-lean-${{ env.LEAN_SERVER_LEAN_VERSION }}-external
+
+      - name: Run Lean setup
+        if: steps.lean-cache.outputs.cache-hit != 'true'
+        run: |
+          cd ${{ env.KIMINA_SERVER_PATH }}
+          bash setup.sh
+
+      - name: Install server dependencies and generate Prisma types
+        run: |
+          cd ${{ env.KIMINA_SERVER_PATH }}
+          uv venv
+          source .venv/bin/activate
+          uv pip install -r requirements.txt
+          uv pip install .
+          prisma generate
+
+      - name: Add lake binary to PATH
+        run: echo "$HOME/.elan/bin" >> $GITHUB_PATH
+
+      - name: Verify Lean installation
+        run: |
+          which lake
+          lake --version
+
+      - name: Start Kimina server in background
+        run: |
+          cd ${{ env.KIMINA_SERVER_PATH }}
+          source .venv/bin/activate
+          nohup python -m server > server.log 2>&1 &
+          echo $! > server.pid
+          # Wait for server to be ready
+          sleep 10
+          # Check if server is running
+          if ! curl -f http://localhost:8000/health > /dev/null 2>&1; then
+            echo "Server failed to start. Log:"
+            cat server.log
+            exit 1
+          fi
+          echo "Server started successfully"
+
+      - name: Run integration tests
+        run: |
+          uv run python -m pytest tests/test_kimina_agents.py -v --cov --cov-config=pyproject.toml --cov-append --cov-report=xml
+        env:
+          KIMINA_SERVER_URL: http://localhost:8000
+
+      - name: Stop Kimina server
+        if: always()
+        run: |
+          if [ -f ${{ env.KIMINA_SERVER_PATH }}/server.pid ]; then
+            kill $(cat ${{ env.KIMINA_SERVER_PATH }}/server.pid) || true
+          fi
+
+      - name: Upload coverage reports to Codecov
+        uses: codecov/codecov-action@v4
+        env:
+          CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
+
   check-docs:
     runs-on: ubuntu-latest
     steps:
