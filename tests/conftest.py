@@ -1,5 +1,6 @@
 """Test fixtures for goedels_poetry tests."""
 
+import os
 from collections.abc import Generator
 
 import pytest
@@ -10,47 +11,45 @@ def kimina_server_url() -> Generator[str, None, None]:
     """
     Fixture that provides a test Kimina Lean server URL.
 
-    Creates an in-process FastAPI TestClient for integration tests.
-    This avoids the complexity of Docker or separate server processes in CI.
+    NOTE: Integration tests require a real, running Kimina Lean server.
+    The server must be started manually before running these tests.
+
+    To run integration tests:
+    1. Start the Kimina server in a separate terminal:
+       cd ../kimina-lean-server && python -m server
+
+    2. Run the tests:
+       make test-integration
 
     Yields
     ------
     str
-        The base URL for the test server (e.g., "http://testserver")
+        The base URL for the test server (e.g., "http://localhost:8000")
     """
-    # Lazy import to avoid requiring fastapi for all tests
+    import httpx
+
+    # Check if a real server is running
+    server_url = os.getenv("KIMINA_SERVER_URL", "http://localhost:8000")
+
+    # Try to connect to the server
     try:
-        from fastapi.testclient import TestClient
-    except ImportError:
-        pytest.skip("fastapi not installed - skipping integration test")
+        with httpx.Client(timeout=5.0) as client:
+            response = client.get(f"{server_url}/health", timeout=5.0)
+            if response.status_code != 200:
+                pytest.skip(
+                    f"Kimina server at {server_url} is not healthy. "
+                    "Start the server with: cd ../kimina-lean-server && python -m server"
+                )
+                return  # type: ignore[unreachable]
+    except (httpx.ConnectError, httpx.TimeoutException) as e:
+        pytest.skip(
+            f"Kimina server not running at {server_url}. "
+            f"Error: {e}. "
+            "Start the server with: cd ../kimina-lean-server && python -m server"
+        )
         return  # type: ignore[unreachable]
 
-    # Try to import kimina-lean-server modules
-    # Note: kimina-lean-server is no longer a submodule. To run integration tests,
-    # you need to install and run a Kimina Lean Server separately.
-    try:
-        from server.main import create_app  # type: ignore[import-not-found]
-        from server.settings import Environment, Settings  # type: ignore[import-not-found]
-    except ImportError:
-        pytest.skip("kimina-lean-server not available - install separately to run integration tests")
-        return  # type: ignore[unreachable]
-
-    settings = Settings(
-        _env_file=None,
-        max_repls=5,
-        max_repl_uses=10,
-        init_repls={},
-        database_url=None,
-        environment=Environment.prod,
-    )
-    app = create_app(settings)
-
-    # Create TestClient with base_url pointing to root
-    # (the agents will append /api/check, /api/ast_code, etc.)
-    with TestClient(app, base_url="http://testserver") as client:
-        # Store the client on the app so we can access it if needed
-        app.state.test_client = client  # type: ignore[attr-defined]
-        yield "http://testserver"
+    yield server_url
 
 
 @pytest.fixture

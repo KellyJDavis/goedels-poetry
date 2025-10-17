@@ -21,16 +21,17 @@ test: ## Test the code with pytest (excludes integration tests)
 	@uv run python -m pytest --ignore=tests/test_kimina_agents.py --cov --cov-config=pyproject.toml --cov-report=xml
 
 .PHONY: test-integration
-test-integration: ## Run integration tests (requires Lean and Kimina server installation)
-	@echo "⚠️  Integration tests require a Kimina Lean Server installation"
-	@echo "📝 Note: kimina-lean-server is no longer a submodule"
-	@echo "🔗 Install from: https://github.com/project-numina/kimina-lean-server"
+test-integration: ## Run integration tests (requires a RUNNING Kimina Lean server)
+	@echo "🚀 Running integration tests"
 	@echo ""
-	@if ! command -v lake > /dev/null; then \
-		echo "❌ Error: Lean (lake) is not installed."; \
-		exit 1; \
-	fi
-	@echo "🧪 Running integration tests..."
+	@echo "⚠️  Note: Integration tests require a running Kimina Lean server!"
+	@echo ""
+	@echo "To start the server (in a separate terminal):"
+	@echo "  cd ../kimina-lean-server && python -m server"
+	@echo ""
+	@echo "Or set a custom server URL:"
+	@echo "  export KIMINA_SERVER_URL=http://localhost:9000"
+	@echo ""
 	@uv run python -m pytest tests/test_kimina_agents.py -v --cov --cov-config=pyproject.toml --cov-append --cov-report=xml
 
 .PHONY: test-all

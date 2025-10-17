@@ -1,0 +1,78 @@
+name: Publish to PyPI
+
+on:
+  push:
+    tags:
+      - 'v*'  # Trigger on version tags like v0.0.1, v1.0.0, etc.
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write  # Required for trusted publishing (optional)
+
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Extract version from tag
+        id: get_version
+        run: |
+          TAG=${GITHUB_REF#refs/tags/v}
+          echo "version=$TAG" >> $GITHUB_OUTPUT
+          echo "Publishing version: $TAG"
+
+      - name: Verify version matches tag
+        run: |
+          PYPROJECT_VERSION=$(grep '^version = ' pyproject.toml | cut -d'"' -f2)
+          TAG_VERSION=${{ steps.get_version.outputs.version }}
+          echo "pyproject.toml version: $PYPROJECT_VERSION"
+          echo "Git tag version: $TAG_VERSION"
+          if [ "$PYPROJECT_VERSION" != "$TAG_VERSION" ]; then
+            echo "❌ Error: Version mismatch!"
+            echo "pyproject.toml has version $PYPROJECT_VERSION but tag is v$TAG_VERSION"
+            exit 1
+          fi
+          echo "✓ Version matches tag"
+
+      - name: Set up Python environment
+        uses: ./.github/actions/setup-python-env
+        with:
+          python-version: "3.11"
+
+      - name: Build package
+        run: |
+          echo "🔨 Building package..."
+          uv build
+          echo "✓ Build complete"
+          ls -lh dist/
+
+      - name: Check package
+        run: |
+          echo "🔍 Checking package with twine..."
+          uvx twine check dist/*
+
+      - name: Publish to PyPI
+        run: |
+          echo "🚀 Publishing to PyPI..."
+          uv publish
+        env:
+          UV_PUBLISH_TOKEN: ${{ secrets.PYPI_API_TOKEN }}
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v1
+        with:
+          files: dist/*
+          generate_release_notes: true
+          body: |
+            ## Installation
+            ```bash
+            pip install goedels-poetry==${{ steps.get_version.outputs.version }}
+            ```
+
+            See [CHANGELOG.md](https://github.com/KellyJDavis/goedels-poetry/blob/main/CHANGELOG.md) for details.
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
