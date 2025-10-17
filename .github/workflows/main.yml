@@ -103,10 +103,17 @@ jobs:
           cd ${{ env.KIMINA_SERVER_PATH }}
           uv sync --no-dev
 
+      - name: Debug - Check prisma installation
+        run: |
+          cd ${{ env.KIMINA_SERVER_PATH }}
+          ls -la .venv/bin/ | grep prisma || echo "No prisma in bin"
+          .venv/bin/python -c "import prisma; print(f'Prisma version: {prisma.__version__}')"
+
       - name: Generate prisma types
         run: |
           cd ${{ env.KIMINA_SERVER_PATH }}
-          uv run prisma generate
+          source .venv/bin/activate
+          prisma generate
 
       - name: Add lake binary to PATH
         run: echo "$HOME/.elan/bin" >> $GITHUB_PATH
@@ -119,7 +126,8 @@ jobs:
       - name: Start Kimina server in background
         run: |
           cd ${{ env.KIMINA_SERVER_PATH }}
-          nohup uv run python -m server > server.log 2>&1 &
+          source .venv/bin/activate
+          nohup python -m server > server.log 2>&1 &
           echo $! > server.pid
           # Wait for server to be ready
           sleep 10
