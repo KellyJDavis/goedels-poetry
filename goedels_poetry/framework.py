@@ -325,7 +325,7 @@ class GoedelsPoetryFramework:
                 complete_proof = self._state_manager.reconstruct_complete_proof()
                 self._console.print("Complete Lean4 Proof:")
                 self._console.print("-" * 80)
-                self._console.print(complete_proof)
+                self._console.print(complete_proof, markup=False)
                 self._console.print("-" * 80)
             except (AttributeError, KeyError, TypeError, ValueError) as e:
                 self._console.print(f"Error reconstructing proof: {e}")
