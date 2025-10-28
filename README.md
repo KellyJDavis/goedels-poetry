@@ -22,7 +22,7 @@
   - [Prerequisites](#prerequisites)
   - [Installation](#installation)
   - [Running the Kimina Lean Server](#running-the-kimina-lean-server)
-  - [Setting Up Your OpenAI API Key](#setting-up-your-openai-api-key)
+  - [Setting Up Your API Keys](#setting-up-your-api-keys)
   - [Using the Command Line Tool](#using-the-command-line-tool)
 - [Examples](#examples)
 - [How It Works](#how-it-works)
@@ -166,9 +166,11 @@ docker compose up
 
 See the [Kimina Server README](https://github.com/KellyJDavis/kimina-lean-server/blob/main/README.md) for more deployment options.
 
-### Setting Up Your OpenAI API Key
+### Setting Up Your API Keys
 
-Gödel's Poetry uses OpenAI's GPT models for certain reasoning tasks. You'll need an API key:
+Gödel's Poetry supports both OpenAI and Google Generative AI for certain reasoning tasks. You can use either provider:
+
+#### Option 1: OpenAI (Default)
 
 1. **Get an API key** from [OpenAI's platform](https://platform.openai.com/api-keys)
 
@@ -188,6 +190,34 @@ Gödel's Poetry uses OpenAI's GPT models for certain reasoning tasks. You'll nee
    ```powershell
    $env:OPENAI_API_KEY='your-api-key-here'
    ```
+
+#### Option 2: Google Generative AI
+
+1. **Get an API key** from [Google AI Studio](https://makersuite.google.com/app/apikey)
+
+2. **Set the environment variable**:
+
+   **On Linux/macOS**:
+   ```bash
+   export GOOGLE_API_KEY='your-api-key-here'
+   ```
+
+   **On Windows (Command Prompt)**:
+   ```cmd
+   set GOOGLE_API_KEY=your-api-key-here
+   ```
+
+   **On Windows (PowerShell)**:
+   ```powershell
+   $env:GOOGLE_API_KEY='your-api-key-here'
+   ```
+
+#### Provider Selection
+
+The system automatically selects the provider based on available API keys:
+- If both keys are set, **OpenAI takes priority**
+- If only one key is set, that provider is used
+- If no keys are set, the system falls back to OpenAI with a warning
 
 3. **Make it permanent** (optional):
 
@@ -466,10 +496,19 @@ model = qwen3:30b
 num_ctx = 262144
 
 [DECOMPOSER_AGENT_LLM]
-model = gpt-5-2025-08-07
-max_completion_tokens = 50000
-max_remote_retries = 5
-max_retries = 3
+# Provider selection (openai, google, auto)
+provider = auto
+
+# OpenAI-specific settings
+openai_model = gpt-5-2025-08-07
+openai_max_completion_tokens = 50000
+openai_max_remote_retries = 5
+openai_max_retries = 3
+
+# Google-specific settings
+google_model = gemini-2.5-flash
+google_max_output_tokens = 50000
+google_max_retries = 3
 
 [KIMINA_LEAN_SERVER]
 url = http://0.0.0.0:8000
@@ -528,8 +567,16 @@ goedels_poetry --formal-theorem "theorem theorem_54_43 : 1 + 1 = 2 := by sorry"
 **Multiple overrides**:
 ```bash
 export PROVER_AGENT_LLM__MODEL="kdavis/Goedel-Prover-V2:70b"
-export DECOMPOSER_AGENT_LLM__MODEL="gpt-5-pro"
+export DECOMPOSER_AGENT_LLM__OPENAI_MODEL="gpt-5-pro"
 export KIMINA_LEAN_SERVER__MAX_RETRIES="10"
+goedels_poetry --formal-theorem "..."
+```
+
+**Using Google Generative AI**:
+```bash
+export GOOGLE_API_KEY="your-google-api-key"
+export DECOMPOSER_AGENT_LLM__GOOGLE_MODEL="gemini-2.5-flash"
+export DECOMPOSER_AGENT_LLM__GOOGLE_MAX_OUTPUT_TOKENS="100000"
 goedels_poetry --formal-theorem "..."
 ```
 
