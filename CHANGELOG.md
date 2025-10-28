@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+- Support for Google Generative AI as an alternative to OpenAI for the decomposer agent
+- Automatic provider selection based on available API keys (OpenAI takes priority)
+- Provider-specific configuration parameters for OpenAI and Google models
+- Backward compatibility with existing OpenAI-only configurations
+
+### Changed
+- Updated decomposer agent configuration to support multiple providers
+- Enhanced configuration documentation with Google Generative AI setup instructions
+- Updated default Google model from `gemini-2.0-flash-exp` to `gemini-2.5-flash` for improved performance and capabilities
+
 ## [0.0.2] - 2025-01-21
 - Fixed printout of final proof
 
