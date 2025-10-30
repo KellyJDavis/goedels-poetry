@@ -484,7 +484,7 @@ def test_reconstruct_complete_proof_simple_leaf() -> None:
             proved=True,
             errors=None,
             ast=None,
-            proof_attempts=1,
+            self_correction_attempts=1,
             proof_history=[],
         )
 
@@ -537,8 +537,8 @@ def test_reconstruct_complete_proof_with_single_have() -> None:
             syntactic=True,
             errors=None,
             ast=None,
-            decomposition_attempts=1,
-            decomposition_history=[],
+            self_correction_attempts=1,
+            proof_history=[],
         )
 
         # Create child proof
@@ -551,7 +551,7 @@ def test_reconstruct_complete_proof_with_single_have() -> None:
             proved=True,
             errors=None,
             ast=None,
-            proof_attempts=1,
+            self_correction_attempts=1,
             proof_history=[],
         )
 
@@ -625,8 +625,8 @@ def test_reconstruct_complete_proof_with_multiple_haves() -> None:
             syntactic=True,
             errors=None,
             ast=None,
-            decomposition_attempts=1,
-            decomposition_history=[],
+            self_correction_attempts=1,
+            proof_history=[],
         )
 
         # Create first child proof
@@ -639,7 +639,7 @@ def test_reconstruct_complete_proof_with_multiple_haves() -> None:
             proved=True,
             errors=None,
             ast=None,
-            proof_attempts=1,
+            self_correction_attempts=1,
             proof_history=[],
         )
 
@@ -653,7 +653,7 @@ def test_reconstruct_complete_proof_with_multiple_haves() -> None:
             proved=True,
             errors=None,
             ast=None,
-            proof_attempts=1,
+            self_correction_attempts=1,
             proof_history=[],
         )
 
@@ -712,8 +712,8 @@ def test_reconstruct_complete_proof_with_main_body() -> None:
             syntactic=True,
             errors=None,
             ast=None,
-            decomposition_attempts=1,
-            decomposition_history=[],
+            self_correction_attempts=1,
+            proof_history=[],
         )
 
         # Create have proof
@@ -726,7 +726,7 @@ def test_reconstruct_complete_proof_with_main_body() -> None:
             proved=True,
             errors=None,
             ast=None,
-            proof_attempts=1,
+            self_correction_attempts=1,
             proof_history=[],
         )
 
@@ -740,7 +740,7 @@ def test_reconstruct_complete_proof_with_main_body() -> None:
             proved=True,
             errors=None,
             ast=None,
-            proof_attempts=1,
+            self_correction_attempts=1,
             proof_history=[],
         )
 
@@ -805,8 +805,8 @@ def test_reconstruct_complete_proof_proper_indentation() -> None:
             syntactic=True,
             errors=None,
             ast=None,
-            decomposition_attempts=1,
-            decomposition_history=[],
+            self_correction_attempts=1,
+            proof_history=[],
         )
 
         # Create child with multi-line proof
@@ -819,7 +819,7 @@ def test_reconstruct_complete_proof_proper_indentation() -> None:
             proved=True,
             errors=None,
             ast=None,
-            proof_attempts=1,
+            self_correction_attempts=1,
             proof_history=[],
         )
 
@@ -885,8 +885,8 @@ def test_reconstruct_complete_proof_nested_decomposition() -> None:
             syntactic=True,
             errors=None,
             ast=None,
-            decomposition_attempts=1,
-            decomposition_history=[],
+            self_correction_attempts=1,
+            proof_history=[],
         )
 
         # Create child decomposed state (helper1 is also decomposed)
@@ -903,8 +903,8 @@ def test_reconstruct_complete_proof_nested_decomposition() -> None:
             syntactic=True,
             errors=None,
             ast=None,
-            decomposition_attempts=1,
-            decomposition_history=[],
+            self_correction_attempts=1,
+            proof_history=[],
         )
 
         # Create grandchild proof
@@ -917,7 +917,7 @@ def test_reconstruct_complete_proof_nested_decomposition() -> None:
             proved=True,
             errors=None,
             ast=None,
-            proof_attempts=1,
+            self_correction_attempts=1,
             proof_history=[],
         )
 
@@ -983,8 +983,8 @@ def test_reconstruct_complete_proof_with_dependencies_in_signature() -> None:
             syntactic=True,
             errors=None,
             ast=None,
-            decomposition_attempts=1,
-            decomposition_history=[],
+            self_correction_attempts=1,
+            proof_history=[],
         )
 
         # Create first child
@@ -997,7 +997,7 @@ def test_reconstruct_complete_proof_with_dependencies_in_signature() -> None:
             proved=True,
             errors=None,
             ast=None,
-            proof_attempts=1,
+            self_correction_attempts=1,
             proof_history=[],
         )
 
@@ -1011,7 +1011,7 @@ def test_reconstruct_complete_proof_with_dependencies_in_signature() -> None:
             proved=True,
             errors=None,
             ast=None,
-            proof_attempts=1,
+            self_correction_attempts=1,
             proof_history=[],
         )
 
@@ -1025,7 +1025,7 @@ def test_reconstruct_complete_proof_with_dependencies_in_signature() -> None:
             proved=True,
             errors=None,
             ast=None,
-            proof_attempts=1,
+            self_correction_attempts=1,
             proof_history=[],
         )
 
@@ -1080,7 +1080,7 @@ def test_reconstruct_complete_proof_empty_proof() -> None:
             proved=False,
             errors=None,
             ast=None,
-            proof_attempts=0,
+            self_correction_attempts=0,
             proof_history=[],
         )
 
@@ -1194,8 +1194,8 @@ def test_reconstruct_complete_proof_multiline_type_signatures() -> None:
             syntactic=True,
             errors=None,
             ast=None,
-            decomposition_attempts=1,
-            decomposition_history=[],
+            self_correction_attempts=1,
+            proof_history=[],
         )
 
         # Create first child proof with multiline type signature
@@ -1214,7 +1214,7 @@ def test_reconstruct_complete_proof_multiline_type_signatures() -> None:
             proved=True,
             errors=None,
             ast=None,
-            proof_attempts=1,
+            self_correction_attempts=1,
             proof_history=[],
         )
 
@@ -1230,7 +1230,7 @@ def test_reconstruct_complete_proof_multiline_type_signatures() -> None:
             proved=True,
             errors=None,
             ast=None,
-            proof_attempts=1,
+            self_correction_attempts=1,
             proof_history=[],
         )
 
@@ -1419,8 +1419,8 @@ def test_reconstruct_proof_with_apostrophe_identifiers() -> None:
             syntactic=True,
             errors=None,
             ast=None,
-            decomposition_attempts=1,
-            decomposition_history=[],
+            self_correction_attempts=1,
+            proof_history=[],
         )
 
         # Create child proof with apostrophe in name
@@ -1433,7 +1433,7 @@ def test_reconstruct_proof_with_apostrophe_identifiers() -> None:
             proved=True,
             errors=None,
             ast=None,
-            proof_attempts=1,
+            self_correction_attempts=1,
             proof_history=[],
         )
 
@@ -1553,8 +1553,8 @@ def test_reconstruct_proof_multiline_have_sorry() -> None:
             syntactic=True,
             errors=None,
             ast=None,
-            decomposition_attempts=1,
-            decomposition_history=[],
+            self_correction_attempts=1,
+            proof_history=[],
         )
 
         # Create child proof for the have
@@ -1567,7 +1567,7 @@ def test_reconstruct_proof_multiline_have_sorry() -> None:
             proved=True,
             errors=None,
             ast=None,
-            proof_attempts=1,
+            self_correction_attempts=1,
             proof_history=[],
         )
 
@@ -1581,7 +1581,7 @@ def test_reconstruct_proof_multiline_have_sorry() -> None:
             proved=True,
             errors=None,
             ast=None,
-            proof_attempts=1,
+            self_correction_attempts=1,
             proof_history=[],
         )
 

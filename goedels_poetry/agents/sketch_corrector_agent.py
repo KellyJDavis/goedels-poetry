@@ -88,7 +88,7 @@ def _corrector(state: DecomposedFormalTheoremState) -> DecomposedFormalTheoremSt
     # Construct the prompt
     prompt = load_prompt(
         "decomposer-subsequent",
-        prev_round_num=str(state["decomposition_attempts"] - 1),
+        prev_round_num=str(state["self_correction_attempts"] - 1),
         error_message_for_prev_round=str(state["errors"]),
     )
 

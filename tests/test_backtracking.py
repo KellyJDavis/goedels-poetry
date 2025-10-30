@@ -58,7 +58,7 @@ def test_get_sketches_to_backtrack_with_items(temp_state: GoedelsPoetryState) ->
         syntactic=False,
         errors=None,
         ast=None,
-        decomposition_attempts=0,
+        self_correction_attempts=0,
         decomposition_history=[],
     )
     temp_state.decomposition_backtrack_queue.append(decomposed_state)
@@ -86,7 +86,7 @@ def test_get_sketches_to_backtrack_with_multiple_items(temp_state: GoedelsPoetry
             syntactic=False,
             errors=None,
             ast=None,
-            decomposition_attempts=i,
+            self_correction_attempts=i,
             decomposition_history=[],
         )
         states.append(state)
@@ -113,7 +113,7 @@ def test_set_backtracked_sketches_clears_queue(temp_state: GoedelsPoetryState) -
         syntactic=False,
         errors=None,
         ast=None,
-        decomposition_attempts=0,
+        self_correction_attempts=0,
         decomposition_history=[],
     )
     temp_state.decomposition_backtrack_queue.append(decomposed_state)
@@ -143,7 +143,7 @@ def test_set_backtracked_sketches_adds_to_validate_queue(temp_state: GoedelsPoet
         syntactic=False,
         errors=None,
         ast=None,
-        decomposition_attempts=1,
+        self_correction_attempts=1,
         decomposition_history=[],
     )
 
@@ -174,7 +174,7 @@ def test_set_backtracked_sketches_with_multiple_items(temp_state: GoedelsPoetryS
             syntactic=False,
             errors=None,
             ast=None,
-            decomposition_attempts=i + 1,
+            self_correction_attempts=i + 1,
             decomposition_history=[],
         )
         states.append(state)
@@ -192,7 +192,7 @@ def test_set_backtracked_sketches_with_multiple_items(temp_state: GoedelsPoetryS
 
 def test_backtracking_integration_with_validated_sketches(temp_state: GoedelsPoetryState) -> None:
     """Test that set_validated_sketches triggers backtracking for failed sketches."""
-    from goedels_poetry.config.llm import DECOMPOSER_AGENT_MAX_SELF_CORRECTIONS
+    from goedels_poetry.config.llm import DECOMPOSER_AGENT_MAX_SELF_CORRECTION_ATTEMPTS
 
     manager = GoedelsPoetryStateManager(temp_state)
 
@@ -206,7 +206,7 @@ def test_backtracking_integration_with_validated_sketches(temp_state: GoedelsPoe
         syntactic=False,
         errors=None,
         ast=None,
-        decomposition_attempts=0,
+        self_correction_attempts=0,
         decomposition_history=[],
     )
 
@@ -220,7 +220,7 @@ def test_backtracking_integration_with_validated_sketches(temp_state: GoedelsPoe
         syntactic=False,
         errors="Compilation error",
         ast=None,
-        decomposition_attempts=DECOMPOSER_AGENT_MAX_SELF_CORRECTIONS - 1,  # Will reach max after increment
+        self_correction_attempts=DECOMPOSER_AGENT_MAX_SELF_CORRECTION_ATTEMPTS - 1,  # Will reach max after increment
         decomposition_history=[],
     )
     parent["children"] = [cast(TreeNode, child)]
@@ -236,7 +236,7 @@ def test_backtracking_integration_with_validated_sketches(temp_state: GoedelsPoe
     manager.set_validated_sketches(validated_sketches)
 
     # Child should have reached max attempts
-    assert child["decomposition_attempts"] == DECOMPOSER_AGENT_MAX_SELF_CORRECTIONS
+    assert child["self_correction_attempts"] == DECOMPOSER_AGENT_MAX_SELF_CORRECTION_ATTEMPTS
 
     # Parent should be in the backtrack queue (since it has attempts remaining)
     assert len(temp_state.decomposition_backtrack_queue) == 1
@@ -252,7 +252,7 @@ def test_backtracking_integration_with_validated_sketches(temp_state: GoedelsPoe
 
 def test_backtracking_sets_finished_when_no_ancestor(temp_state: GoedelsPoetryState) -> None:
     """Test that backtracking sets is_finished when no backtrackable ancestor exists."""
-    from goedels_poetry.config.llm import DECOMPOSER_AGENT_MAX_SELF_CORRECTIONS
+    from goedels_poetry.config.llm import DECOMPOSER_AGENT_MAX_SELF_CORRECTION_ATTEMPTS
 
     manager = GoedelsPoetryStateManager(temp_state)
 
@@ -266,7 +266,7 @@ def test_backtracking_sets_finished_when_no_ancestor(temp_state: GoedelsPoetrySt
         syntactic=False,
         errors="Compilation error",
         ast=None,
-        decomposition_attempts=DECOMPOSER_AGENT_MAX_SELF_CORRECTIONS - 1,  # Will reach max after increment
+        self_correction_attempts=DECOMPOSER_AGENT_MAX_SELF_CORRECTION_ATTEMPTS - 1,  # Will reach max after increment
         decomposition_history=[],
     )
 
@@ -279,7 +279,7 @@ def test_backtracking_sets_finished_when_no_ancestor(temp_state: GoedelsPoetrySt
     manager.set_validated_sketches(validated_sketches)
 
     # Root should have reached max attempts
-    assert root["decomposition_attempts"] == DECOMPOSER_AGENT_MAX_SELF_CORRECTIONS
+    assert root["self_correction_attempts"] == DECOMPOSER_AGENT_MAX_SELF_CORRECTION_ATTEMPTS
 
     # No backtrackable ancestor exists, so is_finished should be True
     assert manager.is_finished is True
@@ -290,7 +290,7 @@ def test_backtracking_sets_finished_when_no_ancestor(temp_state: GoedelsPoetrySt
 
 def test_backtracking_removes_descendants_from_queues(temp_state: GoedelsPoetryState) -> None:
     """Test that backtracking removes all descendants from all queues."""
-    from goedels_poetry.config.llm import DECOMPOSER_AGENT_MAX_SELF_CORRECTIONS
+    from goedels_poetry.config.llm import DECOMPOSER_AGENT_MAX_SELF_CORRECTION_ATTEMPTS
 
     manager = GoedelsPoetryStateManager(temp_state)
 
@@ -304,7 +304,7 @@ def test_backtracking_removes_descendants_from_queues(temp_state: GoedelsPoetryS
         syntactic=False,
         errors=None,
         ast=None,
-        decomposition_attempts=0,
+        self_correction_attempts=0,
         decomposition_history=[],
     )
 
@@ -318,7 +318,7 @@ def test_backtracking_removes_descendants_from_queues(temp_state: GoedelsPoetryS
         syntactic=False,
         errors=None,
         ast=None,
-        decomposition_attempts=0,
+        self_correction_attempts=0,
         decomposition_history=[],
     )
 
@@ -332,7 +332,7 @@ def test_backtracking_removes_descendants_from_queues(temp_state: GoedelsPoetryS
         proved=False,
         errors=None,
         ast=None,
-        proof_attempts=0,
+        self_correction_attempts=0,
         proof_history=[],
     )
 
@@ -349,7 +349,7 @@ def test_backtracking_removes_descendants_from_queues(temp_state: GoedelsPoetryS
         syntactic=False,
         errors="Compilation error",
         ast=None,
-        decomposition_attempts=DECOMPOSER_AGENT_MAX_SELF_CORRECTIONS - 1,
+        self_correction_attempts=DECOMPOSER_AGENT_MAX_SELF_CORRECTION_ATTEMPTS - 1,
         decomposition_history=[],
     )
     parent["children"].append(cast(TreeNode, failed_child))
@@ -376,7 +376,7 @@ def test_backtracking_removes_descendants_from_queues(temp_state: GoedelsPoetryS
 
 def test_backtracking_with_valid_sketches(temp_state: GoedelsPoetryState) -> None:
     """Test that valid sketches still get processed while failed ones trigger backtracking."""
-    from goedels_poetry.config.llm import DECOMPOSER_AGENT_MAX_SELF_CORRECTIONS
+    from goedels_poetry.config.llm import DECOMPOSER_AGENT_MAX_SELF_CORRECTION_ATTEMPTS
 
     manager = GoedelsPoetryStateManager(temp_state)
 
@@ -390,7 +390,7 @@ def test_backtracking_with_valid_sketches(temp_state: GoedelsPoetryState) -> Non
         syntactic=True,  # Valid
         errors=None,
         ast=None,
-        decomposition_attempts=0,
+        self_correction_attempts=0,
         decomposition_history=[],
     )
 
@@ -404,7 +404,7 @@ def test_backtracking_with_valid_sketches(temp_state: GoedelsPoetryState) -> Non
         syntactic=False,
         errors=None,
         ast=None,
-        decomposition_attempts=0,
+        self_correction_attempts=0,
         decomposition_history=[],
     )
 
@@ -418,7 +418,7 @@ def test_backtracking_with_valid_sketches(temp_state: GoedelsPoetryState) -> Non
         syntactic=False,  # Invalid
         errors="Compilation error",
         ast=None,
-        decomposition_attempts=DECOMPOSER_AGENT_MAX_SELF_CORRECTIONS - 1,
+        self_correction_attempts=DECOMPOSER_AGENT_MAX_SELF_CORRECTION_ATTEMPTS - 1,
         decomposition_history=[],
     )
     parent_of_failed["children"] = [cast(TreeNode, failed_sketch)]
@@ -436,14 +436,14 @@ def test_backtracking_with_valid_sketches(temp_state: GoedelsPoetryState) -> Non
     assert parent_of_failed in temp_state.decomposition_backtrack_queue
 
     # Failed sketch should have reached max attempts
-    assert failed_sketch["decomposition_attempts"] == DECOMPOSER_AGENT_MAX_SELF_CORRECTIONS
+    assert failed_sketch["self_correction_attempts"] == DECOMPOSER_AGENT_MAX_SELF_CORRECTION_ATTEMPTS
 
 
 def test_backtracking_preserves_history(temp_state: GoedelsPoetryState) -> None:
     """Test that backtracking preserves decomposition_history."""
     from langchain_core.messages import HumanMessage
 
-    from goedels_poetry.config.llm import DECOMPOSER_AGENT_MAX_SELF_CORRECTIONS
+    from goedels_poetry.config.llm import DECOMPOSER_AGENT_MAX_SELF_CORRECTION_ATTEMPTS
 
     manager = GoedelsPoetryStateManager(temp_state)
 
@@ -457,7 +457,7 @@ def test_backtracking_preserves_history(temp_state: GoedelsPoetryState) -> None:
         syntactic=False,
         errors=None,
         ast=None,
-        decomposition_attempts=0,
+        self_correction_attempts=0,
         decomposition_history=[HumanMessage(content="Initial prompt")],
     )
 
@@ -471,7 +471,7 @@ def test_backtracking_preserves_history(temp_state: GoedelsPoetryState) -> None:
         syntactic=False,
         errors="Compilation error",
         ast=None,
-        decomposition_attempts=DECOMPOSER_AGENT_MAX_SELF_CORRECTIONS - 1,
+        self_correction_attempts=DECOMPOSER_AGENT_MAX_SELF_CORRECTION_ATTEMPTS - 1,
         decomposition_history=[],
     )
     parent["children"] = [cast(TreeNode, child)]
@@ -489,5 +489,5 @@ def test_backtracking_preserves_history(temp_state: GoedelsPoetryState) -> None:
     assert len(parent["decomposition_history"]) == 1
     assert parent["decomposition_history"][0].content == "Initial prompt"
 
-    # decomposition_attempts should be preserved (not incremented by backtracking itself)
-    assert parent["decomposition_attempts"] == 0
+    # self_correction_attempts should be preserved (not incremented by backtracking itself)
+    assert parent["self_correction_attempts"] == 0

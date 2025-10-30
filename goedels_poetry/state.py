@@ -17,10 +17,10 @@ from goedels_poetry.agents.state import (
     InformalTheoremState,
 )
 from goedels_poetry.config.llm import (
-    DECOMPOSER_AGENT_MAX_SELF_CORRECTIONS,
+    DECOMPOSER_AGENT_MAX_SELF_CORRECTION_ATTEMPTS,
     FORMALIZER_AGENT_MAX_RETRIES,
     PROVER_AGENT_MAX_DEPTH,
-    PROVER_AGENT_MAX_SELF_CORRECTIONS,
+    PROVER_AGENT_MAX_SELF_CORRECTION_ATTEMPTS,
 )
 
 # Note: FORMALIZER_AGENT_LLM and SEMANTICS_AGENT_LLM are intentionally NOT imported here
@@ -75,7 +75,7 @@ class GoedelsPoetryState:
                     proved=False,
                     errors=None,
                     ast=None,
-                    proof_attempts=0,
+                    self_correction_attempts=0,
                     proof_history=[],
                 ),
             )
@@ -339,7 +339,7 @@ class GoedelsPoetryStateManager:
 
     def _find_backtrackable_ancestor(self, node: DecomposedFormalTheoremState) -> DecomposedFormalTheoremState | None:
         """
-        Find the nearest ancestor (closest to the failed node) that has decomposition_attempts
+        Find the nearest ancestor (closest to the failed node) that has self_correction_attempts
         less than DECOMPOSER_AGENT_MAX_SELF_CORRECTIONS. Returns None if no such ancestor exists.
 
         Parameters
@@ -357,7 +357,7 @@ class GoedelsPoetryStateManager:
             # Check if current is a DecomposedFormalTheoremState (has 'children' attribute)
             if isinstance(current, dict) and "children" in current:
                 decomposed_current = cast(DecomposedFormalTheoremState, current)
-                if decomposed_current["decomposition_attempts"] < DECOMPOSER_AGENT_MAX_SELF_CORRECTIONS:
+                if decomposed_current["self_correction_attempts"] < DECOMPOSER_AGENT_MAX_SELF_CORRECTION_ATTEMPTS:
                     return decomposed_current
             current = current["parent"] if isinstance(current, dict) else None
         return None
@@ -665,7 +665,7 @@ class GoedelsPoetryStateManager:
                 proved=False,
                 errors=None,
                 ast=None,
-                proof_attempts=0,
+                self_correction_attempts=0,
                 proof_history=[],
             )
             # Queue theorem_to_prove to be proven
@@ -785,17 +785,21 @@ class GoedelsPoetryStateManager:
 
         # Increment the proof attempt count for all validated proofs
         for validated_proof in validated_proofs_outputs:
-            validated_proof["proof_attempts"] += 1
+            validated_proof["self_correction_attempts"] += 1
 
         # Gather all unsuccessful proofs
         unsuccessful_proofs = [vp for vp in validated_proofs_outputs if (not vp["proved"])]
 
         # Partition unsuccessful proofs into those that are too difficult and those to correct
         proofs_too_difficult = [
-            up for up in unsuccessful_proofs if (up["proof_attempts"] >= PROVER_AGENT_MAX_SELF_CORRECTIONS)
+            up
+            for up in unsuccessful_proofs
+            if (up["self_correction_attempts"] >= PROVER_AGENT_MAX_SELF_CORRECTION_ATTEMPTS)
         ]
         proofs_to_correct = [
-            up for up in unsuccessful_proofs if (up["proof_attempts"] < PROVER_AGENT_MAX_SELF_CORRECTIONS)
+            up
+            for up in unsuccessful_proofs
+            if (up["self_correction_attempts"] < PROVER_AGENT_MAX_SELF_CORRECTION_ATTEMPTS)
         ]
 
         # Queue proofs too difficult for decomposition
@@ -827,7 +831,7 @@ class GoedelsPoetryStateManager:
                 syntactic=False,
                 errors=None,
                 ast=None,
-                decomposition_attempts=0,
+                self_correction_attempts=0,
                 decomposition_history=[],
             )
             self._state.decomposition_sketch_queue.append(formal_theorem_to_decompose)
@@ -987,17 +991,21 @@ class GoedelsPoetryStateManager:
 
         # Increment the decomposition attempt count
         for validated_sketch in validated_sketches_outputs:
-            validated_sketch["decomposition_attempts"] += 1
+            validated_sketch["self_correction_attempts"] += 1
 
         # Gather all invalid sketches
         invalid_sketches = [vs for vs in validated_sketches_outputs if (not vs["syntactic"])]
 
         # Partition invalid sketches into those too difficult to decompose and those to correct
         sketches_too_difficult = [
-            ivs for ivs in invalid_sketches if (ivs["decomposition_attempts"] >= DECOMPOSER_AGENT_MAX_SELF_CORRECTIONS)
+            ivs
+            for ivs in invalid_sketches
+            if (ivs["self_correction_attempts"] >= DECOMPOSER_AGENT_MAX_SELF_CORRECTION_ATTEMPTS)
         ]
         sketches_to_correct = [
-            ivs for ivs in invalid_sketches if (ivs["decomposition_attempts"] < DECOMPOSER_AGENT_MAX_SELF_CORRECTIONS)
+            ivs
+            for ivs in invalid_sketches
+            if (ivs["self_correction_attempts"] < DECOMPOSER_AGENT_MAX_SELF_CORRECTION_ATTEMPTS)
         ]
 
         # Addd sketches to correct to the correction queue

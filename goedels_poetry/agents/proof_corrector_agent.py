@@ -87,7 +87,7 @@ def _corrector(state: FormalTheoremProofState) -> FormalTheoremProofStates:
     # Construct the prompt
     prompt = load_prompt(
         "goedel-prover-v2-subsequent",
-        prev_round_num=str(state["proof_attempts"] - 1),
+        prev_round_num=str(state["self_correction_attempts"] - 1),
         error_message_for_prev_round=str(state["errors"]),
     )
 
