@@ -488,7 +488,7 @@ max_retries = 10
 [PROVER_AGENT_LLM]
 model = kdavis/Goedel-Prover-V2:32b
 num_ctx = 40960
-max_retries = 10
+max_self_corrections = 3
 max_depth = 20
 
 [SEMANTICS_AGENT_LLM]
@@ -503,12 +503,12 @@ provider = auto
 openai_model = gpt-5-2025-08-07
 openai_max_completion_tokens = 50000
 openai_max_remote_retries = 5
-openai_max_retries = 3
+openai_max_self_corrections = 6
 
 # Google-specific settings
 google_model = gemini-2.5-flash
 google_max_output_tokens = 50000
-google_max_retries = 3
+google_max_self_corrections = 6
 
 [KIMINA_LEAN_SERVER]
 url = http://0.0.0.0:8000
@@ -525,7 +525,7 @@ max_retries = 5
 **Prover Agent**:
 - `model`: The LLM used to generate proofs
 - `num_ctx`: Context window size (tokens)
-- `max_retries`: Maximum proof generation attempts
+- `max_self_corrections`: Maximum proof generation self-correction attempts
 - `max_depth`: Maximum recursion depth for proof decomposition
 
 **Semantics Agent**:
@@ -536,7 +536,7 @@ max_retries = 5
 - `model`: The LLM used for proof sketching and decomposition
 - `max_completion_tokens`: Maximum tokens in generated response
 - `max_remote_retries`: Retry attempts for API calls
-- `max_retries`: Retry attempts for decomposition
+- `openai_max_self_corrections` / `google_max_self_corrections`: Max decomposition self-corrections
 
 **Kimina Lean Server**:
 - `url`: Server endpoint for Lean verification

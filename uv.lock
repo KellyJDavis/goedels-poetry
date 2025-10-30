@@ -779,7 +779,7 @@ requires-dist = [
     { name = "jinja2", specifier = ">=3.1.6" },
     { name = "kimina-ast-client", specifier = ">=0.2.2" },
     { name = "langchain-core", specifier = ">=0.3.77" },
-    { name = "langchain-google-genai", specifier = ">=2.0.0" },
+    { name = "langchain-google-genai", specifier = ">=2.1.12" },
     { name = "langchain-ollama", specifier = ">=0.3.10" },
     { name = "langchain-openai", specifier = ">=0.3.34" },
     { name = "langgraph", specifier = ">=0.6.8" },
