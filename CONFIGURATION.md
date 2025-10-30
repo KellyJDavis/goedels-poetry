@@ -17,7 +17,7 @@ max_retries = 10
 [PROVER_AGENT_LLM]
 model = kdavis/Goedel-Prover-V2:32b
 num_ctx = 40960
-max_retries = 10
+max_self_corrections = 3
 max_depth = 20
 
 [SEMANTICS_AGENT_LLM]
@@ -32,12 +32,12 @@ provider = auto
 openai_model = gpt-5-2025-08-07
 openai_max_completion_tokens = 50000
 openai_max_remote_retries = 5
-openai_max_retries = 3
+openai_max_self_corrections = 6
 
 # Google-specific settings
 google_model = gemini-2.5-flash
 google_max_output_tokens = 50000
-google_max_retries = 3
+google_max_self_corrections = 6
 
 [KIMINA_LEAN_SERVER]
 url = http://0.0.0.0:8000
@@ -77,8 +77,8 @@ export GOOGLE_API_KEY="your-google-api-key"
 
 The decomposer agent uses different configuration parameters depending on the selected provider:
 
-- **OpenAI**: Uses `openai_model`, `openai_max_completion_tokens`, `openai_max_remote_retries`
-- **Google**: Uses `google_model`, `google_max_output_tokens`, `google_max_retries`
+– **OpenAI**: Uses `openai_model`, `openai_max_completion_tokens`, `openai_max_remote_retries`
+– **Google**: Uses `google_model`, `google_max_output_tokens`, `google_max_self_corrections`
 
 ## Environment Variable Overrides
 
