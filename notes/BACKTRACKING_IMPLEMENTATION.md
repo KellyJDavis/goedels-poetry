@@ -6,13 +6,13 @@ This document describes the implementation of the proof backtracking feature for
 
 ## Problem Statement
 
-Previously, when a `DecomposedFormalTheoremState` reached `decomposition_attempts >= DECOMPOSER_AGENT_MAX_RETRIES`, the system would simply set `is_finished = True` and give up. This was suboptimal because an ancestor of the failed node might still have remaining attempts and could be sketched in a different manner to explore alternative proof strategies.
+Previously, when a `DecomposedFormalTheoremState` reached `decomposition_attempts >= DECOMPOSER_AGENT_MAX_SELF_CORRECTIONS`, the system would simply set `is_finished = True` and give up. This was suboptimal because an ancestor of the failed node might still have remaining attempts and could be sketched in a different manner to explore alternative proof strategies.
 
 ## Solution Design
 
 ### Key Requirements
 
-1. **Backtrack to nearest ancestor**: Find the closest ancestor with `decomposition_attempts < DECOMPOSER_AGENT_MAX_RETRIES`
+1. **Backtrack to nearest ancestor**: Find the closest ancestor with `decomposition_attempts < DECOMPOSER_AGENT_MAX_SELF_CORRECTIONS`
 2. **Increment attempts on re-sketch**: When re-sketching, increment the ancestor's `decomposition_attempts`
 3. **Exhaust all options**: Only set `is_finished = True` when all ancestors (including root) have exhausted their attempts
 4. **Re-sketch root if needed**: The root node can be re-sketched if it's a `DecomposedFormalTheoremState`
@@ -33,7 +33,7 @@ This queue holds nodes that need to be re-sketched due to failed children attemp
 #### 2. Helper Methods in `GoedelsPoetryStateManager`
 
 ##### `_find_backtrackable_ancestor(node)`
-Traverses up the tree from a failed node to find the nearest ancestor with `decomposition_attempts < DECOMPOSER_AGENT_MAX_RETRIES`. Returns `None` if no such ancestor exists.
+Traverses up the tree from a failed node to find the nearest ancestor with `decomposition_attempts < DECOMPOSER_AGENT_MAX_SELF_CORRECTIONS`. Returns `None` if no such ancestor exists.
 
 ##### `_collect_all_descendants(node)`
 Recursively collects all descendants (children, grandchildren, etc.) of a given node.

@@ -17,10 +17,10 @@ from goedels_poetry.agents.state import (
     InformalTheoremState,
 )
 from goedels_poetry.config.llm import (
-    DECOMPOSER_AGENT_MAX_RETRIES,
+    DECOMPOSER_AGENT_MAX_SELF_CORRECTIONS,
     FORMALIZER_AGENT_MAX_RETRIES,
     PROVER_AGENT_MAX_DEPTH,
-    PROVER_AGENT_MAX_RETRIES,
+    PROVER_AGENT_MAX_SELF_CORRECTIONS,
 )
 
 # Note: FORMALIZER_AGENT_LLM and SEMANTICS_AGENT_LLM are intentionally NOT imported here
@@ -340,7 +340,7 @@ class GoedelsPoetryStateManager:
     def _find_backtrackable_ancestor(self, node: DecomposedFormalTheoremState) -> DecomposedFormalTheoremState | None:
         """
         Find the nearest ancestor (closest to the failed node) that has decomposition_attempts
-        less than DECOMPOSER_AGENT_MAX_RETRIES. Returns None if no such ancestor exists.
+        less than DECOMPOSER_AGENT_MAX_SELF_CORRECTIONS. Returns None if no such ancestor exists.
 
         Parameters
         ----------
@@ -357,7 +357,7 @@ class GoedelsPoetryStateManager:
             # Check if current is a DecomposedFormalTheoremState (has 'children' attribute)
             if isinstance(current, dict) and "children" in current:
                 decomposed_current = cast(DecomposedFormalTheoremState, current)
-                if decomposed_current["decomposition_attempts"] < DECOMPOSER_AGENT_MAX_RETRIES:
+                if decomposed_current["decomposition_attempts"] < DECOMPOSER_AGENT_MAX_SELF_CORRECTIONS:
                     return decomposed_current
             current = current["parent"] if isinstance(current, dict) else None
         return None
@@ -791,8 +791,12 @@ class GoedelsPoetryStateManager:
         unsuccessful_proofs = [vp for vp in validated_proofs_outputs if (not vp["proved"])]
 
         # Partition unsuccessful proofs into those that are too difficult and those to correct
-        proofs_too_difficult = [up for up in unsuccessful_proofs if (up["proof_attempts"] >= PROVER_AGENT_MAX_RETRIES)]
-        proofs_to_correct = [up for up in unsuccessful_proofs if (up["proof_attempts"] < PROVER_AGENT_MAX_RETRIES)]
+        proofs_too_difficult = [
+            up for up in unsuccessful_proofs if (up["proof_attempts"] >= PROVER_AGENT_MAX_SELF_CORRECTIONS)
+        ]
+        proofs_to_correct = [
+            up for up in unsuccessful_proofs if (up["proof_attempts"] < PROVER_AGENT_MAX_SELF_CORRECTIONS)
+        ]
 
         # Queue proofs too difficult for decomposition
         self._queue_proofs_for_decomposition(proofs_too_difficult)
@@ -990,10 +994,10 @@ class GoedelsPoetryStateManager:
 
         # Partition invalid sketches into those too difficult to decompose and those to correct
         sketches_too_difficult = [
-            ivs for ivs in invalid_sketches if (ivs["decomposition_attempts"] >= DECOMPOSER_AGENT_MAX_RETRIES)
+            ivs for ivs in invalid_sketches if (ivs["decomposition_attempts"] >= DECOMPOSER_AGENT_MAX_SELF_CORRECTIONS)
         ]
         sketches_to_correct = [
-            ivs for ivs in invalid_sketches if (ivs["decomposition_attempts"] < DECOMPOSER_AGENT_MAX_RETRIES)
+            ivs for ivs in invalid_sketches if (ivs["decomposition_attempts"] < DECOMPOSER_AGENT_MAX_SELF_CORRECTIONS)
         ]
 
         # Addd sketches to correct to the correction queue

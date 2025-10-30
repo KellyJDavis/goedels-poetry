@@ -308,11 +308,13 @@ def _create_decomposer_llm():  # type: ignore[no-untyped-def]
 DECOMPOSER_AGENT_LLM = _create_decomposer_llm()
 
 # Create LLM configurations
-PROVER_AGENT_MAX_RETRIES = parsed_config.getint(section="PROVER_AGENT_LLM", option="max_self_corrections", fallback=3)
+PROVER_AGENT_MAX_SELF_CORRECTIONS = parsed_config.getint(
+    section="PROVER_AGENT_LLM", option="max_self_corrections", fallback=3
+)
 PROVER_AGENT_MAX_DEPTH = parsed_config.getint(section="PROVER_AGENT_LLM", option="max_depth", fallback=20)
-# DECOMPOSER_AGENT_MAX_RETRIES is now handled dynamically based on provider selection
+# DECOMPOSER_AGENT_MAX_SELF_CORRECTIONS is now handled dynamically based on provider selection
 # This maintains backward compatibility for any code that might reference it
-DECOMPOSER_AGENT_MAX_RETRIES = parsed_config.getint(
+DECOMPOSER_AGENT_MAX_SELF_CORRECTIONS = parsed_config.getint(
     section="DECOMPOSER_AGENT_LLM", option="openai_max_self_corrections", fallback=6
 )
 FORMALIZER_AGENT_MAX_RETRIES = parsed_config.getint(section="FORMALIZER_AGENT_LLM", option="max_retries", fallback=10)
