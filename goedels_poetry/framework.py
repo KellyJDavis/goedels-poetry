@@ -25,7 +25,7 @@ from goedels_poetry.config.llm import (
     DECOMPOSER_AGENT_LLM,
     FORMALIZER_AGENT_MAX_RETRIES,
     PROVER_AGENT_LLM,
-    PROVER_AGENT_MAX_RETRIES,
+    PROVER_AGENT_MAX_SELF_CORRECTION_ATTEMPTS,
     get_formalizer_agent_llm,
     get_semantics_agent_llm,
 )
@@ -62,7 +62,7 @@ class GoedelsPoetryConfig:
         formalizer_agent_llm: Optional[BaseChatModel] = None,
         formalizer_agent_max_retries: int = FORMALIZER_AGENT_MAX_RETRIES,
         prover_agent_llm: BaseChatModel = PROVER_AGENT_LLM,
-        prover_agent_max_retries: int = PROVER_AGENT_MAX_RETRIES,
+        prover_agent_max_retries: int = PROVER_AGENT_MAX_SELF_CORRECTION_ATTEMPTS,
         semantics_agent_llm: Optional[BaseChatModel] = None,
         decomposer_agent_llm: BaseChatModel = DECOMPOSER_AGENT_LLM,
         kimina_lean_server_url: str = KIMINA_LEAN_SERVER["url"],

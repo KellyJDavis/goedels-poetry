@@ -127,6 +127,7 @@ def _create_formal_theorem_proof_state(
         proved=False,
         errors=None,
         ast=None,
-        proof_attempts=0,
+        self_correction_attempts=0,
         proof_history=[],
+        pass_attempts=0,
     )

@@ -57,10 +57,11 @@ class FormalTheoremProofState(TypedDict):
         A string indicating errors in formal_proof
     ast: Required[AST | None]
         The AST of the formal_proof
-    proof_attempts: Required[int]
-        The number of attempts to prove formal_theorem
+    self_correction_attempts: Required[int]
+        The number of self-correction attempts to prove formal_theorem (was proof_attempts)
     proof_history: Required[Annotated[list[AnyMessage],add]]
         The history of messages sent and received from the LLMs
+    pass_attempts: Required[int]  # The number of times the self-correction loop has been executed
     """
 
     parent: Required[TreeNode | None]
@@ -71,8 +72,9 @@ class FormalTheoremProofState(TypedDict):
     proved: Required[bool]
     errors: Required[str | None]
     ast: Required[AST | None]
-    proof_attempts: Required[int]
+    self_correction_attempts: Required[int]
     proof_history: Required[Annotated[list[AnyMessage], add]]  # TODO: Correct annotation?
+    pass_attempts: Required[int]  # The number of times the self-correction loop has been executed
 
 
 class FormalTheoremProofStates(TypedDict):
@@ -112,8 +114,8 @@ class DecomposedFormalTheoremState(TypedDict):
         A string indicating errors in proof_sketch
     ast: Required[AST | None]
         The AST of the proof_sketch
-    decomposition_attempts: Required[int]
-        The number of decomposition attempts of formal_theorem
+    self_correction_attempts: Required[int]
+        The number of self-correction attempts to decompose formal_theorem (was decomposition_attempts)
     decomposition_history: Required[Annotated[list[AnyMessage],add]]
         The history of messages sent and received from the LLMs
     """
@@ -129,7 +131,7 @@ class DecomposedFormalTheoremState(TypedDict):
     syntactic: Required[bool]
     errors: Required[str | None]
     ast: Required[AST | None]
-    decomposition_attempts: Required[int]
+    self_correction_attempts: Required[int]
     decomposition_history: Required[Annotated[list[AnyMessage], add]]
 
 

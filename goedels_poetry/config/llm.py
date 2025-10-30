@@ -300,7 +300,7 @@ def _create_decomposer_llm():  # type: ignore[no-untyped-def]
                 section="DECOMPOSER_AGENT_LLM", option="google_max_output_tokens", fallback=50000
             ),
             max_retries=parsed_config.getint(
-                section="DECOMPOSER_AGENT_LLM", option="google_max_self_corrections", fallback=6
+                section="DECOMPOSER_AGENT_LLM", option="google_max_self_correction_attempts", fallback=6
             ),
         )
 
@@ -308,11 +308,13 @@ def _create_decomposer_llm():  # type: ignore[no-untyped-def]
 DECOMPOSER_AGENT_LLM = _create_decomposer_llm()
 
 # Create LLM configurations
-PROVER_AGENT_MAX_RETRIES = parsed_config.getint(section="PROVER_AGENT_LLM", option="max_self_corrections", fallback=3)
+PROVER_AGENT_MAX_SELF_CORRECTION_ATTEMPTS = parsed_config.getint(
+    section="PROVER_AGENT_LLM", option="max_self_correction_attempts", fallback=3
+)
 PROVER_AGENT_MAX_DEPTH = parsed_config.getint(section="PROVER_AGENT_LLM", option="max_depth", fallback=20)
-# DECOMPOSER_AGENT_MAX_RETRIES is now handled dynamically based on provider selection
-# This maintains backward compatibility for any code that might reference it
-DECOMPOSER_AGENT_MAX_RETRIES = parsed_config.getint(
-    section="DECOMPOSER_AGENT_LLM", option="openai_max_self_corrections", fallback=6
+PROVER_AGENT_MAX_PASS = parsed_config.getint(section="PROVER_AGENT_LLM", option="max_pass", fallback=4)
+# For DECOMPOSER_AGENT (openai and google), use the new key names
+DECOMPOSER_AGENT_MAX_SELF_CORRECTION_ATTEMPTS = parsed_config.getint(
+    section="DECOMPOSER_AGENT_LLM", option="openai_max_self_correction_attempts", fallback=6
 )
 FORMALIZER_AGENT_MAX_RETRIES = parsed_config.getint(section="FORMALIZER_AGENT_LLM", option="max_retries", fallback=10)

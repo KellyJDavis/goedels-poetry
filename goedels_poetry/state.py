@@ -17,10 +17,11 @@ from goedels_poetry.agents.state import (
     InformalTheoremState,
 )
 from goedels_poetry.config.llm import (
-    DECOMPOSER_AGENT_MAX_RETRIES,
+    DECOMPOSER_AGENT_MAX_SELF_CORRECTION_ATTEMPTS,
     FORMALIZER_AGENT_MAX_RETRIES,
     PROVER_AGENT_MAX_DEPTH,
-    PROVER_AGENT_MAX_RETRIES,
+    PROVER_AGENT_MAX_PASS,
+    PROVER_AGENT_MAX_SELF_CORRECTION_ATTEMPTS,
 )
 
 # Note: FORMALIZER_AGENT_LLM and SEMANTICS_AGENT_LLM are intentionally NOT imported here
@@ -75,8 +76,9 @@ class GoedelsPoetryState:
                     proved=False,
                     errors=None,
                     ast=None,
-                    proof_attempts=0,
+                    self_correction_attempts=0,
                     proof_history=[],
+                    pass_attempts=0,
                 ),
             )
         )
@@ -339,8 +341,8 @@ class GoedelsPoetryStateManager:
 
     def _find_backtrackable_ancestor(self, node: DecomposedFormalTheoremState) -> DecomposedFormalTheoremState | None:
         """
-        Find the nearest ancestor (closest to the failed node) that has decomposition_attempts
-        less than DECOMPOSER_AGENT_MAX_RETRIES. Returns None if no such ancestor exists.
+        Find the nearest ancestor (closest to the failed node) that has self_correction_attempts
+        less than DECOMPOSER_AGENT_MAX_SELF_CORRECTIONS. Returns None if no such ancestor exists.
 
         Parameters
         ----------
@@ -357,7 +359,7 @@ class GoedelsPoetryStateManager:
             # Check if current is a DecomposedFormalTheoremState (has 'children' attribute)
             if isinstance(current, dict) and "children" in current:
                 decomposed_current = cast(DecomposedFormalTheoremState, current)
-                if decomposed_current["decomposition_attempts"] < DECOMPOSER_AGENT_MAX_RETRIES:
+                if decomposed_current["self_correction_attempts"] < DECOMPOSER_AGENT_MAX_SELF_CORRECTION_ATTEMPTS:
                     return decomposed_current
             current = current["parent"] if isinstance(current, dict) else None
         return None
@@ -665,8 +667,9 @@ class GoedelsPoetryStateManager:
                 proved=False,
                 errors=None,
                 ast=None,
-                proof_attempts=0,
+                self_correction_attempts=0,
                 proof_history=[],
+                pass_attempts=0,
             )
             # Queue theorem_to_prove to be proven
             self._state.proof_prove_queue += [theorem_to_prove]
@@ -785,14 +788,27 @@ class GoedelsPoetryStateManager:
 
         # Increment the proof attempt count for all validated proofs
         for validated_proof in validated_proofs_outputs:
-            validated_proof["proof_attempts"] += 1
+            validated_proof["self_correction_attempts"] += 1
 
         # Gather all unsuccessful proofs
         unsuccessful_proofs = [vp for vp in validated_proofs_outputs if (not vp["proved"])]
 
-        # Partition unsuccessful proofs into those that are too difficult and those to correct
-        proofs_too_difficult = [up for up in unsuccessful_proofs if (up["proof_attempts"] >= PROVER_AGENT_MAX_RETRIES)]
-        proofs_to_correct = [up for up in unsuccessful_proofs if (up["proof_attempts"] < PROVER_AGENT_MAX_RETRIES)]
+        proofs_too_difficult = []
+        proofs_to_correct = []
+
+        for up in unsuccessful_proofs:
+            if up["self_correction_attempts"] >= PROVER_AGENT_MAX_SELF_CORRECTION_ATTEMPTS:
+                up["pass_attempts"] += 1
+                if up["pass_attempts"] < PROVER_AGENT_MAX_PASS:
+                    # Restart self-correction loop: reset state, requeue for correction
+                    self._reset_self_correction_state(up)
+                    proofs_to_correct.append(up)
+                else:
+                    # Hit max_pass: queue for decomposition
+                    proofs_too_difficult.append(up)
+            else:
+                # Still within a self-correction attempt cycle
+                proofs_to_correct.append(up)
 
         # Queue proofs too difficult for decomposition
         self._queue_proofs_for_decomposition(proofs_too_difficult)
@@ -823,7 +839,7 @@ class GoedelsPoetryStateManager:
                 syntactic=False,
                 errors=None,
                 ast=None,
-                decomposition_attempts=0,
+                self_correction_attempts=0,
                 decomposition_history=[],
             )
             self._state.decomposition_sketch_queue.append(formal_theorem_to_decompose)
@@ -983,17 +999,21 @@ class GoedelsPoetryStateManager:
 
         # Increment the decomposition attempt count
         for validated_sketch in validated_sketches_outputs:
-            validated_sketch["decomposition_attempts"] += 1
+            validated_sketch["self_correction_attempts"] += 1
 
         # Gather all invalid sketches
         invalid_sketches = [vs for vs in validated_sketches_outputs if (not vs["syntactic"])]
 
         # Partition invalid sketches into those too difficult to decompose and those to correct
         sketches_too_difficult = [
-            ivs for ivs in invalid_sketches if (ivs["decomposition_attempts"] >= DECOMPOSER_AGENT_MAX_RETRIES)
+            ivs
+            for ivs in invalid_sketches
+            if (ivs["self_correction_attempts"] >= DECOMPOSER_AGENT_MAX_SELF_CORRECTION_ATTEMPTS)
         ]
         sketches_to_correct = [
-            ivs for ivs in invalid_sketches if (ivs["decomposition_attempts"] < DECOMPOSER_AGENT_MAX_RETRIES)
+            ivs
+            for ivs in invalid_sketches
+            if (ivs["self_correction_attempts"] < DECOMPOSER_AGENT_MAX_SELF_CORRECTION_ATTEMPTS)
         ]
 
         # Addd sketches to correct to the correction queue
@@ -1539,3 +1559,12 @@ class GoedelsPoetryStateManager:
             else:
                 indented_lines.append(line)
         return "\n".join(indented_lines)
+
+    def _reset_self_correction_state(self, proof: FormalTheoremProofState) -> None:
+        """
+        Resets the self-correction state for a proof so that a new self-correction pass starts cleanly.
+        """
+        proof["self_correction_attempts"] = 0
+        proof["errors"] = None
+        proof["proof_history"] = []
+        # reset additional state as needed

@@ -87,7 +87,7 @@ def _backtrack(state: DecomposedFormalTheoremState) -> DecomposedFormalTheoremSt
     # Construct the prompt for backtracking
     prompt = load_prompt(
         "decomposer-backtrack",
-        prev_round_num=str(state["decomposition_attempts"]),
+        prev_round_num=str(state["self_correction_attempts"]),
     )
 
     # Add backtrack request to the state's decomposition_history
