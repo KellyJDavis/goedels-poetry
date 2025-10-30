@@ -334,6 +334,7 @@ def test_backtracking_removes_descendants_from_queues(temp_state: GoedelsPoetryS
         ast=None,
         self_correction_attempts=0,
         proof_history=[],
+        pass_attempts=0,
     )
 
     child_decomposed["children"] = [cast(TreeNode, grandchild_proof)]

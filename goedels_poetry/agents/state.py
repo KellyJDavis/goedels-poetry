@@ -61,6 +61,7 @@ class FormalTheoremProofState(TypedDict):
         The number of self-correction attempts to prove formal_theorem (was proof_attempts)
     proof_history: Required[Annotated[list[AnyMessage],add]]
         The history of messages sent and received from the LLMs
+    pass_attempts: Required[int]  # The number of times the self-correction loop has been executed
     """
 
     parent: Required[TreeNode | None]
@@ -73,6 +74,7 @@ class FormalTheoremProofState(TypedDict):
     ast: Required[AST | None]
     self_correction_attempts: Required[int]
     proof_history: Required[Annotated[list[AnyMessage], add]]  # TODO: Correct annotation?
+    pass_attempts: Required[int]  # The number of times the self-correction loop has been executed
 
 
 class FormalTheoremProofStates(TypedDict):

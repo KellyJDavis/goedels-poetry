@@ -312,6 +312,7 @@ PROVER_AGENT_MAX_SELF_CORRECTION_ATTEMPTS = parsed_config.getint(
     section="PROVER_AGENT_LLM", option="max_self_correction_attempts", fallback=3
 )
 PROVER_AGENT_MAX_DEPTH = parsed_config.getint(section="PROVER_AGENT_LLM", option="max_depth", fallback=20)
+PROVER_AGENT_MAX_PASS = parsed_config.getint(section="PROVER_AGENT_LLM", option="max_pass", fallback=4)
 # For DECOMPOSER_AGENT (openai and google), use the new key names
 DECOMPOSER_AGENT_MAX_SELF_CORRECTION_ATTEMPTS = parsed_config.getint(
     section="DECOMPOSER_AGENT_LLM", option="openai_max_self_correction_attempts", fallback=6

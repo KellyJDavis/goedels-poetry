@@ -486,6 +486,7 @@ def test_reconstruct_complete_proof_simple_leaf() -> None:
             ast=None,
             self_correction_attempts=1,
             proof_history=[],
+            pass_attempts=0,
         )
 
         state.formal_theorem_proof = proof_state
@@ -553,6 +554,7 @@ def test_reconstruct_complete_proof_with_single_have() -> None:
             ast=None,
             self_correction_attempts=1,
             proof_history=[],
+            pass_attempts=0,
         )
 
         decomposed["children"].append(cast(TreeNode, child_proof))
@@ -641,6 +643,7 @@ def test_reconstruct_complete_proof_with_multiple_haves() -> None:
             ast=None,
             self_correction_attempts=1,
             proof_history=[],
+            pass_attempts=0,
         )
 
         # Create second child proof (with dependency)
@@ -655,6 +658,7 @@ def test_reconstruct_complete_proof_with_multiple_haves() -> None:
             ast=None,
             self_correction_attempts=1,
             proof_history=[],
+            pass_attempts=0,
         )
 
         decomposed["children"].extend([cast(TreeNode, child1), cast(TreeNode, child2)])
@@ -728,6 +732,7 @@ def test_reconstruct_complete_proof_with_main_body() -> None:
             ast=None,
             self_correction_attempts=1,
             proof_history=[],
+            pass_attempts=0,
         )
 
         # Create main body proof (no clear name, so it's the main body)
@@ -742,6 +747,7 @@ def test_reconstruct_complete_proof_with_main_body() -> None:
             ast=None,
             self_correction_attempts=1,
             proof_history=[],
+            pass_attempts=0,
         )
 
         decomposed["children"].extend([cast(TreeNode, child_have), cast(TreeNode, child_main)])
@@ -821,6 +827,7 @@ def test_reconstruct_complete_proof_proper_indentation() -> None:
             ast=None,
             self_correction_attempts=1,
             proof_history=[],
+            pass_attempts=0,
         )
 
         decomposed["children"].append(cast(TreeNode, child))
@@ -919,6 +926,7 @@ def test_reconstruct_complete_proof_nested_decomposition() -> None:
             ast=None,
             self_correction_attempts=1,
             proof_history=[],
+            pass_attempts=0,
         )
 
         child_decomposed["children"].append(cast(TreeNode, grandchild))
@@ -999,6 +1007,7 @@ def test_reconstruct_complete_proof_with_dependencies_in_signature() -> None:
             ast=None,
             self_correction_attempts=1,
             proof_history=[],
+            pass_attempts=0,
         )
 
         # Create second child WITH DEPENDENCY in signature (as AST.get_named_subgoal_code does)
@@ -1013,6 +1022,7 @@ def test_reconstruct_complete_proof_with_dependencies_in_signature() -> None:
             ast=None,
             self_correction_attempts=1,
             proof_history=[],
+            pass_attempts=0,
         )
 
         # Create main body
@@ -1027,6 +1037,7 @@ def test_reconstruct_complete_proof_with_dependencies_in_signature() -> None:
             ast=None,
             self_correction_attempts=1,
             proof_history=[],
+            pass_attempts=0,
         )
 
         decomposed["children"].extend([cast(TreeNode, child1), cast(TreeNode, child2), cast(TreeNode, child3)])
@@ -1082,6 +1093,7 @@ def test_reconstruct_complete_proof_empty_proof() -> None:
             ast=None,
             self_correction_attempts=0,
             proof_history=[],
+            pass_attempts=0,
         )
 
         state.formal_theorem_proof = proof_state
@@ -1216,6 +1228,7 @@ def test_reconstruct_complete_proof_multiline_type_signatures() -> None:
             ast=None,
             self_correction_attempts=1,
             proof_history=[],
+            pass_attempts=0,
         )
 
         # Create second child proof with := on different line
@@ -1232,6 +1245,7 @@ def test_reconstruct_complete_proof_multiline_type_signatures() -> None:
             ast=None,
             self_correction_attempts=1,
             proof_history=[],
+            pass_attempts=0,
         )
 
         decomposed["children"].extend([cast(TreeNode, child1), cast(TreeNode, child2)])
@@ -1435,6 +1449,7 @@ def test_reconstruct_proof_with_apostrophe_identifiers() -> None:
             ast=None,
             self_correction_attempts=1,
             proof_history=[],
+            pass_attempts=0,
         )
 
         decomposed["children"].append(cast(TreeNode, child))
@@ -1569,6 +1584,7 @@ def test_reconstruct_proof_multiline_have_sorry() -> None:
             ast=None,
             self_correction_attempts=1,
             proof_history=[],
+            pass_attempts=0,
         )
 
         # Create child proof for main body
@@ -1583,6 +1599,7 @@ def test_reconstruct_proof_multiline_have_sorry() -> None:
             ast=None,
             self_correction_attempts=1,
             proof_history=[],
+            pass_attempts=0,
         )
 
         decomposed["children"].extend([cast(TreeNode, child_have), cast(TreeNode, child_main)])
