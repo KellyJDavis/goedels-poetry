@@ -120,7 +120,8 @@ def _check_proof(server_url: str, server_max_retries: int, state: FormalTheoremP
     log_kimina_response("check", parsed_response)
 
     # Update the state with the proof check result
-    state["proved"] = parsed_response["pass"]
+    # Note: We use "complete" instead of "pass" to ensure proofs with sorries are marked as unsuccessful
+    state["proved"] = parsed_response["complete"]
 
     # Update the state with the error string formatted for Goedel-Prover-V2 use
     # Note: get_error_str expects the code with DEFAULT_IMPORTS for proper line number handling
