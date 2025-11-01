@@ -295,7 +295,7 @@ def _create_decomposer_llm():  # type: ignore[no-untyped-def]
         )
     else:  # provider == "google"
         return _create_decomposer_llm_safe(
-            model=parsed_config.get(section="DECOMPOSER_AGENT_LLM", option="google_model", fallback="gemini-2.5-flash"),
+            model=parsed_config.get(section="DECOMPOSER_AGENT_LLM", option="google_model", fallback="gemini-2.5-pro"),
             max_completion_tokens=parsed_config.getint(
                 section="DECOMPOSER_AGENT_LLM", option="google_max_output_tokens", fallback=50000
             ),
