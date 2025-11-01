@@ -60,6 +60,11 @@ theorem simple : 1 + 1 = 2 := by
   rfl
 """
 
+PROOF_WITH_SORRY = """
+theorem test_theorem : True := by
+  sorry
+"""
+
 
 class TestProofCheckerAgent:
     """Tests for ProofCheckerAgentFactory."""
@@ -116,6 +121,29 @@ class TestProofCheckerAgent:
         output_state = result["outputs"][0]
         assert output_state["proved"] is False
         assert len(output_state["errors"]) > 0
+
+    def test_check_proof_with_sorry(self, kimina_server_url: str) -> None:
+        """Test checking a proof with sorry - should not be marked as proved."""
+        agent = ProofCheckerAgentFactory.create_agent(server_url=kimina_server_url, server_max_retries=3)
+
+        # Create input state with proof containing sorry
+        state: FormalTheoremProofState = {
+            "formal_theorem": SIMPLE_THEOREM,
+            "formal_proof": PROOF_WITH_SORRY,
+            "proved": False,
+            "errors": "",
+            "ast": None,
+        }
+        input_states: FormalTheoremProofStates = {"inputs": [state], "outputs": []}
+
+        # Run agent
+        result = agent.invoke(input_states)
+
+        # Verify result - proof with sorry should NOT be marked as proved
+        assert "outputs" in result
+        assert len(result["outputs"]) == 1
+        output_state = result["outputs"][0]
+        assert output_state["proved"] is False, "Proof with sorry should not be marked as proved"
 
 
 class TestProofParserAgent:

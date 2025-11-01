@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- Fixed bug where proofs containing `sorry` were incorrectly marked as successful. The proof checker now uses the `complete` field from Kimina server responses instead of the `pass` field to properly detect proofs with sorries.
+
 ### Added
 - Support for Google Generative AI as an alternative to OpenAI for the decomposer agent
 - Automatic provider selection based on available API keys (OpenAI takes priority)
