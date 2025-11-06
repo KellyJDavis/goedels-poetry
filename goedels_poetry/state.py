@@ -901,6 +901,48 @@ class GoedelsPoetryStateManager:
             current = current["parent"] if isinstance(current, dict) else None
         return None
 
+    def _find_backtrackable_grandparent_or_higher(
+        self, child: FormalTheoremProofState
+    ) -> DecomposedFormalTheoremState | None:
+        """
+        Find a backtrackable ancestor that is at least a grandparent of the given child.
+        This is used when a child exceeds max depth - we need to backtrack at least to the
+        grandparent level to avoid the same depth problem if we just re-decompose the parent.
+
+        Parameters
+        ----------
+        child : FormalTheoremProofState
+            The child node that is too deep
+
+        Returns
+        -------
+        DecomposedFormalTheoremState | None
+            A backtrackable ancestor at grandparent level or higher, or None if none exists
+        """
+        # Get the parent (the DecomposedFormalTheoremState that created this child)
+        parent = child["parent"]
+        if parent is None:
+            return None
+
+        # Get the grandparent (parent's parent)
+        grandparent = parent["parent"] if isinstance(parent, dict) else None
+        if grandparent is None:
+            return None
+
+        # Now search from the grandparent upward for a backtrackable ancestor
+        # We use _find_backtrackable_ancestor but we need to ensure we're searching from grandparent
+        # Since _find_backtrackable_ancestor starts from node["parent"], we need to create
+        # a temporary node structure or search manually
+        current = grandparent
+        while current is not None:
+            # Check if current is a DecomposedFormalTheoremState (has 'children' attribute)
+            if isinstance(current, dict) and "children" in current:
+                decomposed_current = cast(DecomposedFormalTheoremState, current)
+                if decomposed_current["self_correction_attempts"] < DECOMPOSER_AGENT_MAX_SELF_CORRECTION_ATTEMPTS:
+                    return decomposed_current
+            current = current["parent"] if isinstance(current, dict) else None
+        return None
+
     def _collect_all_descendants(self, node: TreeNode) -> list[TreeNode]:
         """
         Recursively collect all descendants of a node in the tree.
@@ -1174,13 +1216,55 @@ class GoedelsPoetryStateManager:
             cast(FormalTheoremProofState, dt) for ds in decomposed_sketches["outputs"] for dt in ds["children"]
         ]
 
-        # Queue all children FormalTheoremProofState's to have their theorems proved
-        self._state.proof_prove_queue += all_children
+        # Identify children that are too deep
+        too_deep_children = [child for child in all_children if child["depth"] >= PROVER_AGENT_MAX_DEPTH]
 
-        # Flip is_finished appropriately
-        self._state.is_finished = any((child["depth"] >= PROVER_AGENT_MAX_DEPTH) for child in all_children)
-        if self._state.is_finished:
-            self._state.reason = "Proof failed: Maximum proof tree depth exceeded."
+        # Handle too-deep children by attempting to backtrack to grandparent or higher
+        if too_deep_children:
+            # Track which backtrack targets we've already processed (to avoid duplicates)
+            # Use id() since DecomposedFormalTheoremState is a dict and not hashable
+            processed_backtrack_target_ids: set[int] = set()
+            has_backtrackable_ancestor = False
+
+            for too_deep_child in too_deep_children:
+                # Find a backtrackable ancestor at grandparent level or higher
+                backtrack_target = self._find_backtrackable_grandparent_or_higher(too_deep_child)
+
+                if backtrack_target is not None:
+                    has_backtrackable_ancestor = True
+
+                    # Only process each backtrack target once
+                    backtrack_target_id = id(backtrack_target)
+                    if backtrack_target_id not in processed_backtrack_target_ids:
+                        processed_backtrack_target_ids.add(backtrack_target_id)
+
+                        # Collect all descendants of the backtrack target (to be removed)
+                        descendants = self._collect_all_descendants(cast(TreeNode, backtrack_target))
+
+                        # Remove all descendants from all queues
+                        self._remove_nodes_from_all_queues(descendants)
+
+                        # Prepare the backtrack target for re-sketching
+                        self._prepare_node_for_resketching(backtrack_target)
+
+                        # Queue the backtrack target for re-sketching
+                        self._state.decomposition_backtrack_queue.append(backtrack_target)
+
+            # Only finish if no backtrackable ancestors were found
+            if not has_backtrackable_ancestor:
+                self._state.is_finished = True
+                self._state.reason = (
+                    "Proof failed: Maximum proof tree depth exceeded and no backtrackable ancestors found."
+                )
+            else:
+                # Queue children that are NOT too deep (too-deep ones will be recreated after backtracking)
+                # Use id() for comparison to avoid recursion issues with dict comparison
+                too_deep_child_ids = {id(child) for child in too_deep_children}
+                not_too_deep_children = [child for child in all_children if id(child) not in too_deep_child_ids]
+                self._state.proof_prove_queue += not_too_deep_children
+        else:
+            # No too-deep children, queue all children normally
+            self._state.proof_prove_queue += all_children
 
     def reconstruct_complete_proof(self) -> str:
         """
