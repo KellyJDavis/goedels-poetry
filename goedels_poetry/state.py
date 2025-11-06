@@ -339,166 +339,6 @@ class GoedelsPoetryStateManager:
         # that update the state have logic to save checkpoints.
         self._state = state
 
-    def _find_backtrackable_ancestor(self, node: DecomposedFormalTheoremState) -> DecomposedFormalTheoremState | None:
-        """
-        Find the nearest ancestor (closest to the failed node) that has self_correction_attempts
-        less than DECOMPOSER_AGENT_MAX_SELF_CORRECTIONS. Returns None if no such ancestor exists.
-
-        Parameters
-        ----------
-        node : DecomposedFormalTheoremState
-            The node from which to start searching upward
-
-        Returns
-        -------
-        DecomposedFormalTheoremState | None
-            The nearest backtrackable ancestor, or None if none exists
-        """
-        current = node["parent"]
-        while current is not None:
-            # Check if current is a DecomposedFormalTheoremState (has 'children' attribute)
-            if isinstance(current, dict) and "children" in current:
-                decomposed_current = cast(DecomposedFormalTheoremState, current)
-                if decomposed_current["self_correction_attempts"] < DECOMPOSER_AGENT_MAX_SELF_CORRECTION_ATTEMPTS:
-                    return decomposed_current
-            current = current["parent"] if isinstance(current, dict) else None
-        return None
-
-    def _collect_all_descendants(self, node: TreeNode) -> list[TreeNode]:
-        """
-        Recursively collect all descendants of a node in the tree.
-
-        Parameters
-        ----------
-        node : TreeNode
-            The node whose descendants to collect
-
-        Returns
-        -------
-        list[TreeNode]
-            List of all descendant nodes (children, grandchildren, etc.)
-        """
-        descendants: list[TreeNode] = []
-        # Check if this is an internal node with children
-        if isinstance(node, dict) and "children" in node:
-            internal_node = cast(DecomposedFormalTheoremState, node)
-            for child in internal_node["children"]:
-                descendants.append(child)
-                # Recursively collect descendants of this child
-                descendants.extend(self._collect_all_descendants(child))
-        return descendants
-
-    def _remove_proof_node_from_queues(self, proof_node: FormalTheoremProofState) -> None:
-        """
-        Remove a proof node from all proof queues.
-
-        Parameters
-        ----------
-        proof_node : FormalTheoremProofState
-            The proof node to remove
-        """
-        if proof_node in self._state.proof_syntax_queue:
-            self._state.proof_syntax_queue.remove(proof_node)
-        if proof_node in self._state.proof_prove_queue:
-            self._state.proof_prove_queue.remove(proof_node)
-        if proof_node in self._state.proof_validate_queue:
-            self._state.proof_validate_queue.remove(proof_node)
-        if proof_node in self._state.proof_correct_queue:
-            self._state.proof_correct_queue.remove(proof_node)
-        if proof_node in self._state.proof_ast_queue:
-            self._state.proof_ast_queue.remove(proof_node)
-
-    def _remove_decomposition_node_from_queues(self, decomp_node: DecomposedFormalTheoremState) -> None:
-        """
-        Remove a decomposition node from all decomposition queues.
-
-        Parameters
-        ----------
-        decomp_node : DecomposedFormalTheoremState
-            The decomposition node to remove
-        """
-        if decomp_node in self._state.decomposition_sketch_queue:
-            self._state.decomposition_sketch_queue.remove(decomp_node)
-        if decomp_node in self._state.decomposition_validate_queue:
-            self._state.decomposition_validate_queue.remove(decomp_node)
-        if decomp_node in self._state.decomposition_correct_queue:
-            self._state.decomposition_correct_queue.remove(decomp_node)
-        if decomp_node in self._state.decomposition_backtrack_queue:
-            self._state.decomposition_backtrack_queue.remove(decomp_node)
-        if decomp_node in self._state.decomposition_ast_queue:
-            self._state.decomposition_ast_queue.remove(decomp_node)
-        if decomp_node in self._state.decomposition_decompose_queue:
-            self._state.decomposition_decompose_queue.remove(decomp_node)
-
-    def _remove_nodes_from_all_queues(self, nodes: list[TreeNode]) -> None:
-        """
-        Remove the specified nodes from all proof and decomposition queues.
-
-        Parameters
-        ----------
-        nodes : list[TreeNode]
-            List of nodes to remove from all queues
-        """
-        for node in nodes:
-            # Try to remove from proof queues
-            if isinstance(node, dict) and "formal_proof" in node:
-                self._remove_proof_node_from_queues(cast(FormalTheoremProofState, node))
-
-            # Try to remove from decomposition queues
-            if isinstance(node, dict) and "children" in node:
-                self._remove_decomposition_node_from_queues(cast(DecomposedFormalTheoremState, node))
-
-    def _prepare_node_for_resketching(self, node: DecomposedFormalTheoremState) -> None:
-        """
-        Prepare a node for re-sketching by clearing its children, sketch, AST, and errors.
-        The decomposition_history and decomposition_attempts are preserved.
-
-        Parameters
-        ----------
-        node : DecomposedFormalTheoremState
-            The node to prepare for re-sketching
-        """
-        # Clear children (they will be removed from tree separately)
-        node["children"] = []
-        # Clear sketch-related fields
-        node["proof_sketch"] = None
-        node["syntactic"] = False
-        node["errors"] = None
-        node["ast"] = None
-
-    def _handle_failed_sketch(self, failed_sketch: DecomposedFormalTheoremState) -> None:
-        """
-        Handle a sketch that has exceeded max decomposition attempts by attempting to backtrack
-        to the nearest ancestor that can be re-sketched. If no such ancestor exists, sets
-        is_finished to True.
-
-        Parameters
-        ----------
-        failed_sketch : DecomposedFormalTheoremState
-            The sketch that has failed and exceeded max attempts
-        """
-        # Try to find a backtrackable ancestor
-        backtrack_target = self._find_backtrackable_ancestor(failed_sketch)
-
-        if backtrack_target is None:
-            # No backtrackable ancestor found - we've exhausted all options
-            self._state.is_finished = True
-            self._state.reason = "Proof failed: Unable to decompose theorem - all decomposition attempts exhausted."
-            return
-
-        # We found an ancestor to backtrack to - perform the backtracking
-        # 1. Collect all descendants of the backtrack target (to be removed)
-        descendants = self._collect_all_descendants(cast(TreeNode, backtrack_target))
-
-        # 2. Remove all descendants from all queues
-        self._remove_nodes_from_all_queues(descendants)
-
-        # 3. Prepare the backtrack target for re-sketching
-        self._prepare_node_for_resketching(backtrack_target)
-
-        # 4. Queue the backtrack target for re-sketching
-        self._state.decomposition_backtrack_queue.append(backtrack_target)
-
     @property
     def is_finished(self) -> bool:
         """
@@ -819,6 +659,15 @@ class GoedelsPoetryStateManager:
         successful_proofs = [vp for vp in validated_proofs_outputs if vp["proved"]]
         self._state.proof_ast_queue += successful_proofs
 
+    def _reset_self_correction_state(self, proof: FormalTheoremProofState) -> None:
+        """
+        Resets the self-correction state for a proof so that a new self-correction pass starts cleanly.
+        """
+        proof["self_correction_attempts"] = 0
+        proof["errors"] = None
+        proof["proof_history"] = []
+        # reset additional state as needed
+
     def _queue_proofs_for_decomposition(self, proofs_too_difficult: list[FormalTheoremProofState]) -> None:
         """
         Queues the list of FormalTheoremProofState containing proofs too difficult to be decomposed.
@@ -1026,6 +875,166 @@ class GoedelsPoetryStateManager:
         # Gather all valid sketches and add them to the queue of sketches to parse into an AST
         valid_sketches = [vs for vs in validated_sketches_outputs if vs["syntactic"]]
         self._state.decomposition_ast_queue += valid_sketches
+
+    def _find_backtrackable_ancestor(self, node: DecomposedFormalTheoremState) -> DecomposedFormalTheoremState | None:
+        """
+        Find the nearest ancestor (closest to the failed node) that has self_correction_attempts
+        less than DECOMPOSER_AGENT_MAX_SELF_CORRECTIONS. Returns None if no such ancestor exists.
+
+        Parameters
+        ----------
+        node : DecomposedFormalTheoremState
+            The node from which to start searching upward
+
+        Returns
+        -------
+        DecomposedFormalTheoremState | None
+            The nearest backtrackable ancestor, or None if none exists
+        """
+        current = node["parent"]
+        while current is not None:
+            # Check if current is a DecomposedFormalTheoremState (has 'children' attribute)
+            if isinstance(current, dict) and "children" in current:
+                decomposed_current = cast(DecomposedFormalTheoremState, current)
+                if decomposed_current["self_correction_attempts"] < DECOMPOSER_AGENT_MAX_SELF_CORRECTION_ATTEMPTS:
+                    return decomposed_current
+            current = current["parent"] if isinstance(current, dict) else None
+        return None
+
+    def _collect_all_descendants(self, node: TreeNode) -> list[TreeNode]:
+        """
+        Recursively collect all descendants of a node in the tree.
+
+        Parameters
+        ----------
+        node : TreeNode
+            The node whose descendants to collect
+
+        Returns
+        -------
+        list[TreeNode]
+            List of all descendant nodes (children, grandchildren, etc.)
+        """
+        descendants: list[TreeNode] = []
+        # Check if this is an internal node with children
+        if isinstance(node, dict) and "children" in node:
+            internal_node = cast(DecomposedFormalTheoremState, node)
+            for child in internal_node["children"]:
+                descendants.append(child)
+                # Recursively collect descendants of this child
+                descendants.extend(self._collect_all_descendants(child))
+        return descendants
+
+    def _remove_proof_node_from_queues(self, proof_node: FormalTheoremProofState) -> None:
+        """
+        Remove a proof node from all proof queues.
+
+        Parameters
+        ----------
+        proof_node : FormalTheoremProofState
+            The proof node to remove
+        """
+        if proof_node in self._state.proof_syntax_queue:
+            self._state.proof_syntax_queue.remove(proof_node)
+        if proof_node in self._state.proof_prove_queue:
+            self._state.proof_prove_queue.remove(proof_node)
+        if proof_node in self._state.proof_validate_queue:
+            self._state.proof_validate_queue.remove(proof_node)
+        if proof_node in self._state.proof_correct_queue:
+            self._state.proof_correct_queue.remove(proof_node)
+        if proof_node in self._state.proof_ast_queue:
+            self._state.proof_ast_queue.remove(proof_node)
+
+    def _remove_decomposition_node_from_queues(self, decomp_node: DecomposedFormalTheoremState) -> None:
+        """
+        Remove a decomposition node from all decomposition queues.
+
+        Parameters
+        ----------
+        decomp_node : DecomposedFormalTheoremState
+            The decomposition node to remove
+        """
+        if decomp_node in self._state.decomposition_sketch_queue:
+            self._state.decomposition_sketch_queue.remove(decomp_node)
+        if decomp_node in self._state.decomposition_validate_queue:
+            self._state.decomposition_validate_queue.remove(decomp_node)
+        if decomp_node in self._state.decomposition_correct_queue:
+            self._state.decomposition_correct_queue.remove(decomp_node)
+        if decomp_node in self._state.decomposition_backtrack_queue:
+            self._state.decomposition_backtrack_queue.remove(decomp_node)
+        if decomp_node in self._state.decomposition_ast_queue:
+            self._state.decomposition_ast_queue.remove(decomp_node)
+        if decomp_node in self._state.decomposition_decompose_queue:
+            self._state.decomposition_decompose_queue.remove(decomp_node)
+
+    def _remove_nodes_from_all_queues(self, nodes: list[TreeNode]) -> None:
+        """
+        Remove the specified nodes from all proof and decomposition queues.
+
+        Parameters
+        ----------
+        nodes : list[TreeNode]
+            List of nodes to remove from all queues
+        """
+        for node in nodes:
+            # Try to remove from proof queues
+            if isinstance(node, dict) and "formal_proof" in node:
+                self._remove_proof_node_from_queues(cast(FormalTheoremProofState, node))
+
+            # Try to remove from decomposition queues
+            if isinstance(node, dict) and "children" in node:
+                self._remove_decomposition_node_from_queues(cast(DecomposedFormalTheoremState, node))
+
+    def _prepare_node_for_resketching(self, node: DecomposedFormalTheoremState) -> None:
+        """
+        Prepare a node for re-sketching by clearing its children, sketch, AST, and errors.
+        The decomposition_history and decomposition_attempts are preserved.
+
+        Parameters
+        ----------
+        node : DecomposedFormalTheoremState
+            The node to prepare for re-sketching
+        """
+        # Clear children (they will be removed from tree separately)
+        node["children"] = []
+        # Clear sketch-related fields
+        node["proof_sketch"] = None
+        node["syntactic"] = False
+        node["errors"] = None
+        node["ast"] = None
+
+    def _handle_failed_sketch(self, failed_sketch: DecomposedFormalTheoremState) -> None:
+        """
+        Handle a sketch that has exceeded max decomposition attempts by attempting to backtrack
+        to the nearest ancestor that can be re-sketched. If no such ancestor exists, sets
+        is_finished to True.
+
+        Parameters
+        ----------
+        failed_sketch : DecomposedFormalTheoremState
+            The sketch that has failed and exceeded max attempts
+        """
+        # Try to find a backtrackable ancestor
+        backtrack_target = self._find_backtrackable_ancestor(failed_sketch)
+
+        if backtrack_target is None:
+            # No backtrackable ancestor found - we've exhausted all options
+            self._state.is_finished = True
+            self._state.reason = "Proof failed: Unable to decompose theorem - all decomposition attempts exhausted."
+            return
+
+        # We found an ancestor to backtrack to - perform the backtracking
+        # 1. Collect all descendants of the backtrack target (to be removed)
+        descendants = self._collect_all_descendants(cast(TreeNode, backtrack_target))
+
+        # 2. Remove all descendants from all queues
+        self._remove_nodes_from_all_queues(descendants)
+
+        # 3. Prepare the backtrack target for re-sketching
+        self._prepare_node_for_resketching(backtrack_target)
+
+        # 4. Queue the backtrack target for re-sketching
+        self._state.decomposition_backtrack_queue.append(backtrack_target)
 
     def get_sketches_to_correct(self) -> DecomposedFormalTheoremStates:
         """
@@ -1559,12 +1568,3 @@ class GoedelsPoetryStateManager:
             else:
                 indented_lines.append(line)
         return "\n".join(indented_lines)
-
-    def _reset_self_correction_state(self, proof: FormalTheoremProofState) -> None:
-        """
-        Resets the self-correction state for a proof so that a new self-correction pass starts cleanly.
-        """
-        proof["self_correction_attempts"] = 0
-        proof["errors"] = None
-        proof["proof_history"] = []
-        # reset additional state as needed
