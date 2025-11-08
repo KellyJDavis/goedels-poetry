@@ -6,7 +6,7 @@ from langgraph.graph.state import CompiledStateGraph
 from langgraph.types import Send
 
 from goedels_poetry.agents.state import FormalTheoremProofState, FormalTheoremProofStates
-from goedels_poetry.agents.util.common import add_default_imports, remove_default_imports_from_ast
+from goedels_poetry.agents.util.common import combine_preamble_and_body, remove_default_imports_from_ast
 from goedels_poetry.agents.util.debug import log_kimina_response
 from goedels_poetry.agents.util.kimina_server import parse_kimina_ast_code_response
 from goedels_poetry.parsers.ast import AST
@@ -110,8 +110,8 @@ def _parse_proof(server_url: str, server_max_retries: int, state: FormalTheoremP
     # Create a client to access the Kimina Server
     kimina_client = KiminaClient(api_url=server_url, http_timeout=36000, n_retries=server_max_retries)
 
-    # Parse formal proof of the passed state with DEFAULT_IMPORTS prefix
-    proof_with_imports = add_default_imports(str(state["formal_proof"]))
+    # Parse formal proof of the passed state with the stored preamble prefix
+    proof_with_imports = combine_preamble_and_body(state["preamble"], str(state["formal_proof"]))
     ast_code_response = kimina_client.ast_code(proof_with_imports)
 
     # Parse ast_code_response
@@ -120,8 +120,8 @@ def _parse_proof(server_url: str, server_max_retries: int, state: FormalTheoremP
     # Log debug response
     log_kimina_response("ast_code", parsed_response)
 
-    # Remove DEFAULT_IMPORTS from the parsed AST
-    ast_without_imports = remove_default_imports_from_ast(parsed_response["ast"])
+    # Remove the preamble-specific commands from the parsed AST when applicable
+    ast_without_imports = remove_default_imports_from_ast(parsed_response["ast"], preamble=state["preamble"])
 
     # Set state["ast"] with the parsed_response (without DEFAULT_IMPORTS)
     state["ast"] = AST(ast_without_imports)

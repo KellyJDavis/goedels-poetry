@@ -5,7 +5,7 @@ from langgraph.graph import END, START, StateGraph
 from langgraph.graph.state import CompiledStateGraph
 
 from goedels_poetry.agents.state import InformalTheoremState
-from goedels_poetry.agents.util.common import add_default_imports
+from goedels_poetry.agents.util.common import DEFAULT_IMPORTS, combine_preamble_and_body
 from goedels_poetry.agents.util.debug import log_kimina_response
 from goedels_poetry.agents.util.kimina_server import parse_kimina_check_response
 
@@ -88,8 +88,8 @@ def _check_syntax(server_url: str, server_max_retries: int, state: InformalTheor
     # Create a client to access the Kimina Server
     kimina_client = KiminaClient(api_url=server_url, http_timeout=36000, n_retries=server_max_retries)
 
-    # Check syntax of state["formal_theorem"] with DEFAULT_IMPORTS prefix
-    code_with_imports = add_default_imports(str(state["formal_theorem"]))
+    # Check syntax of state["formal_theorem"] with the default preamble prefix
+    code_with_imports = combine_preamble_and_body(DEFAULT_IMPORTS, str(state["formal_theorem"]))
     check_response = kimina_client.check(code_with_imports, timeout=36000)
 
     # Parse check_response

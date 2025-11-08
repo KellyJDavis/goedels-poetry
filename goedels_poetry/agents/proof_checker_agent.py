@@ -6,7 +6,7 @@ from langgraph.graph.state import CompiledStateGraph
 from langgraph.types import Send
 
 from goedels_poetry.agents.state import FormalTheoremProofState, FormalTheoremProofStates
-from goedels_poetry.agents.util.common import add_default_imports, get_error_str
+from goedels_poetry.agents.util.common import combine_preamble_and_body, get_error_str
 from goedels_poetry.agents.util.debug import log_kimina_response
 from goedels_poetry.agents.util.kimina_server import parse_kimina_check_response
 
@@ -109,8 +109,8 @@ def _check_proof(server_url: str, server_max_retries: int, state: FormalTheoremP
     # Create a client to access the Kimina Server
     kimina_client = KiminaClient(api_url=server_url, http_timeout=36000, n_retries=server_max_retries)
 
-    # Check the formal proof state["formal_proof"] with DEFAULT_IMPORTS prefix
-    proof_with_imports = add_default_imports(str(state["formal_proof"]))
+    # Check the formal proof with the stored preamble prefix
+    proof_with_imports = combine_preamble_and_body(state["preamble"], str(state["formal_proof"]))
     check_response = kimina_client.check(proof_with_imports, timeout=36000)
 
     # Parse check_response

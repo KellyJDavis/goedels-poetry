@@ -7,7 +7,12 @@ from pathlib import Path
 
 import pytest
 
+from goedels_poetry.agents.util.common import DEFAULT_IMPORTS, combine_preamble_and_body
 from goedels_poetry.state import GoedelsPoetryState
+
+
+def with_default_preamble(body: str) -> str:
+    return combine_preamble_and_body(DEFAULT_IMPORTS, body)
 
 
 def test_normalize_theorem() -> None:
@@ -97,7 +102,7 @@ def test_list_checkpoints_by_theorem() -> None:
     """Test list_checkpoints lists checkpoints for a theorem using the default directory."""
     import uuid
 
-    theorem = f"Test Theorem For Checkpoints {uuid.uuid4()}"
+    theorem = with_default_preamble(f"theorem test_checkpoints_{uuid.uuid4().hex} : True := by sorry")
 
     # Clean up any existing directory first
     with suppress(Exception):
@@ -135,7 +140,7 @@ def test_clear_theorem_directory() -> None:
     """Test clearing a theorem directory."""
     import uuid
 
-    theorem = f"Test Theorem To Clear {uuid.uuid4()}"
+    theorem = with_default_preamble(f"theorem test_clear_{uuid.uuid4().hex} : True := by sorry")
 
     theorem_hash = GoedelsPoetryState._hash_theorem(theorem)
     from goedels_poetry import state as state_module
@@ -174,7 +179,7 @@ def test_save_and_load() -> None:
     """Test saving and loading state."""
     import uuid
 
-    theorem = f"Test Save Load Theorem {uuid.uuid4()}"
+    theorem = with_default_preamble(f"theorem test_save_load_{uuid.uuid4().hex} : True := by sorry")
 
     # Clean up any existing directory first
     with suppress(Exception):
@@ -209,7 +214,7 @@ def test_load_latest() -> None:
     import time
     import uuid
 
-    theorem = f"Test Load Latest Theorem {uuid.uuid4()}"
+    theorem = with_default_preamble(f"theorem test_load_latest_{uuid.uuid4().hex} : True := by sorry")
 
     # Clean up any existing directory first
     with suppress(Exception):
@@ -285,8 +290,7 @@ def test_state_init_creates_directory() -> None:
     with tempfile.TemporaryDirectory() as tmpdir:
         try:
             os.environ["GOEDELS_POETRY_DIR"] = tmpdir
-
-            theorem = "Test Directory Creation"
+            theorem = with_default_preamble("theorem test_directory_creation : True := by sorry")
             state = GoedelsPoetryState(formal_theorem=theorem)
 
             # Directory should exist
@@ -313,7 +317,7 @@ def test_state_init_with_informal_theorem() -> None:
     """Test state initialization with informal theorem."""
     import uuid
 
-    theorem = f"Prove that 3 cannot be written as sum of two cubes {uuid.uuid4()}."
+    theorem = with_default_preamble(f"theorem test_formalization_{uuid.uuid4().hex} : True := by sorry")
 
     # Clean up any existing directory first
     with suppress(Exception):
@@ -341,8 +345,7 @@ def test_state_init_directory_exists_error() -> None:
     with tempfile.TemporaryDirectory() as tmpdir:
         try:
             os.environ["GOEDELS_POETRY_DIR"] = tmpdir
-
-            theorem = "Test Duplicate Directory"
+            theorem = with_default_preamble("theorem test_duplicate_directory : True := by sorry")
 
             # Create first state
             GoedelsPoetryState(formal_theorem=theorem)
@@ -364,7 +367,7 @@ def test_save_increments_iteration() -> None:
     """Test that save increments the iteration counter."""
     import uuid
 
-    theorem = f"Test Iteration Counter {uuid.uuid4()}"
+    theorem = with_default_preamble(f"theorem test_iteration_counter_{uuid.uuid4().hex} : True := by sorry")
 
     # Clean up any existing directory first
     with suppress(Exception):
@@ -405,7 +408,7 @@ def test_state_manager_reason_property() -> None:
 
     from goedels_poetry.state import GoedelsPoetryStateManager
 
-    theorem = f"Test Reason Property {uuid.uuid4()}"
+    theorem = with_default_preamble(f"theorem test_reason_property_{uuid.uuid4().hex} : True := by sorry")
 
     with suppress(Exception):
         GoedelsPoetryState.clear_theorem_directory(theorem)
@@ -440,7 +443,7 @@ def test_reconstruct_complete_proof_no_proof() -> None:
     from goedels_poetry.agents.util.common import DEFAULT_IMPORTS
     from goedels_poetry.state import GoedelsPoetryStateManager
 
-    theorem = f"Test No Proof {uuid.uuid4()}"
+    theorem = with_default_preamble(f"theorem test_no_proof_{uuid.uuid4().hex} : True := by sorry")
 
     with suppress(Exception):
         GoedelsPoetryState.clear_theorem_directory(theorem)
@@ -466,7 +469,7 @@ def test_reconstruct_complete_proof_simple_leaf() -> None:
     from goedels_poetry.agents.util.common import DEFAULT_IMPORTS
     from goedels_poetry.state import GoedelsPoetryStateManager
 
-    theorem = f"Test Simple Leaf {uuid.uuid4()}"
+    theorem = with_default_preamble(f"theorem test_simple_leaf_{uuid.uuid4().hex} : True := by sorry")
 
     with suppress(Exception):
         GoedelsPoetryState.clear_theorem_directory(theorem)
@@ -479,6 +482,7 @@ def test_reconstruct_complete_proof_simple_leaf() -> None:
             parent=None,
             depth=0,
             formal_theorem=theorem,
+            preamble=DEFAULT_IMPORTS,
             syntactic=True,
             formal_proof=f"{theorem} := by\n  trivial",
             proved=True,
@@ -516,7 +520,7 @@ def test_reconstruct_complete_proof_with_single_have() -> None:
     from goedels_poetry.state import GoedelsPoetryStateManager
     from goedels_poetry.util.tree import TreeNode
 
-    theorem = f"theorem test_single_have_{uuid.uuid4()} : P"
+    theorem = with_default_preamble(f"theorem test_single_have_{uuid.uuid4()} : P")
 
     with suppress(Exception):
         GoedelsPoetryState.clear_theorem_directory(theorem)
@@ -534,6 +538,7 @@ def test_reconstruct_complete_proof_with_single_have() -> None:
             children=[],
             depth=0,
             formal_theorem=theorem,
+            preamble=DEFAULT_IMPORTS,
             proof_sketch=sketch,
             syntactic=True,
             errors=None,
@@ -547,6 +552,7 @@ def test_reconstruct_complete_proof_with_single_have() -> None:
             parent=cast(TreeNode, decomposed),
             depth=1,
             formal_theorem="lemma helper : Q",
+            preamble=DEFAULT_IMPORTS,
             syntactic=True,
             formal_proof="lemma helper : Q := by\n  constructor",
             proved=True,
@@ -604,7 +610,7 @@ def test_reconstruct_complete_proof_with_multiple_haves() -> None:
     from goedels_poetry.state import GoedelsPoetryStateManager
     from goedels_poetry.util.tree import TreeNode
 
-    theorem = f"theorem test_multi_{uuid.uuid4()} : P"
+    theorem = with_default_preamble(f"theorem test_multi_{uuid.uuid4()} : P")
 
     with suppress(Exception):
         GoedelsPoetryState.clear_theorem_directory(theorem)
@@ -623,6 +629,7 @@ def test_reconstruct_complete_proof_with_multiple_haves() -> None:
             children=[],
             depth=0,
             formal_theorem=theorem,
+            preamble=DEFAULT_IMPORTS,
             proof_sketch=sketch,
             syntactic=True,
             errors=None,
@@ -636,6 +643,7 @@ def test_reconstruct_complete_proof_with_multiple_haves() -> None:
             parent=cast(TreeNode, decomposed),
             depth=1,
             formal_theorem="lemma helper1 : Q",
+            preamble=DEFAULT_IMPORTS,
             syntactic=True,
             formal_proof="lemma helper1 : Q := by\n  intro x\n  constructor",
             proved=True,
@@ -651,6 +659,7 @@ def test_reconstruct_complete_proof_with_multiple_haves() -> None:
             parent=cast(TreeNode, decomposed),
             depth=1,
             formal_theorem="lemma helper2 (helper1 : Q) : R",
+            preamble=DEFAULT_IMPORTS,
             syntactic=True,
             formal_proof="lemma helper2 (helper1 : Q) : R := by\n  cases helper1\n  constructor",
             proved=True,
@@ -694,7 +703,7 @@ def test_reconstruct_complete_proof_with_main_body() -> None:
     from goedels_poetry.state import GoedelsPoetryStateManager
     from goedels_poetry.util.tree import TreeNode
 
-    theorem = f"theorem test_main_body_{uuid.uuid4()} : P"
+    theorem = with_default_preamble(f"theorem test_main_body_{uuid.uuid4()} : P")
 
     with suppress(Exception):
         GoedelsPoetryState.clear_theorem_directory(theorem)
@@ -712,6 +721,7 @@ def test_reconstruct_complete_proof_with_main_body() -> None:
             children=[],
             depth=0,
             formal_theorem=theorem,
+            preamble=DEFAULT_IMPORTS,
             proof_sketch=sketch,
             syntactic=True,
             errors=None,
@@ -725,6 +735,7 @@ def test_reconstruct_complete_proof_with_main_body() -> None:
             parent=cast(TreeNode, decomposed),
             depth=1,
             formal_theorem="lemma helper : Q",
+            preamble=DEFAULT_IMPORTS,
             syntactic=True,
             formal_proof="lemma helper : Q := by\n  constructor",
             proved=True,
@@ -740,6 +751,7 @@ def test_reconstruct_complete_proof_with_main_body() -> None:
             parent=cast(TreeNode, decomposed),
             depth=1,
             formal_theorem="theorem main_body : P",
+            preamble=DEFAULT_IMPORTS,
             syntactic=True,
             formal_proof="theorem main_body : P := by\n  apply helper\n  done",
             proved=True,
@@ -789,7 +801,7 @@ def test_reconstruct_complete_proof_proper_indentation() -> None:
     from goedels_poetry.state import GoedelsPoetryStateManager
     from goedels_poetry.util.tree import TreeNode
 
-    theorem = f"theorem test_indent_{uuid.uuid4()} : P"
+    theorem = with_default_preamble(f"theorem test_indent_{uuid.uuid4()} : P")
 
     with suppress(Exception):
         GoedelsPoetryState.clear_theorem_directory(theorem)
@@ -807,6 +819,7 @@ def test_reconstruct_complete_proof_proper_indentation() -> None:
             children=[],
             depth=0,
             formal_theorem=theorem,
+            preamble=DEFAULT_IMPORTS,
             proof_sketch=sketch,
             syntactic=True,
             errors=None,
@@ -820,6 +833,7 @@ def test_reconstruct_complete_proof_proper_indentation() -> None:
             parent=cast(TreeNode, decomposed),
             depth=1,
             formal_theorem="lemma helper : Q",
+            preamble=DEFAULT_IMPORTS,
             syntactic=True,
             formal_proof="lemma helper : Q := by\n  intro x\n  cases x\n  constructor",
             proved=True,
@@ -870,7 +884,7 @@ def test_reconstruct_complete_proof_nested_decomposition() -> None:
     from goedels_poetry.state import GoedelsPoetryStateManager
     from goedels_poetry.util.tree import TreeNode
 
-    theorem = f"theorem test_nested_{uuid.uuid4()} : P"
+    theorem = with_default_preamble(f"theorem test_nested_{uuid.uuid4()} : P")
 
     with suppress(Exception):
         GoedelsPoetryState.clear_theorem_directory(theorem)
@@ -888,6 +902,7 @@ def test_reconstruct_complete_proof_nested_decomposition() -> None:
             children=[],
             depth=0,
             formal_theorem=theorem,
+            preamble=DEFAULT_IMPORTS,
             proof_sketch=parent_sketch,
             syntactic=True,
             errors=None,
@@ -906,6 +921,7 @@ def test_reconstruct_complete_proof_nested_decomposition() -> None:
             children=[],
             depth=1,
             formal_theorem="lemma helper1 : Q",
+            preamble=DEFAULT_IMPORTS,
             proof_sketch=child_sketch,
             syntactic=True,
             errors=None,
@@ -919,6 +935,7 @@ def test_reconstruct_complete_proof_nested_decomposition() -> None:
             parent=cast(TreeNode, child_decomposed),
             depth=2,
             formal_theorem="lemma subhelper : R",
+            preamble=DEFAULT_IMPORTS,
             syntactic=True,
             formal_proof="lemma subhelper : R := by\n  constructor",
             proved=True,
@@ -968,7 +985,7 @@ def test_reconstruct_complete_proof_with_dependencies_in_signature() -> None:
     from goedels_poetry.state import GoedelsPoetryStateManager
     from goedels_poetry.util.tree import TreeNode
 
-    theorem = f"theorem test_deps_{uuid.uuid4()} : P"
+    theorem = with_default_preamble(f"theorem test_deps_{uuid.uuid4()} : P")
 
     with suppress(Exception):
         GoedelsPoetryState.clear_theorem_directory(theorem)
@@ -987,6 +1004,7 @@ def test_reconstruct_complete_proof_with_dependencies_in_signature() -> None:
             children=[],
             depth=0,
             formal_theorem=theorem,
+            preamble=DEFAULT_IMPORTS,
             proof_sketch=sketch,
             syntactic=True,
             errors=None,
@@ -1000,6 +1018,7 @@ def test_reconstruct_complete_proof_with_dependencies_in_signature() -> None:
             parent=cast(TreeNode, decomposed),
             depth=1,
             formal_theorem="lemma cube_mod9 : ∀ (a : ℤ), (a^3) % 9 ∈ {0, 1, 8}",  # noqa: RUF001
+            preamble=DEFAULT_IMPORTS,
             syntactic=True,
             formal_proof="lemma cube_mod9 : ∀ (a : ℤ), (a^3) % 9 ∈ {0, 1, 8} := by\n  intro a\n  omega",  # noqa: RUF001
             proved=True,
@@ -1015,6 +1034,7 @@ def test_reconstruct_complete_proof_with_dependencies_in_signature() -> None:
             parent=cast(TreeNode, decomposed),
             depth=1,
             formal_theorem="lemma sum_not_3 (cube_mod9 : ∀ (a : ℤ), (a^3) % 9 ∈ {0, 1, 8}) : ∀ (s1 s2 : ℤ), s1 ∈ {0, 1, 8} → s2 ∈ {0, 1, 8} → (s1 + s2) % 9 ≠ 3",  # noqa: RUF001
+            preamble=DEFAULT_IMPORTS,
             syntactic=True,
             formal_proof="lemma sum_not_3 (cube_mod9 : ∀ (a : ℤ), (a^3) % 9 ∈ {0, 1, 8}) : ∀ (s1 s2 : ℤ), s1 ∈ {0, 1, 8} → s2 ∈ {0, 1, 8} → (s1 + s2) % 9 ≠ 3 := by\n  intro s1 s2\n  omega",  # noqa: RUF001
             proved=True,
@@ -1030,6 +1050,7 @@ def test_reconstruct_complete_proof_with_dependencies_in_signature() -> None:
             parent=cast(TreeNode, decomposed),
             depth=1,
             formal_theorem="theorem main_body (cube_mod9 : ∀ (a : ℤ), (a^3) % 9 ∈ {0, 1, 8}) (sum_not_3 : ∀ (s1 s2 : ℤ), s1 ∈ {0, 1, 8} → s2 ∈ {0, 1, 8} → (s1 + s2) % 9 ≠ 3) : P",  # noqa: RUF001
+            preamble=DEFAULT_IMPORTS,
             syntactic=True,
             formal_proof="theorem main_body (cube_mod9 : ...) (sum_not_3 : ...) : P := by\n  apply sum_not_3\n  omega",
             proved=True,
@@ -1073,7 +1094,7 @@ def test_reconstruct_complete_proof_empty_proof() -> None:
     from goedels_poetry.agents.util.common import DEFAULT_IMPORTS
     from goedels_poetry.state import GoedelsPoetryStateManager
 
-    theorem = f"theorem test_empty_{uuid.uuid4()} : True"
+    theorem = with_default_preamble(f"theorem test_empty_{uuid.uuid4()} : True")
 
     with suppress(Exception):
         GoedelsPoetryState.clear_theorem_directory(theorem)
@@ -1086,6 +1107,7 @@ def test_reconstruct_complete_proof_empty_proof() -> None:
             parent=None,
             depth=0,
             formal_theorem=theorem,
+            preamble=DEFAULT_IMPORTS,
             syntactic=True,
             formal_proof=None,  # No proof yet
             proved=False,
@@ -1118,7 +1140,7 @@ def test_reconstruct_complete_proof_whitespace_robustness() -> None:
 
     from goedels_poetry.state import GoedelsPoetryStateManager
 
-    theorem = f"theorem whitespace_test_{uuid.uuid4()} : True"
+    theorem = with_default_preamble(f"theorem whitespace_test_{uuid.uuid4()} : True")
 
     with suppress(Exception):
         GoedelsPoetryState.clear_theorem_directory(theorem)
@@ -1180,7 +1202,7 @@ def test_reconstruct_complete_proof_multiline_type_signatures() -> None:
     from goedels_poetry.state import GoedelsPoetryStateManager
     from goedels_poetry.util.tree import TreeNode
 
-    theorem = f"theorem test_multiline_{uuid.uuid4()} : P"
+    theorem = with_default_preamble(f"theorem test_multiline_{uuid.uuid4()} : P")
 
     with suppress(Exception):
         GoedelsPoetryState.clear_theorem_directory(theorem)
@@ -1202,6 +1224,7 @@ def test_reconstruct_complete_proof_multiline_type_signatures() -> None:
             children=[],
             depth=0,
             formal_theorem=theorem,
+            preamble=DEFAULT_IMPORTS,
             proof_sketch=sketch,
             syntactic=True,
             errors=None,
@@ -1215,6 +1238,7 @@ def test_reconstruct_complete_proof_multiline_type_signatures() -> None:
             parent=cast(TreeNode, decomposed),
             depth=1,
             formal_theorem="""lemma helper1 :
+            preamble=DEFAULT_IMPORTS,
   VeryLongType →
   AnotherType""",
             syntactic=True,
@@ -1236,6 +1260,7 @@ def test_reconstruct_complete_proof_multiline_type_signatures() -> None:
             parent=cast(TreeNode, decomposed),
             depth=1,
             formal_theorem="lemma helper2 : SimpleType",
+            preamble=DEFAULT_IMPORTS,
             syntactic=True,
             formal_proof="""lemma helper2 : SimpleType
   := by
@@ -1280,7 +1305,7 @@ def test_extract_tactics_after_by_multiline_variations() -> None:
 
     from goedels_poetry.state import GoedelsPoetryStateManager
 
-    theorem = f"theorem test_multiline_by_{uuid.uuid4()} : True"
+    theorem = with_default_preamble(f"theorem test_multiline_by_{uuid.uuid4()} : True")
 
     with suppress(Exception):
         GoedelsPoetryState.clear_theorem_directory(theorem)
@@ -1323,7 +1348,7 @@ def test_extract_have_name_multiline_signature() -> None:
 
     from goedels_poetry.state import GoedelsPoetryStateManager
 
-    theorem = f"theorem test_name_extraction_{uuid.uuid4()} : True"
+    theorem = with_default_preamble(f"theorem test_name_extraction_{uuid.uuid4()} : True")
 
     with suppress(Exception):
         GoedelsPoetryState.clear_theorem_directory(theorem)
@@ -1359,7 +1384,7 @@ def test_extract_have_name_with_apostrophes() -> None:
 
     from goedels_poetry.state import GoedelsPoetryStateManager
 
-    theorem = f"theorem test_apostrophes_{uuid.uuid4()} : True"
+    theorem = with_default_preamble(f"theorem test_apostrophes_{uuid.uuid4()} : True")
 
     with suppress(Exception):
         GoedelsPoetryState.clear_theorem_directory(theorem)
@@ -1411,7 +1436,7 @@ def test_reconstruct_proof_with_apostrophe_identifiers() -> None:
     from goedels_poetry.state import GoedelsPoetryStateManager
     from goedels_poetry.util.tree import TreeNode
 
-    theorem = f"theorem test_apostrophe_proof_{uuid.uuid4()} : P"
+    theorem = with_default_preamble(f"theorem test_apostrophe_proof_{uuid.uuid4()} : P")
 
     with suppress(Exception):
         GoedelsPoetryState.clear_theorem_directory(theorem)
@@ -1429,6 +1454,7 @@ def test_reconstruct_proof_with_apostrophe_identifiers() -> None:
             children=[],
             depth=0,
             formal_theorem=theorem,
+            preamble=DEFAULT_IMPORTS,
             proof_sketch=sketch,
             syntactic=True,
             errors=None,
@@ -1442,6 +1468,7 @@ def test_reconstruct_proof_with_apostrophe_identifiers() -> None:
             parent=cast(TreeNode, decomposed),
             depth=1,
             formal_theorem="lemma helper' : Q",
+            preamble=DEFAULT_IMPORTS,
             syntactic=True,
             formal_proof="lemma helper' : Q := by\n  constructor",
             proved=True,
@@ -1480,7 +1507,7 @@ def test_replace_main_body_sorry_multiline_have() -> None:
 
     from goedels_poetry.state import GoedelsPoetryStateManager
 
-    theorem = f"theorem test_multiline_have_{uuid.uuid4()} : True"
+    theorem = with_default_preamble(f"theorem test_multiline_have_{uuid.uuid4()} : True")
 
     with suppress(Exception):
         GoedelsPoetryState.clear_theorem_directory(theorem)
@@ -1544,7 +1571,7 @@ def test_reconstruct_proof_multiline_have_sorry() -> None:
     from goedels_poetry.state import GoedelsPoetryStateManager
     from goedels_poetry.util.tree import TreeNode
 
-    theorem = f"theorem test_multiline_recon_{uuid.uuid4()} : P"
+    theorem = with_default_preamble(f"theorem test_multiline_recon_{uuid.uuid4()} : P")
 
     with suppress(Exception):
         GoedelsPoetryState.clear_theorem_directory(theorem)
@@ -1564,6 +1591,7 @@ def test_reconstruct_proof_multiline_have_sorry() -> None:
             children=[],
             depth=0,
             formal_theorem=theorem,
+            preamble=DEFAULT_IMPORTS,
             proof_sketch=sketch,
             syntactic=True,
             errors=None,
@@ -1577,6 +1605,7 @@ def test_reconstruct_proof_multiline_have_sorry() -> None:
             parent=cast(TreeNode, decomposed),
             depth=1,
             formal_theorem="lemma helper : VeryLongType",
+            preamble=DEFAULT_IMPORTS,
             syntactic=True,
             formal_proof="lemma helper : VeryLongType := by\n  constructor",
             proved=True,
@@ -1592,6 +1621,7 @@ def test_reconstruct_proof_multiline_have_sorry() -> None:
             parent=cast(TreeNode, decomposed),
             depth=1,
             formal_theorem="theorem main_body : P",
+            preamble=DEFAULT_IMPORTS,
             syntactic=True,
             formal_proof="theorem main_body : P := by\n  exact helper",
             proved=True,
@@ -1634,7 +1664,7 @@ def test_replace_main_body_sorry_edge_cases() -> None:
 
     from goedels_poetry.state import GoedelsPoetryStateManager
 
-    theorem = f"theorem test_edge_cases_{uuid.uuid4()} : True"
+    theorem = with_default_preamble(f"theorem test_edge_cases_{uuid.uuid4()} : True")
 
     with suppress(Exception):
         GoedelsPoetryState.clear_theorem_directory(theorem)
