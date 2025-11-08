@@ -10,6 +10,8 @@ They test the 6 agent factories that use KiminaClient but not BaseChatModel:
 6. InformalTheoremSyntaxAgentFactory
 """
 
+from typing import Any, cast
+
 import pytest
 
 # Try to import the required modules - skip all tests if imports fail
@@ -28,6 +30,7 @@ try:
         FormalTheoremProofStates,
         InformalTheoremState,
     )
+    from goedels_poetry.agents.util.common import DEFAULT_IMPORTS
 
     IMPORTS_AVAILABLE = True
 except (ImportError, TypeError) as e:
@@ -66,6 +69,76 @@ theorem test_theorem : True := by
 """
 
 
+def _make_formal_theorem_state(
+    formal_theorem: str,
+    *,
+    formal_proof: str | None = "",
+    overrides: dict[str, Any] | None = None,
+) -> FormalTheoremProofState:
+    """Create a FormalTheoremProofState with sensible defaults for tests."""
+    base: dict[str, Any] = {
+        "parent": None,
+        "depth": 0,
+        "formal_theorem": formal_theorem,
+        "preamble": DEFAULT_IMPORTS,
+        "syntactic": False,
+        "formal_proof": formal_proof,
+        "proved": False,
+        "errors": "",
+        "ast": None,
+        "self_correction_attempts": 0,
+        "proof_history": [],
+        "pass_attempts": 0,
+    }
+    if overrides:
+        base.update(overrides)
+    return cast(FormalTheoremProofState, base)
+
+
+def _make_decomposed_theorem_state(
+    formal_theorem: str,
+    *,
+    proof_sketch: str | None = None,
+    overrides: dict[str, Any] | None = None,
+) -> DecomposedFormalTheoremState:
+    """Create a DecomposedFormalTheoremState with sensible defaults for tests."""
+    base: dict[str, Any] = {
+        "parent": None,
+        "children": [],
+        "depth": 0,
+        "formal_theorem": formal_theorem,
+        "preamble": DEFAULT_IMPORTS,
+        "proof_sketch": proof_sketch,
+        "syntactic": False,
+        "errors": "",
+        "ast": None,
+        "self_correction_attempts": 0,
+        "decomposition_history": [],
+    }
+    if overrides:
+        base.update(overrides)
+    return cast(DecomposedFormalTheoremState, base)
+
+
+def _make_informal_theorem_state(
+    informal_theorem: str,
+    formal_theorem: str,
+    *,
+    overrides: dict[str, Any] | None = None,
+) -> InformalTheoremState:
+    """Create an InformalTheoremState with sensible defaults for tests."""
+    base: dict[str, Any] = {
+        "informal_theorem": informal_theorem,
+        "formalization_attempts": 0,
+        "formal_theorem": formal_theorem,
+        "syntactic": False,
+        "semantic": False,
+    }
+    if overrides:
+        base.update(overrides)
+    return cast(InformalTheoremState, base)
+
+
 class TestProofCheckerAgent:
     """Tests for ProofCheckerAgentFactory."""
 
@@ -79,13 +152,10 @@ class TestProofCheckerAgent:
         agent = ProofCheckerAgentFactory.create_agent(server_url=kimina_server_url, server_max_retries=3)
 
         # Create input state
-        state: FormalTheoremProofState = {
-            "formal_theorem": SIMPLE_THEOREM,
-            "formal_proof": VALID_LEAN_CODE,
-            "proved": False,
-            "errors": "",
-            "ast": None,
-        }
+        state = _make_formal_theorem_state(
+            SIMPLE_THEOREM,
+            formal_proof=VALID_LEAN_CODE,
+        )
         input_states: FormalTheoremProofStates = {"inputs": [state], "outputs": []}
 
         # Run agent
@@ -103,13 +173,10 @@ class TestProofCheckerAgent:
         agent = ProofCheckerAgentFactory.create_agent(server_url=kimina_server_url, server_max_retries=3)
 
         # Create input state with invalid proof
-        state: FormalTheoremProofState = {
-            "formal_theorem": SIMPLE_THEOREM,
-            "formal_proof": INVALID_LEAN_CODE,
-            "proved": False,
-            "errors": "",
-            "ast": None,
-        }
+        state = _make_formal_theorem_state(
+            SIMPLE_THEOREM,
+            formal_proof=INVALID_LEAN_CODE,
+        )
         input_states: FormalTheoremProofStates = {"inputs": [state], "outputs": []}
 
         # Run agent
@@ -127,13 +194,10 @@ class TestProofCheckerAgent:
         agent = ProofCheckerAgentFactory.create_agent(server_url=kimina_server_url, server_max_retries=3)
 
         # Create input state with proof containing sorry
-        state: FormalTheoremProofState = {
-            "formal_theorem": SIMPLE_THEOREM,
-            "formal_proof": PROOF_WITH_SORRY,
-            "proved": False,
-            "errors": "",
-            "ast": None,
-        }
+        state = _make_formal_theorem_state(
+            SIMPLE_THEOREM,
+            formal_proof=PROOF_WITH_SORRY,
+        )
         input_states: FormalTheoremProofStates = {"inputs": [state], "outputs": []}
 
         # Run agent
@@ -159,13 +223,10 @@ class TestProofParserAgent:
         agent = ProofParserAgentFactory.create_agent(server_url=kimina_server_url, server_max_retries=3)
 
         # Create input state
-        state: FormalTheoremProofState = {
-            "formal_theorem": SIMPLE_THEOREM,
-            "formal_proof": VALID_LEAN_CODE,
-            "proved": False,
-            "errors": "",
-            "ast": None,
-        }
+        state = _make_formal_theorem_state(
+            SIMPLE_THEOREM,
+            formal_proof=VALID_LEAN_CODE,
+        )
         input_states: FormalTheoremProofStates = {"inputs": [state], "outputs": []}
 
         # Run agent
@@ -191,13 +252,10 @@ class TestSketchCheckerAgent:
         agent = SketchCheckerAgentFactory.create_agent(server_url=kimina_server_url, server_max_retries=3)
 
         # Create input state
-        state: DecomposedFormalTheoremState = {
-            "formal_theorem": SIMPLE_THEOREM,
-            "proof_sketch": VALID_LEAN_CODE,
-            "syntactic": False,
-            "errors": "",
-            "ast": None,
-        }
+        state = _make_decomposed_theorem_state(
+            SIMPLE_THEOREM,
+            proof_sketch=VALID_LEAN_CODE,
+        )
         input_states: DecomposedFormalTheoremStates = {"inputs": [state], "outputs": []}
 
         # Run agent
@@ -215,13 +273,10 @@ class TestSketchCheckerAgent:
         agent = SketchCheckerAgentFactory.create_agent(server_url=kimina_server_url, server_max_retries=3)
 
         # Create input state with invalid sketch
-        state: DecomposedFormalTheoremState = {
-            "formal_theorem": SIMPLE_THEOREM,
-            "proof_sketch": INVALID_LEAN_CODE,
-            "syntactic": False,
-            "errors": "",
-            "ast": None,
-        }
+        state = _make_decomposed_theorem_state(
+            SIMPLE_THEOREM,
+            proof_sketch=INVALID_LEAN_CODE,
+        )
         input_states: DecomposedFormalTheoremStates = {"inputs": [state], "outputs": []}
 
         # Run agent
@@ -248,13 +303,10 @@ class TestSketchParserAgent:
         agent = SketchParserAgentFactory.create_agent(server_url=kimina_server_url, server_max_retries=3)
 
         # Create input state
-        state: DecomposedFormalTheoremState = {
-            "formal_theorem": SIMPLE_THEOREM,
-            "proof_sketch": VALID_LEAN_CODE,
-            "syntactic": False,
-            "errors": "",
-            "ast": None,
-        }
+        state = _make_decomposed_theorem_state(
+            SIMPLE_THEOREM,
+            proof_sketch=VALID_LEAN_CODE,
+        )
         input_states: DecomposedFormalTheoremStates = {"inputs": [state], "outputs": []}
 
         # Run agent
@@ -280,13 +332,10 @@ class TestFormalTheoremSyntaxAgent:
         agent = FormalTheoremSyntaxAgentFactory.create_agent(server_url=kimina_server_url, server_max_retries=3)
 
         # Create input state
-        state: FormalTheoremProofState = {
-            "formal_theorem": VALID_LEAN_CODE,
-            "formal_proof": "",
-            "proved": False,
-            "errors": "",
-            "ast": None,
-        }
+        state = _make_formal_theorem_state(
+            VALID_LEAN_CODE,
+            formal_proof="",
+        )
         input_states: FormalTheoremProofStates = {"inputs": [state], "outputs": []}
 
         # Run agent
@@ -303,13 +352,10 @@ class TestFormalTheoremSyntaxAgent:
         agent = FormalTheoremSyntaxAgentFactory.create_agent(server_url=kimina_server_url, server_max_retries=3)
 
         # Create input state with invalid theorem
-        state: FormalTheoremProofState = {
-            "formal_theorem": INVALID_LEAN_CODE,
-            "formal_proof": "",
-            "proved": False,
-            "errors": "",
-            "ast": None,
-        }
+        state = _make_formal_theorem_state(
+            INVALID_LEAN_CODE,
+            formal_proof="",
+        )
         input_states: FormalTheoremProofStates = {"inputs": [state], "outputs": []}
 
         # Run agent
@@ -335,12 +381,10 @@ class TestInformalTheoremSyntaxAgent:
         agent = InformalTheoremSyntaxAgentFactory.create_agent(server_url=kimina_server_url, server_max_retries=3)
 
         # Create input state
-        state: InformalTheoremState = {
-            "informal_theorem": "Prove that true is true",
-            "formal_theorem": VALID_LEAN_CODE,
-            "syntactic": False,
-            "semantic": False,
-        }
+        state = _make_informal_theorem_state(
+            "Prove that true is true",
+            VALID_LEAN_CODE,
+        )
 
         # Run agent
         result = agent.invoke(state)
@@ -353,12 +397,10 @@ class TestInformalTheoremSyntaxAgent:
         agent = InformalTheoremSyntaxAgentFactory.create_agent(server_url=kimina_server_url, server_max_retries=3)
 
         # Create input state with invalid theorem
-        state: InformalTheoremState = {
-            "informal_theorem": "Prove that false is true",
-            "formal_theorem": INVALID_LEAN_CODE,
-            "syntactic": False,
-            "semantic": False,
-        }
+        state = _make_informal_theorem_state(
+            "Prove that false is true",
+            INVALID_LEAN_CODE,
+        )
 
         # Run agent
         result = agent.invoke(state)
