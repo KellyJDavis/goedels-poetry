@@ -49,6 +49,8 @@ class FormalTheoremProofState(TypedDict):
         The text of the formalization of the informal theorem
     syntactic: Required[bool]
         A bool indicating if formal_theorem is syntactically valid
+    preamble: Required[str]
+        A string containing the theorem's preamble
     formal_proof: Required[str | None]
         Formal proof of the formal_theorem
     proved: Required[bool]
@@ -107,6 +109,8 @@ class DecomposedFormalTheoremState(TypedDict):
         The depth of this node in the proof tree
     formal_theorem: Required[str]
         The text of the formalization of the informal theorem
+    preamble: Required[str]
+        A string containing the theorem's preamble
     proof_sketch: Required[str | None]
         The formal sketch of the proof of formal_theorem
     syntactic: Required[bool]
