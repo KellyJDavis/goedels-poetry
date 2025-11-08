@@ -46,6 +46,13 @@ DEFAULT_IMPORTS = (
 _MANDATORY_PREAMBLE_LINES: tuple[str, ...] = ("set_option maxHeartbeats 0",)
 
 
+def _count_preamble_commands(preamble: str) -> int:
+    """Count non-empty, non-comment lines in a preamble block."""
+    if not preamble:
+        return 0
+    return sum(1 for line in preamble.splitlines() if line.strip() and not line.strip().startswith("--"))
+
+
 def _is_lean_declaration_line(s: str) -> bool:
     """Check if a line is a Lean declaration."""
     return (
@@ -245,16 +252,12 @@ def remove_default_imports_from_ast(ast: dict[str, Any] | None, preamble: str = 
         return {}
 
     skip_default_imports = _normalize_block(preamble) == _normalize_block(DEFAULT_IMPORTS)
-    num_imports_to_skip = 4 if skip_default_imports else 0
+    num_imports_to_skip = _count_preamble_commands(DEFAULT_IMPORTS) if skip_default_imports else 0
 
     # The AST is a dict. If it contains a list of commands, we need to skip
     # the ones that correspond to DEFAULT_IMPORTS.
-    # DEFAULT_IMPORTS contains:
-    # 1. import Mathlib
-    # 2. import Aesop
-    # 3. set_option maxHeartbeats 0
-    # 4. open BigOperators Real Nat Topology Rat
-    # So we skip the first 4 commands
+    # DEFAULT_IMPORTS currently expands to four commands (two imports, a set_option, and an open statement).
+    # We compute the exact count dynamically so updates to DEFAULT_IMPORTS stay in sync.
 
     # Check if the AST is a list at the top level (older format)
     if isinstance(ast, list):
