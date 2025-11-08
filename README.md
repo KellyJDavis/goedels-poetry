@@ -233,8 +233,10 @@ Once installed, you can use the `goedels_poetry` command to prove theorems:
 #### Prove a Single Formal Theorem
 
 ```bash
-goedels_poetry --formal-theorem "theorem theorem_54_43 : 1 + 1 = 2 := by sorry"
+goedels_poetry --formal-theorem "import Mathlib\n\nopen BigOperators\n\ntheorem theorem_54_43 : 1 + 1 = 2 := by sorry"
 ```
+
+Formal theorems supplied on the command line (or via files) must include their full Lean preamble—imports, options, namespaces, and any comments required to state the theorem. Gödel's Poetry no longer prepends the default header for user-supplied formal problems. (The default header is still added automatically when an informal theorem is formalized by the system.)
 
 #### Prove a Single Informal Theorem
 
@@ -272,19 +274,19 @@ To see detailed LLM and Kimina server responses during execution, set the `GOEDE
 **On Linux/macOS**:
 ```bash
 export GOEDELS_POETRY_DEBUG=1
-goedels_poetry --formal-theorem "theorem theorem_54_43 : 1 + 1 = 2 := by sorry"
+goedels_poetry --formal-theorem "import Mathlib\n\nopen BigOperators\n\ntheorem theorem_54_43 : 1 + 1 = 2 := by sorry"
 ```
 
 **On Windows (Command Prompt)**:
 ```cmd
 set GOEDELS_POETRY_DEBUG=1
-goedels_poetry --formal-theorem "theorem theorem_54_43 : 1 + 1 = 2 := by sorry"
+goedels_poetry --formal-theorem "import Mathlib\n\nopen BigOperators\n\ntheorem theorem_54_43 : 1 + 1 = 2 := by sorry"
 ```
 
 **On Windows (PowerShell)**:
 ```powershell
 $env:GOEDELS_POETRY_DEBUG=1
-goedels_poetry --formal-theorem "theorem theorem_54_43 : 1 + 1 = 2 := by sorry"
+goedels_poetry --formal-theorem "import Mathlib`n`nopen BigOperators`n`ntheorem theorem_54_43 : 1 + 1 = 2 := by sorry"
 ```
 
 When debug mode is enabled, all responses from:
@@ -304,7 +306,7 @@ will be printed to the console with rich formatting for easy debugging and inspe
 
 ```bash
 goedels_poetry --formal-theorem \
-  "theorem add_comm_example : 3 + 5 = 5 + 3 := by sorry"
+  "import Mathlib\n\nopen BigOperators\n\ntheorem add_comm_example : 3 + 5 = 5 + 3 := by sorry"
 ```
 
 ### Example 2: Informal Theorem
@@ -319,8 +321,21 @@ goedels_poetry --informal-theorem \
 Create a directory with theorem files:
 ```bash
 mkdir theorems
-echo "theorem test1 : 2 + 2 = 4 := by sorry" > theorems/test1.lean
-echo "theorem test2 : 5 * 5 = 25 := by sorry" > theorems/test2.lean
+cat <<'EOF' > theorems/test1.lean
+import Mathlib
+
+open BigOperators
+
+theorem test1 : 2 + 2 = 4 := by sorry
+EOF
+
+cat <<'EOF' > theorems/test2.lean
+import Mathlib
+
+open BigOperators
+
+theorem test2 : 5 * 5 = 25 := by sorry
+EOF
 
 goedels_poetry --formal-theorems ./theorems/
 ```
@@ -561,7 +576,7 @@ export KIMINA_LEAN_SERVER__URL="http://localhost:9000"
 export PROVER_AGENT_LLM__NUM_CTX="8192"
 
 # Run with custom configuration
-goedels_poetry --formal-theorem "theorem theorem_54_43 : 1 + 1 = 2 := by sorry"
+goedels_poetry --formal-theorem "import Mathlib\n\nopen BigOperators\n\ntheorem theorem_54_43 : 1 + 1 = 2 := by sorry"
 ```
 
 **Multiple overrides**:
@@ -569,7 +584,8 @@ goedels_poetry --formal-theorem "theorem theorem_54_43 : 1 + 1 = 2 := by sorry"
 export PROVER_AGENT_LLM__MODEL="kdavis/Goedel-Prover-V2:70b"
 export DECOMPOSER_AGENT_LLM__OPENAI_MODEL="gpt-5-pro"
 export KIMINA_LEAN_SERVER__MAX_RETRIES="10"
-goedels_poetry --formal-theorem "..."
+# Provide the full preamble plus theorem body when invoking formal problems
+goedels_poetry --formal-theorem "import Mathlib\n\nopen BigOperators\n\ntheorem theorem_54_43 : 1 + 1 = 2 := by sorry"
 ```
 
 **Using Google Generative AI**:

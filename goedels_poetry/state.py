@@ -16,6 +16,12 @@ from goedels_poetry.agents.state import (
     FormalTheoremProofStates,
     InformalTheoremState,
 )
+from goedels_poetry.agents.util.common import (
+    DEFAULT_IMPORTS,
+    combine_preamble_and_body,
+    ensure_mandatory_preamble,
+    split_preamble_and_body,
+)
 from goedels_poetry.config.llm import (
     DECOMPOSER_AGENT_MAX_SELF_CORRECTION_ATTEMPTS,
     FORMALIZER_AGENT_MAX_RETRIES,
@@ -43,6 +49,8 @@ _OUTPUT_DIR = os.environ.get("GOEDELS_POETRY_DIR", os.path.expanduser("~/.goedel
 #     exact h
 PROOF_BODY_INDENT_SPACES = 2
 
+MISSING_FORMAL_PREAMBLE_MSG = "Formal theorems must include a Lean preamble/header (imports, options, etc.)."
+
 
 class GoedelsPoetryState:
     def __init__(self, formal_theorem: str | None = None, informal_theorem: str | None = None):
@@ -61,27 +69,35 @@ class GoedelsPoetryState:
         # Introduce a list of strings to hold the action history
         self.action_history: list[str] = []
 
-        # Initialize state with provided arguemnts
-        self.formal_theorem_proof: TreeNode | None = (
-            None
-            if formal_theorem is None
-            else cast(
-                TreeNode,
-                FormalTheoremProofState(
-                    parent=None,
-                    depth=0,
-                    formal_theorem=formal_theorem,
-                    syntactic=False,
-                    formal_proof=None,
-                    proved=False,
-                    errors=None,
-                    ast=None,
-                    self_correction_attempts=0,
-                    proof_history=[],
-                    pass_attempts=0,
-                ),
+        self._root_preamble: str | None = None
+
+        # Initialize state with provided arguments
+        self.formal_theorem_proof: TreeNode | None = None
+        if formal_theorem is not None:
+            preamble, body = split_preamble_and_body(formal_theorem)
+            if not preamble.strip():
+                raise ValueError(MISSING_FORMAL_PREAMBLE_MSG)
+
+            preamble = ensure_mandatory_preamble(preamble)
+            self._root_preamble = preamble
+            initial_formal_state = FormalTheoremProofState(
+                parent=None,
+                depth=0,
+                formal_theorem=body,
+                preamble=preamble,
+                syntactic=False,
+                formal_proof=None,
+                proved=False,
+                errors=None,
+                ast=None,
+                self_correction_attempts=0,
+                proof_history=[],
+                pass_attempts=0,
             )
-        )
+            self.formal_theorem_proof = cast(TreeNode, initial_formal_state)
+            theorem_for_metadata = combine_preamble_and_body(preamble, body)
+        else:
+            theorem_for_metadata = str(informal_theorem)
 
         # Initialize InformalTheoremState queues
         self.informal_formalizer_queue: InformalTheoremState | None = (
@@ -100,7 +116,7 @@ class GoedelsPoetryState:
 
         # Initialize FormalTheoremProofState lists
         self.proof_syntax_queue: list[FormalTheoremProofState] = (
-            [] if formal_theorem is None else [cast(FormalTheoremProofState, self.formal_theorem_proof)]
+            [] if self.formal_theorem_proof is None else [cast(FormalTheoremProofState, self.formal_theorem_proof)]
         )
         self.proof_prove_queue: list[FormalTheoremProofState] = []
         self.proof_validate_queue: list[FormalTheoremProofState] = []
@@ -121,7 +137,7 @@ class GoedelsPoetryState:
         self._iteration = 0
 
         # Create theorem specific output directory
-        theorem = str(formal_theorem if formal_theorem else informal_theorem)
+        theorem = theorem_for_metadata
         theorem_hash = self._hash_theorem(theorem)
         self._output_dir = os.path.join(_OUTPUT_DIR, theorem_hash)
 
@@ -498,10 +514,12 @@ class GoedelsPoetryStateManager:
         # Check if semantically_checked_informal_theorem is semantically valid
         if semantically_checked_informal_theorem["semantic"]:
             # If it is semantically valid, create an associated FormalTheoremProofState
+            default_preamble = ensure_mandatory_preamble(DEFAULT_IMPORTS)
             theorem_to_prove = FormalTheoremProofState(
                 parent=None,
                 depth=0,
                 formal_theorem=str(semantically_checked_informal_theorem["formal_theorem"]),
+                preamble=default_preamble,
                 syntactic=semantically_checked_informal_theorem["syntactic"],
                 formal_proof=None,
                 proved=False,
@@ -515,6 +533,8 @@ class GoedelsPoetryStateManager:
             self._state.proof_prove_queue += [theorem_to_prove]
             # Set this FormalTheoremProofState as the root theorem to prove.
             self._state.formal_theorem_proof = cast(TreeNode, theorem_to_prove)
+            if self._state._root_preamble is None:
+                self._state._root_preamble = default_preamble
         else:
             # If it isn't semantically valid, queue it to be re-formalized
             self._state.informal_formalizer_queue = semantically_checked_informal_theorem
@@ -684,6 +704,7 @@ class GoedelsPoetryStateManager:
                 children=[],
                 depth=proof_too_difficult["depth"],
                 formal_theorem=proof_too_difficult["formal_theorem"],
+                preamble=proof_too_difficult["preamble"],
                 proof_sketch=None,
                 syntactic=False,
                 errors=None,
@@ -1273,15 +1294,15 @@ class GoedelsPoetryStateManager:
         Returns
         -------
         str
-            The complete Lean4 proof text with DEFAULT_IMPORTS prefix
+            The complete Lean4 proof text with the stored preamble prefix
         """
-        from goedels_poetry.agents.util.common import DEFAULT_IMPORTS
+        preamble = self._state._root_preamble or DEFAULT_IMPORTS
 
         if self._state.formal_theorem_proof is None:
-            return DEFAULT_IMPORTS + "-- No proof available\n"
+            return combine_preamble_and_body(preamble, "-- No proof available")
 
-        proof_without_imports = self._reconstruct_node_proof(self._state.formal_theorem_proof)
-        return DEFAULT_IMPORTS + proof_without_imports
+        proof_without_preamble = self._reconstruct_node_proof(self._state.formal_theorem_proof)
+        return combine_preamble_and_body(preamble, proof_without_preamble)
 
     def _reconstruct_node_proof(self, node: TreeNode) -> str:
         """
@@ -1295,7 +1316,7 @@ class GoedelsPoetryStateManager:
         Returns
         -------
         str
-            The proof text for this node and all its children (without DEFAULT_IMPORTS)
+            The proof text for this node and all its children (without preamble)
         """
         # Check if this is a FormalTheoremProofState (leaf node)
         if isinstance(node, dict) and "formal_proof" in node and "children" not in node:

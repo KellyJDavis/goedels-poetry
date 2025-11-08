@@ -122,6 +122,7 @@ def _create_formal_theorem_proof_state(
         parent=cast(TreeNode | None, state),
         depth=(state["depth"] + 1),
         formal_theorem=formal_theorem,
+        preamble=state["preamble"],
         syntactic=True,
         formal_proof=None,
         proved=False,

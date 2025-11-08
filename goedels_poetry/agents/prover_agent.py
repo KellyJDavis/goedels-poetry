@@ -9,7 +9,12 @@ from langgraph.graph.state import CompiledStateGraph
 from langgraph.types import Send
 
 from goedels_poetry.agents.state import FormalTheoremProofState, FormalTheoremProofStates
-from goedels_poetry.agents.util.common import LLMParsingError, add_default_imports, load_prompt, remove_default_imports
+from goedels_poetry.agents.util.common import (
+    LLMParsingError,
+    combine_preamble_and_body,
+    load_prompt,
+    strip_known_preamble,
+)
 from goedels_poetry.agents.util.debug import log_llm_response
 
 
@@ -105,8 +110,8 @@ def _prover(llm: BaseChatModel, state: FormalTheoremProofState) -> FormalTheorem
     # Check if errors is None
     if state["errors"] is None:
         # If it is, load the prompt in use when not correcting a previous proof
-        # Add DEFAULT_IMPORTS prefix to the formal_theorem for the prompt
-        formal_statement_with_imports = add_default_imports(state["formal_theorem"])
+        # Combine the stored preamble with the formal theorem for the prompt
+        formal_statement_with_imports = combine_preamble_and_body(state["preamble"], state["formal_theorem"])
         prompt = load_prompt("goedel-prover-v2-initial", formal_statement=formal_statement_with_imports)
 
         # Put the prompt in the final message
@@ -119,7 +124,7 @@ def _prover(llm: BaseChatModel, state: FormalTheoremProofState) -> FormalTheorem
     log_llm_response("PROVER_AGENT_LLM", str(response_content))
 
     # Parse prover response
-    formal_proof = _parse_prover_response(str(response_content))
+    formal_proof = _parse_prover_response(str(response_content), state["preamble"])
 
     # Add the formal proof to the state
     state["formal_proof"] = formal_proof
@@ -131,7 +136,7 @@ def _prover(llm: BaseChatModel, state: FormalTheoremProofState) -> FormalTheorem
     return {"outputs": [state]}  # type: ignore[typeddict-item]
 
 
-def _parse_prover_response(response: str) -> str:
+def _parse_prover_response(response: str, expected_preamble: str) -> str:
     """
     Extract the final lean code snippet from the passed string and remove DEFAULT_IMPORTS.
 
@@ -155,7 +160,8 @@ def _parse_prover_response(response: str) -> str:
     if not matches:
         raise LLMParsingError("Failed to extract code block from LLM response", response)  # noqa: TRY003
     formal_proof = cast(str, matches[-1]).strip()
-    # Remove DEFAULT_IMPORTS if present
-    if formal_proof:
-        formal_proof = remove_default_imports(formal_proof)
-    return formal_proof
+    if not formal_proof:
+        return formal_proof
+
+    stripped, matched = strip_known_preamble(formal_proof, expected_preamble)
+    return stripped if matched else formal_proof

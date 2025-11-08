@@ -67,6 +67,7 @@ class FormalTheoremProofState(TypedDict):
     parent: Required[TreeNode | None]
     depth: Required[int]
     formal_theorem: Required[str]
+    preamble: Required[str]
     syntactic: Required[bool]
     formal_proof: Required[str | None]
     proved: Required[bool]
@@ -126,6 +127,7 @@ class DecomposedFormalTheoremState(TypedDict):
     depth: Required[int]
     # FormalTheorem specific properties
     formal_theorem: Required[str]
+    preamble: Required[str]
     # DecomposedFormalTheoremState specific properties
     proof_sketch: Required[str | None]
     syntactic: Required[bool]

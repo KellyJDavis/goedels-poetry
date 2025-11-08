@@ -9,8 +9,11 @@ from typing import cast
 import pytest
 
 from goedels_poetry.agents.state import DecomposedFormalTheoremState, FormalTheoremProofState
+from goedels_poetry.agents.util.common import combine_preamble_and_body
 from goedels_poetry.state import GoedelsPoetryState, GoedelsPoetryStateManager
 from goedels_poetry.util.tree import TreeNode
+
+TEST_PREAMBLE = "import Mathlib\n\nset_option maxHeartbeats 0"
 
 
 @pytest.fixture
@@ -20,14 +23,16 @@ def temp_state() -> GoedelsPoetryState:
     tmpdir = tempfile.mkdtemp()
     os.environ["GOEDELS_POETRY_DIR"] = tmpdir
 
-    theorem = f"Test Backtracking Theorem {uuid.uuid4()}"
-    state = GoedelsPoetryState(formal_theorem=theorem)
+    theorem_name = f"test_backtracking_theorem_{uuid.uuid4().hex}"
+    theorem_body = f"theorem {theorem_name} : True := by sorry"
+    full_theorem = combine_preamble_and_body(TEST_PREAMBLE, theorem_body)
+    state = GoedelsPoetryState(formal_theorem=full_theorem)
 
     yield state
 
     # Cleanup
     with suppress(Exception):
-        GoedelsPoetryState.clear_theorem_directory(theorem)
+        GoedelsPoetryState.clear_theorem_directory(full_theorem)
     if old_env is not None:
         os.environ["GOEDELS_POETRY_DIR"] = old_env
     elif "GOEDELS_POETRY_DIR" in os.environ:
@@ -54,6 +59,7 @@ def test_get_sketches_to_backtrack_with_items(temp_state: GoedelsPoetryState) ->
         children=[],
         depth=0,
         formal_theorem="theorem test : True := by sorry",
+        preamble=TEST_PREAMBLE,
         proof_sketch=None,
         syntactic=False,
         errors=None,
@@ -82,6 +88,7 @@ def test_get_sketches_to_backtrack_with_multiple_items(temp_state: GoedelsPoetry
             children=[],
             depth=i,
             formal_theorem=f"theorem test{i} : True := by sorry",
+            preamble=TEST_PREAMBLE,
             proof_sketch=None,
             syntactic=False,
             errors=None,
@@ -109,6 +116,7 @@ def test_set_backtracked_sketches_clears_queue(temp_state: GoedelsPoetryState) -
         children=[],
         depth=0,
         formal_theorem="theorem test : True := by sorry",
+        preamble=TEST_PREAMBLE,
         proof_sketch=None,
         syntactic=False,
         errors=None,
@@ -139,6 +147,7 @@ def test_set_backtracked_sketches_adds_to_validate_queue(temp_state: GoedelsPoet
         children=[],
         depth=0,
         formal_theorem="theorem test : True := by sorry",
+        preamble=TEST_PREAMBLE,
         proof_sketch="by trivial",
         syntactic=False,
         errors=None,
@@ -170,6 +179,7 @@ def test_set_backtracked_sketches_with_multiple_items(temp_state: GoedelsPoetryS
             children=[],
             depth=i,
             formal_theorem=f"theorem test{i} : True := by sorry",
+            preamble=TEST_PREAMBLE,
             proof_sketch=f"by trivial{i}",
             syntactic=False,
             errors=None,
@@ -202,6 +212,7 @@ def test_backtracking_integration_with_validated_sketches(temp_state: GoedelsPoe
         children=[],
         depth=0,
         formal_theorem="theorem parent : True := by sorry",
+        preamble=TEST_PREAMBLE,
         proof_sketch="by trivial",
         syntactic=False,
         errors=None,
@@ -216,6 +227,7 @@ def test_backtracking_integration_with_validated_sketches(temp_state: GoedelsPoe
         children=[],
         depth=1,
         formal_theorem="theorem child : True := by sorry",
+        preamble=TEST_PREAMBLE,
         proof_sketch="by invalid",
         syntactic=False,
         errors="Compilation error",
@@ -262,6 +274,7 @@ def test_backtracking_sets_finished_when_no_ancestor(temp_state: GoedelsPoetrySt
         children=[],
         depth=0,
         formal_theorem="theorem root : True := by sorry",
+        preamble=TEST_PREAMBLE,
         proof_sketch="by invalid",
         syntactic=False,
         errors="Compilation error",
@@ -300,6 +313,7 @@ def test_backtracking_removes_descendants_from_queues(temp_state: GoedelsPoetryS
         children=[],
         depth=0,
         formal_theorem="theorem parent : True := by sorry",
+        preamble=TEST_PREAMBLE,
         proof_sketch="by trivial",
         syntactic=False,
         errors=None,
@@ -314,6 +328,7 @@ def test_backtracking_removes_descendants_from_queues(temp_state: GoedelsPoetryS
         children=[],
         depth=1,
         formal_theorem="theorem child_decomp : True := by sorry",
+        preamble=TEST_PREAMBLE,
         proof_sketch="by trivial",
         syntactic=False,
         errors=None,
@@ -327,6 +342,7 @@ def test_backtracking_removes_descendants_from_queues(temp_state: GoedelsPoetryS
         parent=cast(TreeNode, child_decomposed),
         depth=2,
         formal_theorem="theorem grandchild : True := by sorry",
+        preamble=TEST_PREAMBLE,
         syntactic=True,
         formal_proof=None,
         proved=False,
@@ -346,6 +362,7 @@ def test_backtracking_removes_descendants_from_queues(temp_state: GoedelsPoetryS
         children=[],
         depth=1,
         formal_theorem="theorem failed_child : True := by sorry",
+        preamble=TEST_PREAMBLE,
         proof_sketch="by invalid",
         syntactic=False,
         errors="Compilation error",
@@ -387,6 +404,7 @@ def test_backtracking_with_valid_sketches(temp_state: GoedelsPoetryState) -> Non
         children=[],
         depth=0,
         formal_theorem="theorem valid : True := by sorry",
+        preamble=TEST_PREAMBLE,
         proof_sketch="by trivial",
         syntactic=True,  # Valid
         errors=None,
@@ -401,6 +419,7 @@ def test_backtracking_with_valid_sketches(temp_state: GoedelsPoetryState) -> Non
         children=[],
         depth=0,
         formal_theorem="theorem parent : True := by sorry",
+        preamble=TEST_PREAMBLE,
         proof_sketch="by trivial",
         syntactic=False,
         errors=None,
@@ -415,6 +434,7 @@ def test_backtracking_with_valid_sketches(temp_state: GoedelsPoetryState) -> Non
         children=[],
         depth=1,
         formal_theorem="theorem failed : True := by sorry",
+        preamble=TEST_PREAMBLE,
         proof_sketch="by invalid",
         syntactic=False,  # Invalid
         errors="Compilation error",
@@ -454,6 +474,7 @@ def test_backtracking_preserves_history(temp_state: GoedelsPoetryState) -> None:
         children=[],
         depth=0,
         formal_theorem="theorem parent : True := by sorry",
+        preamble=TEST_PREAMBLE,
         proof_sketch="by trivial",
         syntactic=False,
         errors=None,
@@ -468,6 +489,7 @@ def test_backtracking_preserves_history(temp_state: GoedelsPoetryState) -> None:
         children=[],
         depth=1,
         formal_theorem="theorem child : True := by sorry",
+        preamble=TEST_PREAMBLE,
         proof_sketch="by invalid",
         syntactic=False,
         errors="Compilation error",
@@ -508,6 +530,7 @@ def test_set_decomposed_sketches_with_too_deep_children_backtracks(temp_state: G
         children=[],
         depth=0,
         formal_theorem="theorem grandparent : True := by sorry",
+        preamble=TEST_PREAMBLE,
         proof_sketch="by trivial",
         syntactic=True,
         errors=None,
@@ -521,6 +544,7 @@ def test_set_decomposed_sketches_with_too_deep_children_backtracks(temp_state: G
         children=[],
         depth=1,
         formal_theorem="theorem parent : True := by sorry",
+        preamble=TEST_PREAMBLE,
         proof_sketch="by trivial",
         syntactic=True,
         errors=None,
@@ -535,6 +559,7 @@ def test_set_decomposed_sketches_with_too_deep_children_backtracks(temp_state: G
         parent=cast(TreeNode, parent),
         depth=PROVER_AGENT_MAX_DEPTH,  # At max depth
         formal_theorem="theorem too_deep : True := by sorry",
+        preamble=TEST_PREAMBLE,
         syntactic=True,
         formal_proof=None,
         proved=False,
@@ -588,6 +613,7 @@ def test_set_decomposed_sketches_with_too_deep_children_no_backtrackable_ancesto
         children=[],
         depth=0,
         formal_theorem="theorem grandparent : True := by sorry",
+        preamble=TEST_PREAMBLE,
         proof_sketch="by trivial",
         syntactic=True,
         errors=None,
@@ -601,6 +627,7 @@ def test_set_decomposed_sketches_with_too_deep_children_no_backtrackable_ancesto
         children=[],
         depth=1,
         formal_theorem="theorem parent : True := by sorry",
+        preamble=TEST_PREAMBLE,
         proof_sketch="by trivial",
         syntactic=True,
         errors=None,
@@ -615,6 +642,7 @@ def test_set_decomposed_sketches_with_too_deep_children_no_backtrackable_ancesto
         parent=cast(TreeNode, parent),
         depth=PROVER_AGENT_MAX_DEPTH,
         formal_theorem="theorem too_deep : True := by sorry",
+        preamble=TEST_PREAMBLE,
         syntactic=True,
         formal_proof=None,
         proved=False,
@@ -657,6 +685,7 @@ def test_set_decomposed_sketches_with_too_deep_children_no_grandparent(
         children=[],
         depth=0,
         formal_theorem="theorem parent : True := by sorry",
+        preamble=TEST_PREAMBLE,
         proof_sketch="by trivial",
         syntactic=True,
         errors=None,
@@ -670,6 +699,7 @@ def test_set_decomposed_sketches_with_too_deep_children_no_grandparent(
         parent=cast(TreeNode, parent),
         depth=PROVER_AGENT_MAX_DEPTH,
         formal_theorem="theorem too_deep : True := by sorry",
+        preamble=TEST_PREAMBLE,
         syntactic=True,
         formal_proof=None,
         proved=False,
@@ -706,6 +736,7 @@ def test_set_decomposed_sketches_with_mixed_depth_children(temp_state: GoedelsPo
         children=[],
         depth=0,
         formal_theorem="theorem grandparent : True := by sorry",
+        preamble=TEST_PREAMBLE,
         proof_sketch="by trivial",
         syntactic=True,
         errors=None,
@@ -719,6 +750,7 @@ def test_set_decomposed_sketches_with_mixed_depth_children(temp_state: GoedelsPo
         children=[],
         depth=1,
         formal_theorem="theorem parent : True := by sorry",
+        preamble=TEST_PREAMBLE,
         proof_sketch="by trivial",
         syntactic=True,
         errors=None,
@@ -733,6 +765,7 @@ def test_set_decomposed_sketches_with_mixed_depth_children(temp_state: GoedelsPo
         parent=cast(TreeNode, parent),
         depth=PROVER_AGENT_MAX_DEPTH,
         formal_theorem="theorem too_deep : True := by sorry",
+        preamble=TEST_PREAMBLE,
         syntactic=True,
         formal_proof=None,
         proved=False,
@@ -748,6 +781,7 @@ def test_set_decomposed_sketches_with_mixed_depth_children(temp_state: GoedelsPo
         parent=cast(TreeNode, parent),
         depth=PROVER_AGENT_MAX_DEPTH - 1,  # Just under max
         formal_theorem="theorem normal : True := by sorry",
+        preamble=TEST_PREAMBLE,
         syntactic=True,
         formal_proof=None,
         proved=False,
@@ -795,6 +829,7 @@ def test_set_decomposed_sketches_with_multiple_too_deep_children_same_grandparen
         children=[],
         depth=0,
         formal_theorem="theorem grandparent : True := by sorry",
+        preamble=TEST_PREAMBLE,
         proof_sketch="by trivial",
         syntactic=True,
         errors=None,
@@ -808,6 +843,7 @@ def test_set_decomposed_sketches_with_multiple_too_deep_children_same_grandparen
         children=[],
         depth=1,
         formal_theorem="theorem parent1 : True := by sorry",
+        preamble=TEST_PREAMBLE,
         proof_sketch="by trivial",
         syntactic=True,
         errors=None,
@@ -821,6 +857,7 @@ def test_set_decomposed_sketches_with_multiple_too_deep_children_same_grandparen
         children=[],
         depth=1,
         formal_theorem="theorem parent2 : True := by sorry",
+        preamble=TEST_PREAMBLE,
         proof_sketch="by trivial",
         syntactic=True,
         errors=None,
@@ -836,6 +873,7 @@ def test_set_decomposed_sketches_with_multiple_too_deep_children_same_grandparen
         parent=cast(TreeNode, parent1),
         depth=PROVER_AGENT_MAX_DEPTH,
         formal_theorem="theorem too_deep1 : True := by sorry",
+        preamble=TEST_PREAMBLE,
         syntactic=True,
         formal_proof=None,
         proved=False,
@@ -850,6 +888,7 @@ def test_set_decomposed_sketches_with_multiple_too_deep_children_same_grandparen
         parent=cast(TreeNode, parent2),
         depth=PROVER_AGENT_MAX_DEPTH,
         formal_theorem="theorem too_deep2 : True := by sorry",
+        preamble=TEST_PREAMBLE,
         syntactic=True,
         formal_proof=None,
         proved=False,
@@ -888,6 +927,7 @@ def test_set_decomposed_sketches_with_no_too_deep_children(temp_state: GoedelsPo
         children=[],
         depth=0,
         formal_theorem="theorem parent : True := by sorry",
+        preamble=TEST_PREAMBLE,
         proof_sketch="by trivial",
         syntactic=True,
         errors=None,
@@ -901,6 +941,7 @@ def test_set_decomposed_sketches_with_no_too_deep_children(temp_state: GoedelsPo
         parent=cast(TreeNode, parent),
         depth=PROVER_AGENT_MAX_DEPTH - 1,
         formal_theorem="theorem child1 : True := by sorry",
+        preamble=TEST_PREAMBLE,
         syntactic=True,
         formal_proof=None,
         proved=False,
@@ -915,6 +956,7 @@ def test_set_decomposed_sketches_with_no_too_deep_children(temp_state: GoedelsPo
         parent=cast(TreeNode, parent),
         depth=1,
         formal_theorem="theorem child2 : True := by sorry",
+        preamble=TEST_PREAMBLE,
         syntactic=True,
         formal_proof=None,
         proved=False,

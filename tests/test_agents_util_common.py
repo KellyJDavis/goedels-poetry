@@ -214,6 +214,24 @@ def test_get_error_str_edge_case_first_line() -> None:
     assert "Error on adjusted first line" in result
 
 
+def test_get_error_str_out_of_range_positions() -> None:
+    """Test that get_error_str handles errors with out-of-range positions."""
+    code = "line0\nline1\nline2"
+    errors = [
+        {
+            "pos": {"line": 100, "column": 50},
+            "endPos": {"line": 150, "column": 60},
+            "data": "Out of range error",
+        }
+    ]
+    result = get_error_str(code, errors, error_thres=False)
+
+    assert "Error 1:" in result
+    assert "Out of range error" in result
+    assert "<error>" in result
+    assert "</error>" in result
+
+
 def test_get_error_str_next_line_included() -> None:
     """Test that the line after the error is included in context."""
     code = "line0\nline1\nline2\nline3\nline4\nline5\nline6"

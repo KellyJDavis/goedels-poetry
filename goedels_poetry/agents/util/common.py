@@ -43,6 +43,9 @@ DEFAULT_IMPORTS = (
 )
 
 
+_MANDATORY_PREAMBLE_LINES: tuple[str, ...] = ("set_option maxHeartbeats 0",)
+
+
 def _is_lean_declaration_line(s: str) -> bool:
     """Check if a line is a Lean declaration."""
     return (
@@ -65,13 +68,6 @@ def _is_preamble_line(s: str) -> bool:
         or s.startswith("set_option ")
         or s.startswith("noncomputable ")
         or s == ""
-    )
-
-
-def _has_additional_preamble(remainder: str) -> bool:
-    """Check if remainder starts with additional preamble lines."""
-    return any(
-        remainder.startswith(prefix) for prefix in ["import ", "open ", "set_option ", "noncomputable ", "--", "/-"]
     )
 
 
@@ -123,6 +119,73 @@ def _find_preamble_end(lines: list[str]) -> int:
     return skip_until
 
 
+def _normalize_block(block: str) -> str:
+    """Normalize a multi-line string for comparison."""
+    if not block:
+        return ""
+    lines = block.splitlines()
+    normalized = [line.rstrip() for line in lines]
+    return "\n".join(normalized).strip()
+
+
+def split_preamble_and_body(code: str) -> tuple[str, str]:
+    """Split Lean code into preamble and body parts."""
+    if not code:
+        return "", ""
+
+    lines = code.split("\n")
+    split_index = _find_preamble_end(lines)
+
+    preamble_lines = lines[:split_index]
+    body_lines = lines[split_index:]
+
+    preamble = "\n".join(preamble_lines).strip("\n")
+    body = "\n".join(body_lines).strip()
+
+    return preamble, body
+
+
+def combine_preamble_and_body(preamble: str, body: str) -> str:
+    """Combine a preamble and body into Lean code."""
+    normalized_preamble = preamble.strip()
+    normalized_body = body.strip()
+
+    if not normalized_preamble:
+        return normalized_body
+    if not normalized_body:
+        return normalized_preamble
+
+    return f"{normalized_preamble}\n\n{normalized_body}"
+
+
+def strip_known_preamble(code: str, expected_preamble: str) -> tuple[str, bool]:
+    """Remove a known preamble from code if it matches after normalization."""
+    preamble, body = split_preamble_and_body(code)
+    if _normalize_block(preamble) == _normalize_block(expected_preamble):
+        return body, True
+
+    if not preamble.strip() and not _normalize_block(expected_preamble):
+        return body, True
+
+    return code, False
+
+
+def ensure_mandatory_preamble(preamble: str) -> str:
+    """Ensure required Lean directives are present in a preamble."""
+    lines = preamble.split("\n") if preamble else []
+    existing = {line.strip() for line in lines if line.strip()}
+    additions = [line for line in _MANDATORY_PREAMBLE_LINES if line not in existing]
+
+    if not additions:
+        return preamble
+
+    if lines and lines[-1].strip():
+        lines.append("")
+
+    lines.extend(additions)
+    return "\n".join(lines)
+
+
 def add_default_imports(code: str) -> str:
     """
     Add DEFAULT_IMPORTS prefix to the given code.
@@ -155,29 +218,13 @@ def remove_default_imports(code: str) -> str:
     str
         The code without DEFAULT_IMPORTS prefix.
     """
-    normalized_imports = DEFAULT_IMPORTS.strip()
-    normalized_code = code.strip()
-
-    # First, try exact match with DEFAULT_IMPORTS only if there's nothing after it
-    # that looks like additional preamble
-    if normalized_code.startswith(normalized_imports):
-        remainder = normalized_code[len(normalized_imports) :].strip()
-        if remainder and not _has_additional_preamble(remainder):
-            return remainder
-
-    # Try to remove all preamble patterns
-    lines = normalized_code.split("\n")
-    skip_until = _find_preamble_end(lines)
-
-    if skip_until > 0:
-        result = "\n".join(lines[skip_until:]).strip()
-        if result and not result.startswith("--"):
-            return result
-
+    preamble, body = split_preamble_and_body(code)
+    if preamble.strip():
+        return body
     return code
 
 
-def remove_default_imports_from_ast(ast: dict[str, Any] | None) -> dict[str, Any]:
+def remove_default_imports_from_ast(ast: dict[str, Any] | None, preamble: str = DEFAULT_IMPORTS) -> dict[str, Any]:
     """
     Remove DEFAULT_IMPORTS related nodes from the parsed AST.
 
@@ -197,6 +244,9 @@ def remove_default_imports_from_ast(ast: dict[str, Any] | None) -> dict[str, Any
     if ast is None:
         return {}
 
+    skip_default_imports = _normalize_block(preamble) == _normalize_block(DEFAULT_IMPORTS)
+    num_imports_to_skip = 4 if skip_default_imports else 0
+
     # The AST is a dict. If it contains a list of commands, we need to skip
     # the ones that correspond to DEFAULT_IMPORTS.
     # DEFAULT_IMPORTS contains:
@@ -208,14 +258,12 @@ def remove_default_imports_from_ast(ast: dict[str, Any] | None) -> dict[str, Any
 
     # Check if the AST is a list at the top level (older format)
     if isinstance(ast, list):
-        num_imports_to_skip = 4
         if len(ast) > num_imports_to_skip:
             return {"commands": ast[num_imports_to_skip:]}
         return {"commands": ast}
 
     # If it's a dict with a "commands" key, filter that
     if "commands" in ast and isinstance(ast["commands"], list):
-        num_imports_to_skip = 4
         filtered_ast = ast.copy()
         if len(ast["commands"]) > num_imports_to_skip:
             filtered_ast["commands"] = ast["commands"][num_imports_to_skip:]
@@ -266,55 +314,77 @@ def get_error_str(code: str, errors: list[dict], error_thres: bool) -> str:  # n
     """
     err_str = ""
     code_lines = code.split("\n")
-    # token_lengths = [len(line) + 1 for line in code_lines]
+    if not code_lines:
+        code_lines = [""]
+
+    def clamp_line(idx: int) -> int:
+        return max(0, min(idx, len(code_lines) - 1))
+
+    def clamp_col(idx: int, line: str) -> int:
+        return max(0, min(idx, len(line)))
 
     error_num_thres = 8 if error_thres else len(errors)
 
     for i, error in enumerate(errors[:error_num_thres]):
-        start_line = error["pos"]["line"] + 2  # Originally -1 was here, but Kimina requires +2
+        raw_start_line = error["pos"]["line"] + 2  # Kimina requires +2
+        start_line = clamp_line(raw_start_line)
         start_col = error["pos"]["column"]
 
-        if error.get("endPos", None) is None:  # Originally get() wasn't used by Kimina requires it
+        if error.get("endPos", None) is None:
             end_line = start_line
             end_col = len(code_lines[start_line])
         else:
-            end_line = error["endPos"]["line"] + 2  # Originally -1 was here, but Kimina requires +2
+            raw_end_line = error["endPos"]["line"] + 2
+            end_line = clamp_line(raw_end_line)
+            end_line = max(end_line, start_line)
             end_col = error["endPos"]["column"]
 
-        # start_char_pos = sum(token_lengths[:start_line]) + start_col
-        # end_char_pos = sum(token_lengths[:end_line]) + end_col
+        start_col = clamp_col(start_col, code_lines[start_line])
+        end_col = clamp_col(end_col, code_lines[end_line])
+        if end_line == start_line and end_col < start_col:
+            end_col = start_col
 
         err_str += f"\nError {i + 1}:\n"
         err_str += "\nCorresponding Code:\n```lean4\n"
 
         error_code = ""
-        for ii in range(-4, 0):
-            if start_line + ii >= 0:
-                error_code += f"{code_lines[start_line + ii]}\n"
-        if start_line != end_line:
-            error_code += code_lines[start_line][:start_col] + "<error>" + code_lines[start_line][start_col:] + "\n"
 
+        for ii in range(-4, 0):
+            line_idx = start_line + ii
+            if 0 <= line_idx < len(code_lines):
+                error_code += f"{code_lines[line_idx]}\n"
+
+        if start_line != end_line:
+            start_line_text = code_lines[start_line]
+            error_code += start_line_text[:start_col] + "<error>" + start_line_text[start_col:] + "\n"
+
+            middle_indices = [idx for idx in range(start_line + 1, end_line) if 0 <= idx < len(code_lines)]
             if not error_thres:
-                for j in range(start_line + 1, end_line):
-                    error_code += f"{code_lines[j]}\n"
+                for idx in middle_indices:
+                    error_code += f"{code_lines[idx]}\n"
             else:
                 show_line = 6
-                for j in range(start_line + 1, min(end_line, start_line + show_line)):
-                    error_code += f"{code_lines[j]}\n"
-                if end_line > start_line + show_line:
-                    leading_spaces = len(code_lines[j]) - len(code_lines[j].lstrip(" "))
+                for idx in middle_indices[:show_line]:
+                    error_code += f"{code_lines[idx]}\n"
+                if len(middle_indices) > show_line:
+                    last_shown_idx = middle_indices[show_line - 1] if show_line > 0 else middle_indices[0]
+                    last_line_text = code_lines[last_shown_idx]
+                    leading_spaces = len(last_line_text) - len(last_line_text.lstrip(" "))
                     error_code += "\n" + " " * leading_spaces + "... --[Truncated]-- ...\n"
 
-            error_code += code_lines[end_line][:end_col] + "</error>" + code_lines[end_line][end_col:] + "\n"
+            end_line_text = code_lines[end_line]
+            error_code += end_line_text[:end_col] + "</error>" + end_line_text[end_col:] + "\n"
         else:
+            line_text = code_lines[start_line]
             error_code += (
-                code_lines[start_line][:start_col]
+                line_text[:start_col]
                 + "<error>"
-                + code_lines[start_line][start_col:end_col]
+                + line_text[start_col:end_col]
                 + "</error>"
-                + code_lines[start_line][end_col:]
+                + line_text[end_col:]
                 + "\n"
             )
+
         if end_line + 1 < len(code_lines):
             error_code += f"{code_lines[end_line + 1]}\n"
 

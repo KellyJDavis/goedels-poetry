@@ -9,7 +9,12 @@ from langgraph.graph.state import CompiledStateGraph
 from langgraph.types import Send
 
 from goedels_poetry.agents.state import DecomposedFormalTheoremState, DecomposedFormalTheoremStates
-from goedels_poetry.agents.util.common import LLMParsingError, add_default_imports, load_prompt, remove_default_imports
+from goedels_poetry.agents.util.common import (
+    LLMParsingError,
+    combine_preamble_and_body,
+    load_prompt,
+    strip_known_preamble,
+)
 from goedels_poetry.agents.util.debug import log_llm_response
 
 
@@ -105,8 +110,8 @@ def _proof_sketcher(llm: BaseChatModel, state: DecomposedFormalTheoremState) -> 
     # Check if errors is None
     if state["errors"] is None:
         # If it is, load the prompt used when not correcting a previous proof sketch
-        # Add DEFAULT_IMPORTS prefix to the formal_theorem for the prompt
-        formal_theorem_with_imports = add_default_imports(state["formal_theorem"])
+        # Combine the stored preamble with the formal theorem for the prompt
+        formal_theorem_with_imports = combine_preamble_and_body(state["preamble"], state["formal_theorem"])
         prompt = load_prompt("decomposer-initial", formal_theorem=formal_theorem_with_imports)
 
         # Put the prompt in the final message
@@ -119,7 +124,7 @@ def _proof_sketcher(llm: BaseChatModel, state: DecomposedFormalTheoremState) -> 
     log_llm_response("DECOMPOSER_AGENT_LLM", str(response_content))
 
     # Parse sketcher response
-    proof_sketch = _parse_proof_sketcher_response(str(response_content))
+    proof_sketch = _parse_proof_sketcher_response(str(response_content), state["preamble"])
 
     # Add the proof sketch to the state
     state["proof_sketch"] = proof_sketch
@@ -131,7 +136,7 @@ def _proof_sketcher(llm: BaseChatModel, state: DecomposedFormalTheoremState) -> 
     return {"outputs": [state]}  # type: ignore[typeddict-item]
 
 
-def _parse_proof_sketcher_response(response: str) -> str:
+def _parse_proof_sketcher_response(response: str, expected_preamble: str) -> str:
     """
     Extract the final lean code snippet from the passed string and remove DEFAULT_IMPORTS.
 
@@ -156,7 +161,8 @@ def _parse_proof_sketcher_response(response: str) -> str:
     if not matches:
         raise LLMParsingError("Failed to extract code block from LLM response", response)  # noqa: TRY003
     proof_sketch = cast(str, matches[-1]).strip()
-    # Remove DEFAULT_IMPORTS if present
-    if proof_sketch:
-        proof_sketch = remove_default_imports(proof_sketch)
-    return proof_sketch
+    if not proof_sketch:
+        return proof_sketch
+
+    stripped, matched = strip_known_preamble(proof_sketch, expected_preamble)
+    return stripped if matched else proof_sketch
