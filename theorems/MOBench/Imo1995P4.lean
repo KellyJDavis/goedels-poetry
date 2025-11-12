@@ -1,0 +1,26 @@
+
+import Mathlib
+import Aesop
+
+set_option maxHeartbeats 0
+
+open BigOperators Real Nat Topology Rat
+
+/-!
+# International Mathematical Olympiad 1995, Problem 4
+
+The positive real numbers $x_0, x_1, x_2,.....x_{1994}, x_{1995}$ satisfy the relations
+$x_0=x_{1995}$ and $x_{i-1}+\frac{2}{x_{i-1}}=2{x_i}+\frac{1}{x_i}$
+for $i=1,2,3,....1995$
+Find the maximum value that $x_0$ can have.
+-/
+abbrev solution : ℝ := 2^997
+
+theorem imo1995_p4
+  (x : ℕ → ℝ)
+  (h : x 0 = x 1995)
+  (h1 : ∀ i : ℕ, 0 < i ∧ i ≤ 1995 → x (i - 1) + (2 / x (i - 1)) = 2 * x i + (1 / x i)) :
+  x 0 ≤ solution ∧
+  (∃ x : ℕ → ℝ, x 0 = solution ∧
+    x 0 = x 1995 ∧
+    ∀ i : ℕ, 0 < i ∧ i ≤ 1995 → x (i - 1) + (2 / x (i - 1)) = 2 * x i + (1 / x i)) := by sorry
