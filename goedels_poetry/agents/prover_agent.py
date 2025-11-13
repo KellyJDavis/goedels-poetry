@@ -1,6 +1,6 @@
 import re
 from functools import partial
-from typing import cast
+from typing import Optional, cast
 
 from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.messages import AIMessage, HumanMessage
@@ -217,7 +217,7 @@ def _extract_code_block(response: str) -> str:
     return formal_proof
 
 
-def _extract_proof_from_theorem(code_without_preamble: str) -> str | None:
+def _extract_proof_from_theorem(code_without_preamble: str) -> Optional[str]:
     """
     Extract proof body from a theorem/example declaration.
 
@@ -228,7 +228,7 @@ def _extract_proof_from_theorem(code_without_preamble: str) -> str | None:
 
     Returns
     -------
-    str | None
+    Optional[str]
         The proof body if found, None otherwise
     """
     theorem_pattern = r"(theorem|example)\s+[a-zA-Z0-9_']+.*?:=\s*by"
