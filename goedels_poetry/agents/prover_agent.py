@@ -138,17 +138,20 @@ def _prover(llm: BaseChatModel, state: FormalTheoremProofState) -> FormalTheorem
 
 def _parse_prover_response(response: str, expected_preamble: str) -> str:
     """
-    Extract the final lean code snippet from the passed string and remove DEFAULT_IMPORTS.
+    Extract the final lean code snippet from the passed string, remove DEFAULT_IMPORTS,
+    and extract only the proof body (the tactics after `:= by`).
 
     Parameters
     ----------
     response: str
         The string to extract the final lean code snippet from
+    expected_preamble: str
+        The expected preamble to strip from the response
 
     Returns
     -------
     str
-        A string containing the lean code snippet if found.
+        A string containing only the proof body (tactics after `:= by`).
 
     Raises
     ------
@@ -163,5 +166,33 @@ def _parse_prover_response(response: str, expected_preamble: str) -> str:
     if not formal_proof:
         return formal_proof
 
+    # Strip the preamble if it matches
     stripped, matched = strip_known_preamble(formal_proof, expected_preamble)
-    return stripped if matched else formal_proof
+    code_without_preamble = stripped if matched else formal_proof
+
+    # Extract only the proof body (the tactics after `:= by`)
+    # This handles all variations: ':= by', ':=by', ':=  by', ':=\nby', etc.
+    match = re.search(r":=\s*by", code_without_preamble)
+    if match is None:
+        # Can't find ':= by' pattern, return the whole code (might be just tactics)
+        return code_without_preamble.strip()
+
+    # Extract everything after 'by', preserving indentation
+    # Skip leading whitespace/newlines after 'by' but preserve indentation of first content line
+    proof_body_raw = code_without_preamble[match.end() :]
+    # Remove leading newlines and spaces, but preserve the indentation of the first non-empty line
+    lines = proof_body_raw.split("\n")
+    # Find first non-empty line to determine base indentation
+    first_content_line_idx = None
+    for i, line in enumerate(lines):
+        if line.strip():  # First non-empty line
+            first_content_line_idx = i
+            break
+
+    if first_content_line_idx is None:
+        # All lines are empty, return empty string
+        return ""
+
+    # Return from first non-empty line onwards, preserving original structure
+    proof_body = "\n".join(lines[first_content_line_idx:]).rstrip()
+    return proof_body
