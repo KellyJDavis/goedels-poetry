@@ -136,6 +136,170 @@ def _prover(llm: BaseChatModel, state: FormalTheoremProofState) -> FormalTheorem
     return {"outputs": [state]}  # type: ignore[typeddict-item]
 
 
+def _extract_code_block_fallback(response: str) -> str:
+    """
+    Fallback method to extract code block by finding the last ``` in the response.
+
+    Parameters
+    ----------
+    response: str
+        The LLM response containing a code block
+
+    Returns
+    -------
+    str
+        The extracted code block content
+
+    Raises
+    ------
+    LLMParsingError
+        If no code block is found in the response.
+    """
+    pattern_start = r"```lean4?\s*\n"
+    match_start = re.search(pattern_start, response, re.DOTALL)
+    if not match_start:
+        raise LLMParsingError("Failed to extract code block from LLM response", response)  # noqa: TRY003
+
+    code_start = match_start.end()
+    last_backtick = response.rfind("\n```")
+    if last_backtick == -1:
+        last_backtick = response.rfind("```")
+    if last_backtick == -1 or last_backtick < code_start:
+        raise LLMParsingError("Failed to find closing ``` in LLM response", response)  # noqa: TRY003
+
+    return response[code_start:last_backtick].strip()
+
+
+def _extract_code_block(response: str) -> str:
+    """
+    Extract the code block from an LLM response, handling nested code blocks in doc comments.
+
+    Parameters
+    ----------
+    response: str
+        The LLM response containing a code block
+
+    Returns
+    -------
+    str
+        The extracted code block content
+
+    Raises
+    ------
+    LLMParsingError
+        If no code block is found in the response.
+    """
+    # First try the standard pattern
+    pattern = r"```lean4?\n(.*?)\n?```"
+    matches = re.findall(pattern, response, re.DOTALL)
+    if not matches:
+        return _extract_code_block_fallback(response)
+
+    formal_proof = cast(str, matches[-1]).strip()
+    # Check if there are more ``` after the LAST match (indicating nested blocks)
+    # Find all matches to get the position of the last one
+    all_matches = list(re.finditer(pattern, response, re.DOTALL))
+    if not all_matches:
+        return formal_proof
+
+    # Get the last match's end position
+    last_match = all_matches[-1]
+    match_end_pos = last_match.end()
+    remaining = response[match_end_pos:]
+    if "```" not in remaining:
+        return formal_proof
+
+    # There are more ```, likely a nested block issue - use fallback
+    fallback_proof = _extract_code_block_fallback(response)
+    # Only use fallback if it gives us significantly more content
+    if len(fallback_proof) > len(formal_proof) * 1.5:
+        return fallback_proof
+    return formal_proof
+
+
+def _extract_proof_from_theorem(code_without_preamble: str) -> str | None:
+    """
+    Extract proof body from a theorem/example declaration.
+
+    Parameters
+    ----------
+    code_without_preamble: str
+        Code without preamble
+
+    Returns
+    -------
+    str | None
+        The proof body if found, None otherwise
+    """
+    theorem_pattern = r"(theorem|example)\s+[a-zA-Z0-9_']+.*?:=\s*by"
+    theorem_match = re.search(theorem_pattern, code_without_preamble, re.DOTALL)
+    if not theorem_match:
+        return None
+
+    by_match = re.search(r":=\s*by", code_without_preamble[theorem_match.start() :], re.DOTALL)
+    if not by_match:
+        return None
+
+    proof_start = theorem_match.start() + by_match.end()
+    proof_body_raw = code_without_preamble[proof_start:]
+    # Stop at next declaration
+    next_decl_match = re.search(
+        r"\n\s*(?:/-.*?-\/\s*)?(theorem|lemma|def|abbrev|example|end|namespace)\s+", proof_body_raw, re.DOTALL
+    )
+    if next_decl_match:
+        proof_body_raw = proof_body_raw[: next_decl_match.start()]
+
+    # Extract just the tactics, preserving indentation
+    lines = proof_body_raw.split("\n")
+    first_content_line_idx = None
+    for i, line in enumerate(lines):
+        if line.strip():
+            first_content_line_idx = i
+            break
+
+    if first_content_line_idx is not None:
+        return "\n".join(lines[first_content_line_idx:]).rstrip()
+    return None
+
+
+def _extract_proof_fallback(code_without_preamble: str) -> str:
+    """
+    Fallback method to extract proof body from any := by pattern.
+
+    Parameters
+    ----------
+    code_without_preamble: str
+        Code without preamble
+
+    Returns
+    -------
+    str
+        The proof body
+    """
+    match = re.search(r":=\s*by", code_without_preamble)
+    if match is None:
+        return code_without_preamble.strip()
+
+    proof_body_raw = code_without_preamble[match.end() :]
+    next_decl_match = re.search(
+        r"\n\s*(?:/-.*?-\/\s*)?(theorem|lemma|def|abbrev|example|end|namespace)\s+", proof_body_raw, re.DOTALL
+    )
+    if next_decl_match:
+        proof_body_raw = proof_body_raw[: next_decl_match.start()]
+
+    lines = proof_body_raw.split("\n")
+    first_content_line_idx = None
+    for i, line in enumerate(lines):
+        if line.strip():
+            first_content_line_idx = i
+            break
+
+    if first_content_line_idx is None:
+        return ""
+
+    return "\n".join(lines[first_content_line_idx:]).rstrip()
+
+
 def _parse_prover_response(response: str, expected_preamble: str) -> str:
     """
     Extract the final lean code snippet from the passed string, remove DEFAULT_IMPORTS,
@@ -158,11 +322,7 @@ def _parse_prover_response(response: str, expected_preamble: str) -> str:
     LLMParsingError
         If no code block is found in the response.
     """
-    pattern = r"```lean4?\n(.*?)\n?```"
-    matches = re.findall(pattern, response, re.DOTALL)
-    if not matches:
-        raise LLMParsingError("Failed to extract code block from LLM response", response)  # noqa: TRY003
-    formal_proof = cast(str, matches[-1]).strip()
+    formal_proof = _extract_code_block(response)
     if not formal_proof:
         return formal_proof
 
@@ -170,29 +330,10 @@ def _parse_prover_response(response: str, expected_preamble: str) -> str:
     stripped, matched = strip_known_preamble(formal_proof, expected_preamble)
     code_without_preamble = stripped if matched else formal_proof
 
-    # Extract only the proof body (the tactics after `:= by`)
-    # This handles all variations: ':= by', ':=by', ':=  by', ':=\nby', etc.
-    match = re.search(r":=\s*by", code_without_preamble)
-    if match is None:
-        # Can't find ':= by' pattern, return the whole code (might be just tactics)
-        return code_without_preamble.strip()
+    # Try to extract proof from theorem/example first (preferred)
+    proof_body = _extract_proof_from_theorem(code_without_preamble)
+    if proof_body is not None:
+        return proof_body
 
-    # Extract everything after 'by', preserving indentation
-    # Skip leading whitespace/newlines after 'by' but preserve indentation of first content line
-    proof_body_raw = code_without_preamble[match.end() :]
-    # Remove leading newlines and spaces, but preserve the indentation of the first non-empty line
-    lines = proof_body_raw.split("\n")
-    # Find first non-empty line to determine base indentation
-    first_content_line_idx = None
-    for i, line in enumerate(lines):
-        if line.strip():  # First non-empty line
-            first_content_line_idx = i
-            break
-
-    if first_content_line_idx is None:
-        # All lines are empty, return empty string
-        return ""
-
-    # Return from first non-empty line onwards, preserving original structure
-    proof_body = "\n".join(lines[first_content_line_idx:]).rstrip()
-    return proof_body
+    # Fallback: extract from any := by pattern
+    return _extract_proof_fallback(code_without_preamble)

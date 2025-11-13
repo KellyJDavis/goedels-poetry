@@ -88,6 +88,85 @@ def _is_doc_comment(lines: list[str], i: int) -> bool:
     return False
 
 
+def _handle_complete_comment_line(line: str, lines: list[str], line_idx: int) -> tuple[int | None, bool]:
+    """
+    Handle a line that contains a complete comment (/- ... -/).
+
+    Returns
+    -------
+    tuple[int | None, bool]
+        (split_index if body starts here, should_continue)
+    """
+    stripped = line.strip()
+    comment_start = stripped.find("/-")
+    comment_end = stripped.find("-/", comment_start)
+    if comment_end == -1:
+        return None, False
+
+    # Found a complete comment on this line
+    if _is_doc_comment(lines, line_idx):
+        # This doc comment precedes a declaration, so it's part of the body
+        return line_idx, False
+
+    # Not a doc comment - process the rest of the line after the comment
+    after_comment = stripped[comment_end + 2 :].strip()
+    if after_comment:
+        # There's content after the comment, process it
+        if _is_lean_declaration_line(after_comment):
+            return None, False  # Stop processing
+        if _is_preamble_line(after_comment):
+            return line_idx + 1, True  # Continue, skip this line
+        return None, False  # Stop processing
+    # Just a comment, skip this line
+    return line_idx + 1, True  # Continue, skip this line
+
+
+def _handle_multiline_comment(stripped: str, in_multiline_comment: bool, line_idx: int) -> tuple[bool, int]:
+    """
+    Handle multiline comment state.
+
+    Returns
+    -------
+    tuple[bool, int]
+        (new_in_multiline_comment, skip_until)
+    """
+    if stripped.startswith("/-") and not in_multiline_comment:
+        return True, line_idx + 1
+
+    if in_multiline_comment:
+        if stripped.endswith("-/") or stripped == "-/":
+            return False, line_idx + 1
+        return True, line_idx + 1
+
+    return in_multiline_comment, line_idx
+
+
+def _process_preamble_line(stripped: str, lines: list[str], line_idx: int) -> tuple[int | None, bool]:
+    """
+    Process a single line to determine if it's part of the preamble.
+
+    Returns
+    -------
+    tuple[int | None, bool]
+        (split_index if body starts here, is_preamble_line)
+    """
+    # Check if this is actual Lean code
+    if _is_lean_declaration_line(stripped):
+        return None, False
+
+    # Check if this is a doc comment (single-line -- style)
+    if stripped.startswith("--"):
+        if _is_doc_comment(lines, line_idx):
+            return line_idx, False  # Body starts here
+        return None, True  # Preamble line
+
+    # Check if this is a preamble line
+    if _is_preamble_line(stripped):
+        return None, True  # Preamble line
+
+    return None, False  # Not a preamble line
+
+
 def _find_preamble_end(lines: list[str]) -> int:
     """Find the line index where the preamble ends."""
     skip_until = 0
@@ -96,30 +175,29 @@ def _find_preamble_end(lines: list[str]) -> int:
     for i, line in enumerate(lines):
         stripped = line.strip()
 
-        # Handle multiline comments
-        if stripped.startswith("/-"):
-            in_multiline_comment = True
-            skip_until = i + 1
-            continue
-        if in_multiline_comment:
-            if stripped.endswith("-/") or stripped == "-/":
-                in_multiline_comment = False
-            skip_until = i + 1
-            continue
+        # Handle complete single-line comments
+        if "/-" in stripped:
+            result, should_continue = _handle_complete_comment_line(stripped, lines, i)
+            if result is not None and not should_continue:
+                return result
+            if should_continue:
+                skip_until = result if result is not None else skip_until
+                continue
+            if result is None:
+                # Starts with /- but no closing -/ on this line - multiline comment
+                in_multiline_comment, skip_until = _handle_multiline_comment(stripped, in_multiline_comment, i)
+                continue
 
-        # Check if this is actual Lean code
-        if _is_lean_declaration_line(stripped):
-            break
-
-        # Check if this is a doc comment
-        if stripped.startswith("--"):
-            if _is_doc_comment(lines, i):
-                break
-            skip_until = i + 1
+        in_multiline_comment, new_skip = _handle_multiline_comment(stripped, in_multiline_comment, i)
+        if in_multiline_comment or new_skip != i:
+            skip_until = new_skip
             continue
 
-        # Check if this is a preamble line
-        if _is_preamble_line(stripped):
+        # Process the line to determine if it's preamble or body
+        split_idx, is_preamble = _process_preamble_line(stripped, lines, i)
+        if split_idx is not None:
+            return split_idx
+        if is_preamble:
             skip_until = i + 1
         else:
             break
@@ -443,7 +521,53 @@ def combine_theorem_with_proof(theorem_statement: str, proof_body: str) -> str:
         if has_newlines or (proof_body.strip() and not proof_body.strip().startswith("--")):
             return f"{before}:={whitespace_before_by}by\n{proof_body}{after}"
         return f"{before}:={whitespace_before_by}by {proof_body}{after}"
-    # If no `:= by sorry` pattern found, try to append proof body after `:= by`
+
+    # Also handle `:= sorry` (without "by")
+    # Prefer theorem/example declarations over def/abbrev when multiple := sorry patterns exist
+    # First try to find := sorry in a theorem/example (preferred)
+    # Use a more flexible pattern that handles multiline declarations
+    theorem_sorry_pattern = r"(theorem|example)\s+[a-zA-Z0-9_']+.*?:=\s*sorry"
+    theorem_sorry_match = re.search(theorem_sorry_pattern, theorem_statement, re.DOTALL)
+
+    if theorem_sorry_match:
+        # Found a theorem/example with := sorry, replace that one
+        # Find the exact := sorry part within this match
+        decl_text = theorem_sorry_match.group(0)
+        sorry_match = re.search(r":=\s*sorry", decl_text)
+        if sorry_match:
+            # Calculate positions relative to original string
+            decl_start = theorem_sorry_match.start()
+            sorry_start_in_decl = sorry_match.start()
+            sorry_end_in_decl = sorry_match.end()
+
+            before = theorem_statement[: decl_start + sorry_start_in_decl]
+            after = theorem_statement[decl_start + sorry_end_in_decl :]
+            whitespace_after_equals = sorry_match.group(0)[2:-5]  # Extract whitespace between := and sorry
+
+            # Check if the original had newlines
+            has_newlines = "\n" in whitespace_after_equals
+
+            if has_newlines or (proof_body.strip() and not proof_body.strip().startswith("--")):
+                return f"{before}:=\nby\n{proof_body}{after}"
+            return f"{before}:= by {proof_body}{after}"
+
+    # Fallback: find any := sorry pattern
+    pattern3 = r":=(\s+)sorry"
+    match3 = re.search(pattern3, theorem_statement, re.DOTALL)
+    if match3:
+        # Replace `:= sorry` with `:= by` + proof_body
+        before = theorem_statement[: match3.start()]
+        after = theorem_statement[match3.end() :]
+        whitespace_after_equals = match3.group(1)
+
+        # Check if the original had newlines
+        has_newlines = "\n" in whitespace_after_equals
+
+        if has_newlines or (proof_body.strip() and not proof_body.strip().startswith("--")):
+            return f"{before}:=\nby\n{proof_body}{after}"
+        return f"{before}:= by {proof_body}{after}"
+
+    # If no `:= by sorry` or `:= sorry` pattern found, try to append proof body after `:= by`
     pattern2 = r":=\s*by\s*$"
     match2 = re.search(pattern2, theorem_statement, re.MULTILINE)
     if match2:
