@@ -3,6 +3,7 @@
 from goedels_poetry.agents.util.common import (
     DEFAULT_IMPORTS,
     add_default_imports,
+    combine_theorem_with_proof,
     get_error_str,
     load_prompt,
     remove_default_imports,
@@ -366,3 +367,72 @@ def test_remove_default_imports_round_trip() -> None:
     with_imports = add_default_imports(code)
     without_imports = remove_default_imports(with_imports)
     assert without_imports == code
+
+
+def test_combine_theorem_with_proof_single_line() -> None:
+    """Test combining theorem with proof body (single line format)."""
+    theorem = "theorem test : True := by sorry"
+    proof_body = "trivial"
+    result = combine_theorem_with_proof(theorem, proof_body)
+    assert result == "theorem test : True := by\ntrivial"
+
+
+def test_combine_theorem_with_proof_multiline() -> None:
+    """Test combining theorem with proof body (multiline format)."""
+    theorem = "theorem test : True := by sorry"
+    proof_body = """  have h : True := trivial
+  exact h"""
+    result = combine_theorem_with_proof(theorem, proof_body)
+    assert result == "theorem test : True := by\n  have h : True := trivial\n  exact h"
+
+
+def test_combine_theorem_with_proof_no_spaces() -> None:
+    """Test combining theorem with proof body (no spaces in := by sorry)."""
+    theorem = "theorem test : True :=by sorry"
+    proof_body = "trivial"
+    result = combine_theorem_with_proof(theorem, proof_body)
+    assert result == "theorem test : True :=by\ntrivial"
+
+
+def test_combine_theorem_with_proof_multiple_spaces() -> None:
+    """Test combining theorem with proof body (multiple spaces)."""
+    theorem = "theorem test : True :=  by   sorry"
+    proof_body = "trivial"
+    result = combine_theorem_with_proof(theorem, proof_body)
+    assert result == "theorem test : True :=  by\ntrivial"
+
+
+def test_combine_theorem_with_proof_with_newlines() -> None:
+    """Test combining theorem with proof body when original has newlines."""
+    theorem = "theorem test : True :=\n  by\n  sorry"
+    proof_body = "  trivial"
+    result = combine_theorem_with_proof(theorem, proof_body)
+    assert result == "theorem test : True :=\n  by\n  trivial"
+
+
+def test_combine_theorem_with_proof_empty_proof_body() -> None:
+    """Test combining theorem with empty proof body."""
+    theorem = "theorem test : True := by sorry"
+    proof_body = ""
+    result = combine_theorem_with_proof(theorem, proof_body)
+    assert result == theorem
+
+
+def test_combine_theorem_with_proof_no_sorry_pattern() -> None:
+    """Test combining theorem when no := by sorry pattern is found."""
+    theorem = "theorem test : True := by"
+    proof_body = "trivial"
+    result = combine_theorem_with_proof(theorem, proof_body)
+    assert result == "theorem test : True := by\ntrivial"
+
+
+def test_combine_theorem_with_proof_with_doc_comment() -> None:
+    """Test combining theorem with proof body when theorem has doc comment."""
+    theorem = """/-- This is a test theorem. -/
+theorem test : True := by sorry"""
+    proof_body = "trivial"
+    result = combine_theorem_with_proof(theorem, proof_body)
+    assert "/-- This is a test theorem. -/" in result
+    assert "theorem test : True := by" in result
+    assert "trivial" in result
+    assert "sorry" not in result

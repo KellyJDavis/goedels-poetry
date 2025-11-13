@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import re
 from typing import Any
 
 from jinja2 import Environment, FileSystemLoader, select_autoescape
@@ -399,3 +400,53 @@ def get_error_str(code: str, errors: list[dict], error_thres: bool) -> str:  # n
         err_str += f"\n... [Omitted {len(errors) - error_num_thres} more errors] ...\n"
 
     return err_str
+
+
+def combine_theorem_with_proof(theorem_statement: str, proof_body: str) -> str:
+    """
+    Combine a theorem statement (with `:= by sorry`) with a proof body.
+
+    Parameters
+    ----------
+    theorem_statement: str
+        The theorem statement that ends with `:= by sorry`
+    proof_body: str
+        The proof body (tactics after `:= by`, already properly indented)
+
+    Returns
+    -------
+    str
+        The theorem statement with `sorry` replaced by the proof body
+    """
+    if not proof_body:
+        return theorem_statement
+
+    # Replace `:= by sorry` (with any whitespace variations) with the same format + proof_body
+    # This handles all variations: ':= by sorry', ':=by sorry', ':=  by sorry', ':=\nby\nsorry', etc.
+    # The \s matches spaces, tabs, and newlines
+    pattern = r":=(\s*)by(\s+)sorry"
+    match = re.search(pattern, theorem_statement, re.DOTALL)
+    if match:
+        # Replace the `:= by sorry` part, preserving the original whitespace format
+        # The proof_body already has the correct indentation from the LLM response
+        before = theorem_statement[: match.start()]
+        after = theorem_statement[match.end() :]
+        whitespace_before_by = match.group(1)  # Whitespace between := and by
+        whitespace_after_by = match.group(2)  # Whitespace between by and sorry
+
+        # Check if the original had newlines (multiline format)
+        has_newlines = "\n" in whitespace_before_by or "\n" in whitespace_after_by
+
+        # Preserve the original format: use the same whitespace between := and by
+        # Add newline after `by` if proof_body doesn't start on the same line
+        # or if the original pattern had newlines
+        if has_newlines or (proof_body.strip() and not proof_body.strip().startswith("--")):
+            return f"{before}:={whitespace_before_by}by\n{proof_body}{after}"
+        return f"{before}:={whitespace_before_by}by {proof_body}{after}"
+    # If no `:= by sorry` pattern found, try to append proof body after `:= by`
+    pattern2 = r":=\s*by\s*$"
+    match2 = re.search(pattern2, theorem_statement, re.MULTILINE)
+    if match2:
+        return f"{theorem_statement}\n{proof_body}"
+    # If we can't find the pattern, just append the proof body
+    return f"{theorem_statement}\n{proof_body}"
