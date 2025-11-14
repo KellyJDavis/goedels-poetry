@@ -482,12 +482,12 @@ def get_error_str(code: str, errors: list[dict], error_thres: bool) -> str:  # n
 
 def combine_theorem_with_proof(theorem_statement: str, proof_body: str) -> str:
     """
-    Combine a theorem statement (with `:= by sorry`) with a proof body.
+    Combine a theorem statement (with `:= by sorry` or `:= sorry`) with a proof body.
 
     Parameters
     ----------
     theorem_statement: str
-        The theorem statement that ends with `:= by sorry`
+        The theorem statement that ends with `:= by sorry` or `:= sorry`
     proof_body: str
         The proof body (tactics after `:= by`, already properly indented)
 
@@ -499,78 +499,42 @@ def combine_theorem_with_proof(theorem_statement: str, proof_body: str) -> str:
     if not proof_body:
         return theorem_statement
 
-    # Replace `:= by sorry` (with any whitespace variations) with the same format + proof_body
-    # This handles all variations: ':= by sorry', ':=by sorry', ':=  by sorry', ':=\nby\nsorry', etc.
-    # The \s matches spaces, tabs, and newlines
-    pattern = r":=(\s*)by(\s+)sorry"
-    match = re.search(pattern, theorem_statement, re.DOTALL)
-    if match:
-        # Replace the `:= by sorry` part, preserving the original whitespace format
-        # The proof_body already has the correct indentation from the LLM response
-        before = theorem_statement[: match.start()]
-        after = theorem_statement[match.end() :]
-        whitespace_before_by = match.group(1)  # Whitespace between := and by
-        whitespace_after_by = match.group(2)  # Whitespace between by and sorry
+    # Try := by sorry first (most common pattern in MOBench files)
+    pattern1 = r":=(\s*)by(\s+)sorry"
+    match1 = re.search(pattern1, theorem_statement, re.DOTALL)
+    if match1:
+        before = theorem_statement[: match1.start()]
+        after = theorem_statement[match1.end() :]
+        whitespace_before_by = match1.group(1)
+        # Preserve whitespace before "by", add newline after "by" for proof body
+        return f"{before}:={whitespace_before_by}by\n{proof_body}{after}"
 
-        # Check if the original had newlines (multiline format)
-        has_newlines = "\n" in whitespace_before_by or "\n" in whitespace_after_by
-
-        # Preserve the original format: use the same whitespace between := and by
-        # Add newline after `by` if proof_body doesn't start on the same line
-        # or if the original pattern had newlines
-        if has_newlines or (proof_body.strip() and not proof_body.strip().startswith("--")):
-            return f"{before}:={whitespace_before_by}by\n{proof_body}{after}"
-        return f"{before}:={whitespace_before_by}by {proof_body}{after}"
-
-    # Also handle `:= sorry` (without "by")
+    # Try := sorry (without "by") - used in compfiles
     # Prefer theorem/example declarations over def/abbrev when multiple := sorry patterns exist
-    # First try to find := sorry in a theorem/example (preferred)
-    # Use a more flexible pattern that handles multiline declarations
     theorem_sorry_pattern = r"(theorem|example)\s+[a-zA-Z0-9_']+.*?:=\s*sorry"
     theorem_sorry_match = re.search(theorem_sorry_pattern, theorem_statement, re.DOTALL)
-
     if theorem_sorry_match:
         # Found a theorem/example with := sorry, replace that one
-        # Find the exact := sorry part within this match
+        # Find := sorry within the matched declaration (pattern ensures it's at the end)
         decl_text = theorem_sorry_match.group(0)
-        sorry_match = re.search(r":=\s*sorry", decl_text)
+        sorry_match = re.search(r":=\s*sorry\s*$", decl_text, re.MULTILINE)
         if sorry_match:
-            # Calculate positions relative to original string
             decl_start = theorem_sorry_match.start()
-            sorry_start_in_decl = sorry_match.start()
-            sorry_end_in_decl = sorry_match.end()
-
-            before = theorem_statement[: decl_start + sorry_start_in_decl]
-            after = theorem_statement[decl_start + sorry_end_in_decl :]
-            whitespace_after_equals = sorry_match.group(0)[2:-5]  # Extract whitespace between := and sorry
-
-            # Check if the original had newlines
-            has_newlines = "\n" in whitespace_after_equals
-
-            if has_newlines or (proof_body.strip() and not proof_body.strip().startswith("--")):
-                return f"{before}:=\nby\n{proof_body}{after}"
-            return f"{before}:= by {proof_body}{after}"
+            before = theorem_statement[: decl_start + sorry_match.start()]
+            after = theorem_statement[theorem_sorry_match.end() :]
+            return f"{before}:= by\n{proof_body}{after}"
 
     # Fallback: find any := sorry pattern
-    pattern3 = r":=(\s+)sorry"
-    match3 = re.search(pattern3, theorem_statement, re.DOTALL)
-    if match3:
-        # Replace `:= sorry` with `:= by` + proof_body
-        before = theorem_statement[: match3.start()]
-        after = theorem_statement[match3.end() :]
-        whitespace_after_equals = match3.group(1)
-
-        # Check if the original had newlines
-        has_newlines = "\n" in whitespace_after_equals
-
-        if has_newlines or (proof_body.strip() and not proof_body.strip().startswith("--")):
-            return f"{before}:=\nby\n{proof_body}{after}"
-        return f"{before}:= by {proof_body}{after}"
-
-    # If no `:= by sorry` or `:= sorry` pattern found, try to append proof body after `:= by`
-    pattern2 = r":=\s*by\s*$"
-    match2 = re.search(pattern2, theorem_statement, re.MULTILINE)
+    pattern2 = r":=(\s+)sorry"
+    match2 = re.search(pattern2, theorem_statement, re.DOTALL)
     if match2:
+        before = theorem_statement[: match2.start()]
+        after = theorem_statement[match2.end() :]
+        return f"{before}:= by\n{proof_body}{after}"
+
+    # Fallback: append after := by if present
+    if re.search(r":=\s*by\s*$", theorem_statement, re.MULTILINE):
         return f"{theorem_statement}\n{proof_body}"
-    # If we can't find the pattern, just append the proof body
+
+    # Last resort: append
     return f"{theorem_statement}\n{proof_body}"
