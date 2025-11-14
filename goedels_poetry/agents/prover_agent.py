@@ -189,115 +189,73 @@ def _extract_code_block(response: str) -> str:
     LLMParsingError
         If no code block is found in the response.
     """
-    # First try the standard pattern
     pattern = r"```lean4?\n(.*?)\n?```"
-    matches = re.findall(pattern, response, re.DOTALL)
+    matches = list(re.finditer(pattern, response, re.DOTALL))
     if not matches:
         return _extract_code_block_fallback(response)
 
-    formal_proof = cast(str, matches[-1]).strip()
-    # Check if there are more ``` after the LAST match (indicating nested blocks)
-    # Find all matches to get the position of the last one
-    all_matches = list(re.finditer(pattern, response, re.DOTALL))
-    if not all_matches:
-        return formal_proof
+    # Check if there are more ``` after the last match (nested block issue)
+    last_match = matches[-1]
+    remaining = response[last_match.end() :]
+    if "```" in remaining:
+        # Likely nested blocks in doc comments - use fallback
+        return _extract_code_block_fallback(response)
 
-    # Get the last match's end position
-    last_match = all_matches[-1]
-    match_end_pos = last_match.end()
-    remaining = response[match_end_pos:]
-    if "```" not in remaining:
-        return formal_proof
-
-    # There are more ```, likely a nested block issue - use fallback
-    fallback_proof = _extract_code_block_fallback(response)
-    # Only use fallback if it gives us significantly more content
-    if len(fallback_proof) > len(formal_proof) * 1.5:
-        return fallback_proof
-    return formal_proof
+    # Standard extraction worked fine
+    return cast(str, matches[-1].group(1)).strip()
 
 
-def _extract_proof_from_theorem(code_without_preamble: str) -> Optional[str]:
+def _extract_proof_body(code_without_preamble: str, prefer_theorem: bool = True) -> Optional[str]:
     """
-    Extract proof body from a theorem/example declaration.
+    Extract proof body from code, optionally preferring theorem/example declarations.
 
     Parameters
     ----------
     code_without_preamble: str
         Code without preamble
+    prefer_theorem: bool
+        If True, try to find theorem/example declarations first. If False, find any := by pattern.
 
     Returns
     -------
     Optional[str]
-        The proof body if found, None otherwise
+        The proof body if found, None if prefer_theorem=True and no theorem/example found,
+        empty string if prefer_theorem=False and no := by pattern found
     """
-    theorem_pattern = r"(theorem|example)\s+[a-zA-Z0-9_']+.*?:=\s*by"
-    theorem_match = re.search(theorem_pattern, code_without_preamble, re.DOTALL)
-    if not theorem_match:
-        return None
+    # Find := by pattern, optionally requiring it to be in a theorem/example
+    if prefer_theorem:
+        # Try to find := by within a theorem/example declaration
+        theorem_pattern = r"(theorem|example)\s+[a-zA-Z0-9_']+.*?:=\s*by"
+        match = re.search(theorem_pattern, code_without_preamble, re.DOTALL)
+        if not match:
+            return None
+        # The match ends at "by", so proof starts right after
+        proof_start = match.end()
+        proof_body_raw = code_without_preamble[proof_start:]
+    else:
+        # Find any := by pattern
+        by_match = re.search(r":=\s*by", code_without_preamble, re.DOTALL)
+        if not by_match:
+            return code_without_preamble.strip()
+        proof_start = by_match.end()
+        proof_body_raw = code_without_preamble[proof_start:]
 
-    by_match = re.search(r":=\s*by", code_without_preamble[theorem_match.start() :], re.DOTALL)
-    if not by_match:
-        return None
-
-    proof_start = theorem_match.start() + by_match.end()
-    proof_body_raw = code_without_preamble[proof_start:]
     # Stop at next declaration
     next_decl_match = re.search(
-        r"\n\s*(?:/-.*?-\/\s*)?(theorem|lemma|def|abbrev|example|end|namespace)\s+", proof_body_raw, re.DOTALL
+        r"\n\s*(?:/-.*?-\/\s*)?(theorem|lemma|def|abbrev|example|end|namespace)\s+",
+        proof_body_raw,
+        re.DOTALL,
     )
     if next_decl_match:
         proof_body_raw = proof_body_raw[: next_decl_match.start()]
 
-    # Extract just the tactics, preserving indentation
+    # Find first non-empty line (preserving leading empty lines for indentation)
     lines = proof_body_raw.split("\n")
-    first_content_line_idx = None
-    for i, line in enumerate(lines):
-        if line.strip():
-            first_content_line_idx = i
-            break
+    first_idx = next((i for i, line in enumerate(lines) if line.strip()), None)
+    if first_idx is not None:
+        return "\n".join(lines[first_idx:]).rstrip()
 
-    if first_content_line_idx is not None:
-        return "\n".join(lines[first_content_line_idx:]).rstrip()
-    return None
-
-
-def _extract_proof_fallback(code_without_preamble: str) -> str:
-    """
-    Fallback method to extract proof body from any := by pattern.
-
-    Parameters
-    ----------
-    code_without_preamble: str
-        Code without preamble
-
-    Returns
-    -------
-    str
-        The proof body
-    """
-    match = re.search(r":=\s*by", code_without_preamble)
-    if match is None:
-        return code_without_preamble.strip()
-
-    proof_body_raw = code_without_preamble[match.end() :]
-    next_decl_match = re.search(
-        r"\n\s*(?:/-.*?-\/\s*)?(theorem|lemma|def|abbrev|example|end|namespace)\s+", proof_body_raw, re.DOTALL
-    )
-    if next_decl_match:
-        proof_body_raw = proof_body_raw[: next_decl_match.start()]
-
-    lines = proof_body_raw.split("\n")
-    first_content_line_idx = None
-    for i, line in enumerate(lines):
-        if line.strip():
-            first_content_line_idx = i
-            break
-
-    if first_content_line_idx is None:
-        return ""
-
-    return "\n".join(lines[first_content_line_idx:]).rstrip()
+    return None if prefer_theorem else ""
 
 
 def _parse_prover_response(response: str, expected_preamble: str) -> str:
@@ -331,9 +289,10 @@ def _parse_prover_response(response: str, expected_preamble: str) -> str:
     code_without_preamble = stripped if matched else formal_proof
 
     # Try to extract proof from theorem/example first (preferred)
-    proof_body = _extract_proof_from_theorem(code_without_preamble)
+    proof_body = _extract_proof_body(code_without_preamble, prefer_theorem=True)
     if proof_body is not None:
         return proof_body
 
     # Fallback: extract from any := by pattern
-    return _extract_proof_fallback(code_without_preamble)
+    fallback_result = _extract_proof_body(code_without_preamble, prefer_theorem=False)
+    return fallback_result if fallback_result is not None else ""
