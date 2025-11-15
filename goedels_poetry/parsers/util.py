@@ -210,6 +210,12 @@ def __collect_named_decls(ast: Node) -> dict[str, dict]:  # noqa: C901
                 for name in chosen_names:
                     if name:
                         name_map[name] = n
+            # Collect generalize statements (may introduce multiple names)
+            if k == "Lean.Parser.Tactic.tacticGeneralize_":
+                generalized_names = __extract_generalize_names(n)
+                for name in generalized_names:
+                    if name:
+                        name_map[name] = n
             for v in n.values():
                 rec(v)
         elif isinstance(n, list):
@@ -363,6 +369,12 @@ def __extract_type_ast(node: Any) -> Optional[dict]:  # noqa: C901
     # We rely on goal context for choose types
     if k == "Lean.Parser.Tactic.tacticChoose_":
         # choose doesn't have explicit type annotations in the syntax
+        # Types must come from goal context
+        return None
+    # generalize: types are inferred from the source, not explicitly in the syntax
+    # We rely on goal context for generalize types
+    if k == "Lean.Parser.Tactic.tacticGeneralize_":
+        # generalize doesn't have explicit type annotations in the syntax
         # Types must come from goal context
         return None
     # set: extract type from set binding (if explicitly typed)
@@ -667,10 +679,10 @@ def __find_earlier_bindings(  # noqa: C901
     theorem_node: dict, target_name: str, name_map: dict[str, dict]
 ) -> list[tuple[str, str, dict]]:
     """
-    Find all bindings (have, let, obtain, set, suffices, choose, etc.) that appear textually before the target
+    Find all bindings (have, let, obtain, set, suffices, choose, generalize, etc.) that appear textually before the target
     within the given theorem. Returns a list of (name, binding_type, node) tuples.
 
-    Binding types: "have", "let", "obtain", "set", "suffices", "choose"
+    Binding types: "have", "let", "obtain", "set", "suffices", "choose", "generalize"
     """
     earlier_bindings: list[tuple[str, str, dict]] = []
     target_found = False
@@ -777,6 +789,22 @@ def __find_earlier_bindings(  # noqa: C901
                 except Exception:  # noqa: S110
                     pass
 
+            # Check if this is a generalize statement
+            # generalize h : e = x or generalize e = x
+            elif kind == "Lean.Parser.Tactic.tacticGeneralize_":
+                try:
+                    # Extract names from generalize pattern
+                    generalized_names = __extract_generalize_names(node)
+                    if target_name in generalized_names:
+                        target_found = True
+                        return
+                    else:
+                        # Add all generalized names as separate bindings
+                        for name in generalized_names:
+                            earlier_bindings.append((name, "generalize", node))
+                except Exception:  # noqa: S110
+                    pass
+
             # Recurse into children in order (preserves textual order)
             for v in node.values():
                 if target_found:
@@ -869,6 +897,38 @@ def __extract_choose_names(choose_node: dict) -> list[str]:
                 collect_names(item)
 
     collect_names(choose_node)
+    return names
+
+
+def __extract_generalize_names(generalize_node: dict) -> list[str]:
+    """
+    Extract variable names from a generalize statement.
+    generalize h : e = x extracts [h, x]
+    generalize e = x extracts [x]
+    generalize h : e = x, h2 : e2 = x2 extracts [h, x, h2, x2]
+    """
+    names: list[str] = []
+
+    # Look for binderIdent nodes within the generalize structure
+    # The structure is: generalize h : e = x or generalize e = x
+    def collect_names(n: Node) -> None:
+        if isinstance(n, dict):
+            # Look for binder identifiers
+            if n.get("kind") in {"Lean.binderIdent", "Lean.Parser.Term.binderIdent"}:
+                val_node = __find_first(n, lambda x: isinstance(x.get("val"), str) and x.get("val") != "")
+                if val_node and val_node["val"]:
+                    name = val_node["val"]
+                    # Avoid collecting keywords or special symbols
+                    if name not in {"generalize", ":=", ":", "(", ")", ",", "=", "⟨", "⟩"}:
+                        names.append(name)
+            # Recurse
+            for v in n.values():
+                collect_names(v)
+        elif isinstance(n, list):
+            for item in n:
+                collect_names(item)
+
+    collect_names(generalize_node)
     return names
 
 
