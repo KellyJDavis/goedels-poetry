@@ -194,6 +194,16 @@ def __collect_named_decls(ast: Node) -> dict[str, dict]:  # noqa: C901
                 for name in obtained_names:
                     if name:
                         name_map[name] = n
+            # Collect set statements
+            if k == "Lean.Parser.Tactic.tacticSet_":
+                set_name = __extract_set_name(n)
+                if set_name:
+                    name_map[set_name] = n
+            # Collect suffices statements
+            if k == "Lean.Parser.Tactic.tacticSuffices_":
+                suffices_name = __extract_suffices_name(n)
+                if suffices_name:
+                    name_map[suffices_name] = n
             for v in n.values():
                 rec(v)
         elif isinstance(n, list):
@@ -343,6 +353,67 @@ def __extract_type_ast(node: Any) -> Optional[dict]:  # noqa: C901
         # obtain doesn't have explicit type annotations in the syntax
         # Types must come from goal context
         return None
+    # set: extract type from set binding (if explicitly typed)
+    # set x : T := value or set x := value (inferred type)
+    if k == "Lean.Parser.Tactic.tacticSet_":
+        # Look for setDecl which contains type information (similar to letDecl)
+        set_decl = __find_first(node, lambda n: n.get("kind") == "Lean.Parser.Term.setDecl")
+        if set_decl and isinstance(set_decl, dict):
+            sd_args = set_decl.get("args", [])
+            # Find ":" and extract type between ":" and ":="
+            colon_idx = None
+            assign_idx = None
+            for i, arg in enumerate(sd_args):
+                if isinstance(arg, dict):
+                    if arg.get("val") == ":" and colon_idx is None:
+                        colon_idx = i
+                    elif arg.get("val") == ":=":
+                        assign_idx = i
+                        break
+
+            # Extract type if explicitly provided
+            if colon_idx is not None and assign_idx is not None and assign_idx > colon_idx + 1:
+                type_tokens = sd_args[colon_idx + 1 : assign_idx]
+                if type_tokens:
+                    return {"kind": "__type_container", "args": type_tokens}
+        # Fallback: try to find type in the node structure
+        cand = __find_first(node, lambda n: n.get("kind") in __TYPE_KIND_CANDIDATES)
+        return deepcopy(cand) if cand is not None else None
+    # suffices: extract type from suffices statement (similar to have)
+    # suffices h : P from Q or suffices h : P by ...
+    if k == "Lean.Parser.Tactic.tacticSuffices_":
+        # Look for haveDecl (suffices uses similar structure to have)
+        have_decl = __find_first(node, lambda n: n.get("kind") == "Lean.Parser.Term.haveDecl")
+        if have_decl and isinstance(have_decl, dict):
+            hd_args = have_decl.get("args", [])
+            # Find index of ":"
+            colon_idx = None
+            for i, arg in enumerate(hd_args):
+                if isinstance(arg, dict) and arg.get("val") == ":":
+                    colon_idx = i
+                    break
+
+            # Extract all type tokens after colon (before "from" or "by")
+            if colon_idx is not None and colon_idx + 1 < len(hd_args):
+                # Find where the type ends (either "from" or "by" or end of args)
+                type_end_idx = len(hd_args)
+                for i in range(colon_idx + 1, len(hd_args)):
+                    arg = hd_args[i]
+                    if isinstance(arg, dict):
+                        val = arg.get("val", "")
+                        if val in {"from", "by"}:
+                            type_end_idx = i
+                            break
+
+                type_tokens = hd_args[colon_idx + 1 : type_end_idx]
+                if type_tokens:
+                    return {"kind": "__type_container", "args": type_tokens}
+
+            # Fallback to old behavior
+            if len(hd_args) > 1 and isinstance(hd_args[1], dict):
+                return deepcopy(hd_args[1])
+            cand = __find_first(have_decl, lambda n: n.get("kind") in __TYPE_KIND_CANDIDATES)
+            return deepcopy(cand) if cand is not None else None
     # fallback: search anywhere under node
     cand = __find_first(node, lambda n: n.get("kind") in __TYPE_KIND_CANDIDATES)
     return deepcopy(cand) if cand is not None else None
@@ -584,10 +655,10 @@ def __find_earlier_bindings(  # noqa: C901
     theorem_node: dict, target_name: str, name_map: dict[str, dict]
 ) -> list[tuple[str, str, dict]]:
     """
-    Find all bindings (have, let, obtain, etc.) that appear textually before the target
+    Find all bindings (have, let, obtain, set, suffices, etc.) that appear textually before the target
     within the given theorem. Returns a list of (name, binding_type, node) tuples.
 
-    Binding types: "have", "let", "obtain"
+    Binding types: "have", "let", "obtain", "set", "suffices"
     """
     earlier_bindings: list[tuple[str, str, dict]] = []
     target_found = False
@@ -647,6 +718,34 @@ def __find_earlier_bindings(  # noqa: C901
                         # Add all obtained names as separate bindings
                         for name in obtained_names:
                             earlier_bindings.append((name, "obtain", node))
+                except Exception:  # noqa: S110
+                    pass
+
+            # Check if this is a set statement
+            # set x := value or set x : Type := value
+            elif kind == "Lean.Parser.Tactic.tacticSet_":
+                try:
+                    set_name = __extract_set_name(node)
+                    if set_name:
+                        if set_name == target_name:
+                            target_found = True
+                            return
+                        else:
+                            earlier_bindings.append((set_name, "set", node))
+                except Exception:  # noqa: S110
+                    pass
+
+            # Check if this is a suffices statement
+            # suffices h : P from Q or suffices h : P by ...
+            elif kind == "Lean.Parser.Tactic.tacticSuffices_":
+                try:
+                    suffices_name = __extract_suffices_name(node)
+                    if suffices_name:
+                        if suffices_name == target_name:
+                            target_found = True
+                            return
+                        else:
+                            earlier_bindings.append((suffices_name, "suffices", node))
                 except Exception:  # noqa: S110
                     pass
 
@@ -726,6 +825,69 @@ def __extract_binder_name(binder: dict) -> Optional[str]:
         if name_node:
             val = name_node.get("val")
             return str(val) if val is not None else None
+    return None
+
+
+def __extract_set_name(set_node: dict) -> Optional[str]:
+    """
+    Extract the variable name from a set statement node.
+    set x := value or set x : Type := value
+    """
+    # Look for setIdDecl or similar patterns
+    # The structure is similar to let: [set_keyword, setDecl, ...]
+    set_id = __find_first(
+        set_node,
+        lambda n: n.get("kind") in {"Lean.Parser.Term.setId", "Lean.Parser.Term.setIdDecl", "Lean.binderIdent"},
+    )
+    if set_id:
+        val_node = __find_first(set_id, lambda n: isinstance(n.get("val"), str) and n.get("val") != "")
+        if val_node:
+            val = val_node.get("val")
+            return str(val) if val is not None else None
+
+    # Alternative: look for the name directly in args, similar to let
+    # Try to find a binderIdent in the first few args
+    args = set_node.get("args", [])
+    for arg in args[:3]:  # Check first few args
+        if isinstance(arg, dict):
+            binder_ident = __find_first(
+                arg, lambda n: n.get("kind") in {"Lean.binderIdent", "Lean.Parser.Term.binderIdent"}
+            )
+            if binder_ident:
+                val_node = __find_first(binder_ident, lambda n: isinstance(n.get("val"), str) and n.get("val") != "")
+                if val_node and val_node.get("val") not in {"set", ":=", ":"}:
+                    return str(val_node.get("val"))
+
+    return None
+
+
+def __extract_suffices_name(suffices_node: dict) -> Optional[str]:
+    """
+    Extract the hypothesis name from a suffices statement node.
+    suffices h : P from Q or suffices h : P by ...
+    """
+    # Look for haveIdDecl or similar pattern (suffices uses similar structure to have)
+    have_id_decl = __find_first(suffices_node, lambda n: n.get("kind") == "Lean.Parser.Term.haveIdDecl")
+    if have_id_decl:
+        have_id = __find_first(have_id_decl, lambda n: n.get("kind") == "Lean.Parser.Term.haveId")
+        if have_id:
+            val_node = __find_first(have_id, lambda n: isinstance(n.get("val"), str) and n.get("val") != "")
+            if val_node:
+                val = val_node.get("val")
+                return str(val) if val is not None else None
+
+    # Alternative: look for binderIdent in args
+    args = suffices_node.get("args", [])
+    for arg in args:
+        if isinstance(arg, dict):
+            binder_ident = __find_first(
+                arg, lambda n: n.get("kind") in {"Lean.binderIdent", "Lean.Parser.Term.binderIdent"}
+            )
+            if binder_ident:
+                val_node = __find_first(binder_ident, lambda n: isinstance(n.get("val"), str) and n.get("val") != "")
+                if val_node and val_node.get("val") not in {"suffices", "from", "by", ":=", ":"}:
+                    return str(val_node.get("val"))
+
     return None
 
 
