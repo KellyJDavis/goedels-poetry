@@ -377,6 +377,12 @@ def __extract_type_ast(node: Any) -> Optional[dict]:  # noqa: C901
         # generalize doesn't have explicit type annotations in the syntax
         # Types must come from goal context
         return None
+    # match: types are inferred from the pattern matching, not explicitly in the syntax
+    # We rely on goal context for match pattern bindings
+    if k in {"Lean.Parser.Term.match", "Lean.Parser.Tactic.tacticMatch_"}:
+        # match pattern bindings don't have explicit type annotations in the syntax
+        # Types must come from goal context
+        return None
     # set: extract type from set binding (if explicitly typed)
     # set x : T := value or set x := value (inferred type)
     if k == "Lean.Parser.Tactic.tacticSet_":
@@ -572,6 +578,34 @@ def __is_referenced_in(subtree: Node, name: str) -> bool:
     return False
 
 
+def __contains_target_name(node: Node, target_name: str, name_map: dict[str, dict]) -> bool:
+    """
+    Check if the given node contains the target by name.
+    Uses name_map to check if target is defined within this node.
+    """
+    if isinstance(node, dict):
+        # Check various node types that might contain the target
+        kind = node.get("kind", "")
+        if kind == "Lean.Parser.Tactic.tacticHave_":
+            try:
+                have_decl = node["args"][1]
+                have_id_decl = have_decl["args"][0]
+                have_id = have_id_decl["args"][0]["args"][0]["val"]
+                if have_id == target_name:
+                    return True
+            except Exception:  # noqa: S110
+                pass
+        # Recurse into children
+        for v in node.values():
+            if __contains_target_name(v, target_name, name_map):
+                return True
+    elif isinstance(node, list):
+        for item in node:
+            if __contains_target_name(item, target_name, name_map):
+                return True
+    return False
+
+
 def __find_enclosing_theorem(ast: Node, target_name: str) -> Optional[dict]:  # noqa: C901
     """
     Find the theorem/lemma that encloses the given target (typically a have statement).
@@ -679,10 +713,13 @@ def __find_earlier_bindings(  # noqa: C901
     theorem_node: dict, target_name: str, name_map: dict[str, dict]
 ) -> list[tuple[str, str, dict]]:
     """
-    Find all bindings (have, let, obtain, set, suffices, choose, generalize, etc.) that appear textually before the target
+    Find all bindings (have, let, obtain, set, suffices, choose, generalize, match, etc.) that appear textually before the target
     within the given theorem. Returns a list of (name, binding_type, node) tuples.
 
-    Binding types: "have", "let", "obtain", "set", "suffices", "choose", "generalize"
+    Binding types: "have", "let", "obtain", "set", "suffices", "choose", "generalize", "match"
+
+    Note: For match expressions, bindings are extracted from the pattern of the branch
+    that contains the target, as match bindings are scoped to their branch.
     """
     earlier_bindings: list[tuple[str, str, dict]] = []
     target_found = False
@@ -803,6 +840,51 @@ def __find_earlier_bindings(  # noqa: C901
                         for name in generalized_names:
                             earlier_bindings.append((name, "generalize", node))
                 except Exception:  # noqa: S110
+                    pass
+
+            # Check if this is a match expression
+            # match x with | pattern => body | pattern2 => body2 end
+            elif kind in {"Lean.Parser.Term.match", "Lean.Parser.Tactic.tacticMatch_"}:
+                try:
+                    # For match expressions, we need to check each branch
+                    # If the target is in a branch, include that branch's pattern bindings
+                    args = node.get("args", [])
+                    # Look for branches (matchAlt nodes)
+                    for arg in args:
+                        if isinstance(arg, dict):
+                            branch_kind = arg.get("kind", "")
+                            if branch_kind in {
+                                "Lean.Parser.Term.matchAlt",
+                                "Lean.Parser.Tactic.matchAlt",
+                            } and __contains_target_name(arg, target_name, name_map):
+                                # Extract pattern bindings from this branch
+                                pattern_names = __extract_match_pattern_names(arg)
+                                for name in pattern_names:
+                                    if name:
+                                        earlier_bindings.append((name, "match", arg))
+                                # Continue traversal into this branch to collect earlier bindings
+                                traverse_for_bindings(arg)
+                                if target_found:
+                                    return
+                        elif isinstance(arg, list):
+                            for item in arg:
+                                if isinstance(item, dict):
+                                    item_kind = item.get("kind", "")
+                                    if item_kind in {
+                                        "Lean.Parser.Term.matchAlt",
+                                        "Lean.Parser.Tactic.matchAlt",
+                                    } and __contains_target_name(item, target_name, name_map):
+                                        pattern_names = __extract_match_pattern_names(item)
+                                        for name in pattern_names:
+                                            if name:
+                                                earlier_bindings.append((name, "match", item))
+                                        traverse_for_bindings(item)
+                                        if target_found:
+                                            return
+                    # If target not found in any branch, continue normal traversal
+                    # (to handle cases where match appears before target but target is outside)
+                except Exception:  # noqa: S110
+                    # If match handling fails, continue with normal traversal
                     pass
 
             # Recurse into children in order (preserves textual order)
@@ -929,6 +1011,73 @@ def __extract_generalize_names(generalize_node: dict) -> list[str]:
                 collect_names(item)
 
     collect_names(generalize_node)
+    return names
+
+
+def __extract_match_pattern_names(match_alt_node: dict) -> list[str]:  # noqa: C901
+    """
+    Extract variable names from a match pattern (only from the pattern part, before =>).
+    match x with | some n => ... extracts [n] from the pattern
+    match x with | (a, b) => ... extracts [a, b] from the pattern
+    """
+    names: list[str] = []
+
+    # The matchAlt structure is: [|, pattern, =>, body]
+    # We only want to extract from the pattern part (before =>)
+    args = match_alt_node.get("args", [])
+    arrow_idx = None
+
+    # Find the => token to separate pattern from body
+    for i, arg in enumerate(args):
+        if (isinstance(arg, dict) and arg.get("val") == "=>") or (isinstance(arg, str) and arg == "=>"):
+            arrow_idx = i
+            break
+
+    # If we found =>, only extract from args before it (the pattern part)
+    # Otherwise, return empty list (safer than extracting from all args which might include body)
+    # No => found likely means malformed AST, but safer to return empty than extract from body
+    pattern_args = args[:arrow_idx] if arrow_idx is not None else []
+
+    # Look for binderIdent nodes within the pattern part only
+    def collect_names(n: Node) -> None:
+        if isinstance(n, dict):
+            # Look for binder identifiers
+            if n.get("kind") in {"Lean.binderIdent", "Lean.Parser.Term.binderIdent"}:
+                val_node = __find_first(n, lambda x: isinstance(x.get("val"), str) and x.get("val") != "")
+                if val_node and val_node["val"]:
+                    name = val_node["val"]
+                    # Avoid collecting keywords or special symbols
+                    if name not in {
+                        "match",
+                        "with",
+                        "|",
+                        "=>",
+                        ":=",
+                        ":",
+                        "(",
+                        ")",
+                        ",",
+                        "⟨",
+                        "⟩",
+                        "end",
+                        "some",
+                        "none",
+                    }:
+                        names.append(name)
+            # Recurse
+            for v in n.values():
+                collect_names(v)
+        elif isinstance(n, list):
+            for item in n:
+                collect_names(item)
+        elif isinstance(n, str):
+            # Skip string tokens (they're not bindings)
+            pass
+
+    # Only collect from the pattern part
+    for arg in pattern_args:
+        collect_names(arg)
+
     return names
 
 
