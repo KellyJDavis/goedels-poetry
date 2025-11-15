@@ -2763,3 +2763,758 @@ def test_ast_get_named_subgoal_code_mixed_generalize_other_bindings() -> None:
     # Should include generalized variables h and x
     assert "h" in result
     assert "x" in result
+
+
+def test_ast_get_named_subgoal_code_includes_match_binding() -> None:
+    """Test that get_named_subgoal_code includes variables from match pattern bindings."""
+    # Create a theorem with a match expression and a have statement inside a branch
+    ast_dict = {
+        "kind": "Lean.Parser.Command.theorem",
+        "args": [
+            {"val": "theorem", "info": {"leading": "", "trailing": " "}},
+            {
+                "kind": "Lean.Parser.Command.declId",
+                "args": [{"val": "test_theorem", "info": {"leading": "", "trailing": " "}}],
+            },
+            {
+                "kind": "Lean.Parser.Term.bracketedBinderList",
+                "args": [
+                    {
+                        "kind": "Lean.Parser.Term.explicitBinder",
+                        "args": [
+                            {"val": "(", "info": {"leading": " ", "trailing": ""}},
+                            {
+                                "kind": "Lean.binderIdent",
+                                "args": [{"val": "x", "info": {"leading": "", "trailing": ""}}],
+                            },
+                            {"val": ":", "info": {"leading": " ", "trailing": " "}},
+                            {"val": "Option", "info": {"leading": "", "trailing": " "}},
+                            {"val": "ℕ", "info": {"leading": "", "trailing": " "}},  # noqa: RUF001
+                            {"val": ")", "info": {"leading": "", "trailing": " "}},
+                        ],
+                    },
+                ],
+            },
+            {"val": ":", "info": {"leading": " ", "trailing": " "}},
+            {"val": "Prop", "info": {"leading": "", "trailing": " "}},
+            {"val": ":=", "info": {"leading": " ", "trailing": " "}},
+            {
+                "kind": "Lean.Parser.Term.byTactic",
+                "args": [
+                    {"val": "by", "info": {"leading": "", "trailing": "\n  "}},
+                    {
+                        "kind": "Lean.Parser.Tactic.tacticSeq",
+                        "args": [
+                            # Match expression
+                            {
+                                "kind": "Lean.Parser.Term.match",
+                                "args": [
+                                    {"val": "match", "info": {"leading": "", "trailing": " "}},
+                                    {"val": "x", "info": {"leading": "", "trailing": " "}},
+                                    {"val": "with", "info": {"leading": " ", "trailing": "\n  "}},
+                                    # Branch: some n
+                                    {
+                                        "kind": "Lean.Parser.Term.matchAlt",
+                                        "args": [
+                                            {"val": "|", "info": {"leading": "", "trailing": " "}},
+                                            {"val": "some", "info": {"leading": "", "trailing": " "}},
+                                            {
+                                                "kind": "Lean.binderIdent",
+                                                "args": [{"val": "n", "info": {"leading": "", "trailing": ""}}],
+                                            },
+                                            {"val": "=>", "info": {"leading": " ", "trailing": "\n    "}},
+                                            # Have statement inside branch using pattern binding
+                                            {
+                                                "kind": "Lean.Parser.Tactic.tacticHave_",
+                                                "args": [
+                                                    {"val": "have", "info": {"leading": "", "trailing": " "}},
+                                                    {
+                                                        "kind": "Lean.Parser.Term.haveDecl",
+                                                        "args": [
+                                                            {
+                                                                "kind": "Lean.Parser.Term.haveIdDecl",
+                                                                "args": [
+                                                                    {
+                                                                        "kind": "Lean.Parser.Term.haveId",
+                                                                        "args": [
+                                                                            {
+                                                                                "val": "h1",
+                                                                                "info": {
+                                                                                    "leading": "",
+                                                                                    "trailing": " ",
+                                                                                },
+                                                                            }
+                                                                        ],
+                                                                    }
+                                                                ],
+                                                            },
+                                                            {"val": ":", "info": {"leading": "", "trailing": " "}},
+                                                            {"val": "n", "info": {"leading": "", "trailing": " "}},
+                                                            {"val": ">", "info": {"leading": " ", "trailing": " "}},
+                                                            {"val": "0", "info": {"leading": "", "trailing": " "}},
+                                                        ],
+                                                    },
+                                                    {"val": ":=", "info": {"leading": " ", "trailing": " "}},
+                                                    {
+                                                        "kind": "Lean.Parser.Term.byTactic",
+                                                        "args": [
+                                                            {"val": "by", "info": {"leading": "", "trailing": " "}},
+                                                            {
+                                                                "kind": "Lean.Parser.Tactic.tacticSeq",
+                                                                "args": [
+                                                                    {
+                                                                        "kind": "Lean.Parser.Tactic.tacticSorry",
+                                                                        "args": [
+                                                                            {
+                                                                                "val": "sorry",
+                                                                                "info": {"leading": "", "trailing": ""},
+                                                                            }
+                                                                        ],
+                                                                    }
+                                                                ],
+                                                            },
+                                                        ],
+                                                    },
+                                                ],
+                                            },
+                                        ],
+                                    },
+                                    # Branch: none
+                                    {
+                                        "kind": "Lean.Parser.Term.matchAlt",
+                                        "args": [
+                                            {"val": "|", "info": {"leading": "\n  ", "trailing": " "}},
+                                            {"val": "none", "info": {"leading": "", "trailing": " "}},
+                                            {"val": "=>", "info": {"leading": " ", "trailing": " "}},
+                                            {
+                                                "kind": "Lean.Parser.Tactic.tacticSorry",
+                                                "args": [{"val": "sorry", "info": {"leading": "", "trailing": ""}}],
+                                            },
+                                        ],
+                                    },
+                                    {"val": "end", "info": {"leading": "\n", "trailing": ""}},
+                                ],
+                            },
+                        ],
+                    },
+                ],
+            },
+        ],
+    }
+
+    sorries = [
+        {
+            "pos": {"line": 4, "column": 6},
+            "endPos": {"line": 4, "column": 11},
+            "goal": "x : Option ℕ\nn : ℕ\n⊢ n > 0",  # noqa: RUF001
+            "proofState": 1,
+        }
+    ]
+
+    ast = AST(ast_dict, sorries)
+    result = ast.get_named_subgoal_code("h1")
+
+    # The result should include the theorem parameter x
+    assert "lemma" in result
+    assert "h1" in result
+    assert "x" in result
+    # Should include match pattern binding n as a hypothesis
+    assert "n" in result
+    assert "ℕ" in result  # noqa: RUF001
+
+
+def test_ast_get_named_subgoal_code_includes_match_binding_multiple_patterns() -> None:
+    """Test that get_named_subgoal_code includes multiple variables from match patterns."""
+    # Create a theorem with a match expression with tuple pattern
+    ast_dict = {
+        "kind": "Lean.Parser.Command.theorem",
+        "args": [
+            {"val": "theorem", "info": {"leading": "", "trailing": " "}},
+            {
+                "kind": "Lean.Parser.Command.declId",
+                "args": [{"val": "test_theorem", "info": {"leading": "", "trailing": " "}}],
+            },
+            {
+                "kind": "Lean.Parser.Term.bracketedBinderList",
+                "args": [
+                    {
+                        "kind": "Lean.Parser.Term.explicitBinder",
+                        "args": [
+                            {"val": "(", "info": {"leading": " ", "trailing": ""}},
+                            {
+                                "kind": "Lean.binderIdent",
+                                "args": [{"val": "p", "info": {"leading": "", "trailing": ""}}],
+                            },
+                            {"val": ":", "info": {"leading": " ", "trailing": " "}},
+                            {"val": "ℕ", "info": {"leading": "", "trailing": " "}},  # noqa: RUF001
+                            {"val": "×", "info": {"leading": " ", "trailing": " "}},  # noqa: RUF001
+                            {"val": "ℕ", "info": {"leading": "", "trailing": " "}},  # noqa: RUF001
+                            {"val": ")", "info": {"leading": "", "trailing": " "}},
+                        ],
+                    },
+                ],
+            },
+            {"val": ":", "info": {"leading": " ", "trailing": " "}},
+            {"val": "Prop", "info": {"leading": "", "trailing": " "}},
+            {"val": ":=", "info": {"leading": " ", "trailing": " "}},
+            {
+                "kind": "Lean.Parser.Term.byTactic",
+                "args": [
+                    {"val": "by", "info": {"leading": "", "trailing": "\n  "}},
+                    {
+                        "kind": "Lean.Parser.Tactic.tacticSeq",
+                        "args": [
+                            # Match expression with tuple pattern
+                            {
+                                "kind": "Lean.Parser.Term.match",
+                                "args": [
+                                    {"val": "match", "info": {"leading": "", "trailing": " "}},
+                                    {"val": "p", "info": {"leading": "", "trailing": " "}},
+                                    {"val": "with", "info": {"leading": " ", "trailing": "\n  "}},
+                                    # Branch: (a, b)
+                                    {
+                                        "kind": "Lean.Parser.Term.matchAlt",
+                                        "args": [
+                                            {"val": "|", "info": {"leading": "", "trailing": " "}},
+                                            {"val": "(", "info": {"leading": "", "trailing": ""}},
+                                            {
+                                                "kind": "Lean.binderIdent",
+                                                "args": [{"val": "a", "info": {"leading": "", "trailing": ""}}],
+                                            },
+                                            {"val": ",", "info": {"leading": "", "trailing": " "}},
+                                            {
+                                                "kind": "Lean.binderIdent",
+                                                "args": [{"val": "b", "info": {"leading": "", "trailing": ""}}],
+                                            },
+                                            {"val": ")", "info": {"leading": "", "trailing": " "}},
+                                            {"val": "=>", "info": {"leading": " ", "trailing": "\n    "}},
+                                            # Have statement using pattern bindings
+                                            {
+                                                "kind": "Lean.Parser.Tactic.tacticHave_",
+                                                "args": [
+                                                    {"val": "have", "info": {"leading": "", "trailing": " "}},
+                                                    {
+                                                        "kind": "Lean.Parser.Term.haveDecl",
+                                                        "args": [
+                                                            {
+                                                                "kind": "Lean.Parser.Term.haveIdDecl",
+                                                                "args": [
+                                                                    {
+                                                                        "kind": "Lean.Parser.Term.haveId",
+                                                                        "args": [
+                                                                            {
+                                                                                "val": "h1",
+                                                                                "info": {
+                                                                                    "leading": "",
+                                                                                    "trailing": " ",
+                                                                                },
+                                                                            }
+                                                                        ],
+                                                                    }
+                                                                ],
+                                                            },
+                                                            {"val": ":", "info": {"leading": "", "trailing": " "}},
+                                                            {"val": "a", "info": {"leading": "", "trailing": " "}},
+                                                            {"val": "+", "info": {"leading": " ", "trailing": " "}},
+                                                            {"val": "b", "info": {"leading": "", "trailing": " "}},
+                                                            {"val": ">", "info": {"leading": " ", "trailing": " "}},
+                                                            {"val": "0", "info": {"leading": "", "trailing": " "}},
+                                                        ],
+                                                    },
+                                                    {"val": ":=", "info": {"leading": " ", "trailing": " "}},
+                                                    {
+                                                        "kind": "Lean.Parser.Term.byTactic",
+                                                        "args": [
+                                                            {"val": "by", "info": {"leading": "", "trailing": " "}},
+                                                            {
+                                                                "kind": "Lean.Parser.Tactic.tacticSeq",
+                                                                "args": [
+                                                                    {
+                                                                        "kind": "Lean.Parser.Tactic.tacticSorry",
+                                                                        "args": [
+                                                                            {
+                                                                                "val": "sorry",
+                                                                                "info": {"leading": "", "trailing": ""},
+                                                                            }
+                                                                        ],
+                                                                    }
+                                                                ],
+                                                            },
+                                                        ],
+                                                    },
+                                                ],
+                                            },
+                                        ],
+                                    },
+                                ],
+                            },
+                        ],
+                    },
+                ],
+            },
+        ],
+    }
+
+    sorries = [
+        {
+            "pos": {"line": 4, "column": 6},
+            "endPos": {"line": 4, "column": 11},
+            "goal": "p : ℕ × ℕ\na : ℕ\nb : ℕ\n⊢ a + b > 0",  # noqa: RUF001
+            "proofState": 1,
+        }
+    ]
+
+    ast = AST(ast_dict, sorries)
+    result = ast.get_named_subgoal_code("h1")
+
+    # The result should include the theorem parameter p
+    assert "lemma" in result
+    assert "h1" in result
+    assert "p" in result
+    # Should include match pattern bindings a and b as hypotheses
+    assert "a" in result
+    assert "b" in result
+    assert "ℕ" in result  # noqa: RUF001
+
+
+def test_ast_get_named_subgoal_code_includes_match_binding_nested() -> None:
+    """Test that get_named_subgoal_code includes variables from nested match patterns."""
+    # Create a theorem with nested match expressions
+    ast_dict = {
+        "kind": "Lean.Parser.Command.theorem",
+        "args": [
+            {"val": "theorem", "info": {"leading": "", "trailing": " "}},
+            {
+                "kind": "Lean.Parser.Command.declId",
+                "args": [{"val": "test_theorem", "info": {"leading": "", "trailing": " "}}],
+            },
+            {
+                "kind": "Lean.Parser.Term.bracketedBinderList",
+                "args": [
+                    {
+                        "kind": "Lean.Parser.Term.explicitBinder",
+                        "args": [
+                            {"val": "(", "info": {"leading": " ", "trailing": ""}},
+                            {
+                                "kind": "Lean.binderIdent",
+                                "args": [{"val": "x", "info": {"leading": "", "trailing": ""}}],
+                            },
+                            {"val": ":", "info": {"leading": " ", "trailing": " "}},
+                            {"val": "Option", "info": {"leading": "", "trailing": " "}},
+                            {"val": "(Option ℕ)", "info": {"leading": " ", "trailing": " "}},  # noqa: RUF001
+                            {"val": ")", "info": {"leading": "", "trailing": " "}},
+                        ],
+                    },
+                ],
+            },
+            {"val": ":", "info": {"leading": " ", "trailing": " "}},
+            {"val": "Prop", "info": {"leading": "", "trailing": " "}},
+            {"val": ":=", "info": {"leading": " ", "trailing": " "}},
+            {
+                "kind": "Lean.Parser.Term.byTactic",
+                "args": [
+                    {"val": "by", "info": {"leading": "", "trailing": "\n  "}},
+                    {
+                        "kind": "Lean.Parser.Tactic.tacticSeq",
+                        "args": [
+                            # Outer match
+                            {
+                                "kind": "Lean.Parser.Term.match",
+                                "args": [
+                                    {"val": "match", "info": {"leading": "", "trailing": " "}},
+                                    {"val": "x", "info": {"leading": "", "trailing": " "}},
+                                    {"val": "with", "info": {"leading": " ", "trailing": "\n  "}},
+                                    # Branch: some y
+                                    {
+                                        "kind": "Lean.Parser.Term.matchAlt",
+                                        "args": [
+                                            {"val": "|", "info": {"leading": "", "trailing": " "}},
+                                            {"val": "some", "info": {"leading": "", "trailing": " "}},
+                                            {
+                                                "kind": "Lean.binderIdent",
+                                                "args": [{"val": "y", "info": {"leading": "", "trailing": ""}}],
+                                            },
+                                            {"val": "=>", "info": {"leading": " ", "trailing": "\n    "}},
+                                            # Nested match
+                                            {
+                                                "kind": "Lean.Parser.Term.match",
+                                                "args": [
+                                                    {"val": "match", "info": {"leading": "", "trailing": " "}},
+                                                    {"val": "y", "info": {"leading": "", "trailing": " "}},
+                                                    {"val": "with", "info": {"leading": " ", "trailing": "\n      "}},
+                                                    # Inner branch: some n
+                                                    {
+                                                        "kind": "Lean.Parser.Term.matchAlt",
+                                                        "args": [
+                                                            {"val": "|", "info": {"leading": "", "trailing": " "}},
+                                                            {"val": "some", "info": {"leading": "", "trailing": " "}},
+                                                            {
+                                                                "kind": "Lean.binderIdent",
+                                                                "args": [
+                                                                    {
+                                                                        "val": "n",
+                                                                        "info": {"leading": "", "trailing": ""},
+                                                                    }
+                                                                ],
+                                                            },
+                                                            {
+                                                                "val": "=>",
+                                                                "info": {"leading": " ", "trailing": "\n        "},
+                                                            },
+                                                            # Have statement using both pattern bindings
+                                                            {
+                                                                "kind": "Lean.Parser.Tactic.tacticHave_",
+                                                                "args": [
+                                                                    {
+                                                                        "val": "have",
+                                                                        "info": {"leading": "", "trailing": " "},
+                                                                    },
+                                                                    {
+                                                                        "kind": "Lean.Parser.Term.haveDecl",
+                                                                        "args": [
+                                                                            {
+                                                                                "kind": "Lean.Parser.Term.haveIdDecl",
+                                                                                "args": [
+                                                                                    {
+                                                                                        "kind": "Lean.Parser.Term.haveId",
+                                                                                        "args": [
+                                                                                            {
+                                                                                                "val": "h1",
+                                                                                                "info": {
+                                                                                                    "leading": "",
+                                                                                                    "trailing": " ",
+                                                                                                },
+                                                                                            }
+                                                                                        ],
+                                                                                    }
+                                                                                ],
+                                                                            },
+                                                                            {
+                                                                                "val": ":",
+                                                                                "info": {
+                                                                                    "leading": "",
+                                                                                    "trailing": " ",
+                                                                                },
+                                                                            },
+                                                                            {
+                                                                                "val": "n",
+                                                                                "info": {
+                                                                                    "leading": "",
+                                                                                    "trailing": " ",
+                                                                                },
+                                                                            },
+                                                                            {
+                                                                                "val": ">",
+                                                                                "info": {
+                                                                                    "leading": " ",
+                                                                                    "trailing": " ",
+                                                                                },
+                                                                            },
+                                                                            {
+                                                                                "val": "0",
+                                                                                "info": {
+                                                                                    "leading": "",
+                                                                                    "trailing": " ",
+                                                                                },
+                                                                            },
+                                                                        ],
+                                                                    },
+                                                                    {
+                                                                        "val": ":=",
+                                                                        "info": {"leading": " ", "trailing": " "},
+                                                                    },
+                                                                    {
+                                                                        "kind": "Lean.Parser.Term.byTactic",
+                                                                        "args": [
+                                                                            {
+                                                                                "val": "by",
+                                                                                "info": {
+                                                                                    "leading": "",
+                                                                                    "trailing": " ",
+                                                                                },
+                                                                            },
+                                                                            {
+                                                                                "kind": "Lean.Parser.Tactic.tacticSeq",
+                                                                                "args": [
+                                                                                    {
+                                                                                        "kind": "Lean.Parser.Tactic.tacticSorry",
+                                                                                        "args": [
+                                                                                            {
+                                                                                                "val": "sorry",
+                                                                                                "info": {
+                                                                                                    "leading": "",
+                                                                                                    "trailing": "",
+                                                                                                },
+                                                                                            }
+                                                                                        ],
+                                                                                    }
+                                                                                ],
+                                                                            },
+                                                                        ],
+                                                                    },
+                                                                ],
+                                                            },
+                                                        ],
+                                                    },
+                                                    # Inner branch: none
+                                                    {
+                                                        "kind": "Lean.Parser.Term.matchAlt",
+                                                        "args": [
+                                                            {
+                                                                "val": "|",
+                                                                "info": {"leading": "\n      ", "trailing": " "},
+                                                            },
+                                                            {"val": "none", "info": {"leading": "", "trailing": " "}},
+                                                            {"val": "=>", "info": {"leading": " ", "trailing": " "}},
+                                                            {
+                                                                "kind": "Lean.Parser.Tactic.tacticSorry",
+                                                                "args": [
+                                                                    {
+                                                                        "val": "sorry",
+                                                                        "info": {"leading": "", "trailing": ""},
+                                                                    }
+                                                                ],
+                                                            },
+                                                        ],
+                                                    },
+                                                    {"val": "end", "info": {"leading": "\n    ", "trailing": ""}},
+                                                ],
+                                            },
+                                        ],
+                                    },
+                                    # Outer branch: none
+                                    {
+                                        "kind": "Lean.Parser.Term.matchAlt",
+                                        "args": [
+                                            {"val": "|", "info": {"leading": "\n  ", "trailing": " "}},
+                                            {"val": "none", "info": {"leading": "", "trailing": " "}},
+                                            {"val": "=>", "info": {"leading": " ", "trailing": " "}},
+                                            {
+                                                "kind": "Lean.Parser.Tactic.tacticSorry",
+                                                "args": [{"val": "sorry", "info": {"leading": "", "trailing": ""}}],
+                                            },
+                                        ],
+                                    },
+                                    {"val": "end", "info": {"leading": "\n", "trailing": ""}},
+                                ],
+                            },
+                        ],
+                    },
+                ],
+            },
+        ],
+    }
+
+    sorries = [
+        {
+            "pos": {"line": 6, "column": 10},
+            "endPos": {"line": 6, "column": 15},
+            "goal": "x : Option (Option ℕ)\ny : Option ℕ\nn : ℕ\n⊢ n > 0",  # noqa: RUF001
+            "proofState": 1,
+        }
+    ]
+
+    ast = AST(ast_dict, sorries)
+    result = ast.get_named_subgoal_code("h1")
+
+    # The result should include the theorem parameter x
+    assert "lemma" in result
+    assert "h1" in result
+    assert "x" in result
+    # Should include match pattern bindings from both outer and inner matches
+    # Note: y might not be needed if it's not used, but n should definitely be included
+    assert "n" in result
+    assert "ℕ" in result  # noqa: RUF001
+
+
+def test_ast_get_named_subgoal_code_mixed_match_other_bindings() -> None:
+    """Test get_named_subgoal_code with mixed match and other binding types."""
+    # Create a theorem with match, set, and have statements
+    ast_dict = {
+        "kind": "Lean.Parser.Command.theorem",
+        "args": [
+            {"val": "theorem", "info": {"leading": "", "trailing": " "}},
+            {
+                "kind": "Lean.Parser.Command.declId",
+                "args": [{"val": "mixed_test", "info": {"leading": "", "trailing": " "}}],
+            },
+            {
+                "kind": "Lean.Parser.Term.bracketedBinderList",
+                "args": [
+                    {
+                        "kind": "Lean.Parser.Term.explicitBinder",
+                        "args": [
+                            {"val": "(", "info": {"leading": " ", "trailing": ""}},
+                            {
+                                "kind": "Lean.binderIdent",
+                                "args": [{"val": "x", "info": {"leading": "", "trailing": ""}}],
+                            },
+                            {"val": ":", "info": {"leading": " ", "trailing": " "}},
+                            {"val": "Option", "info": {"leading": "", "trailing": " "}},
+                            {"val": "ℕ", "info": {"leading": "", "trailing": " "}},  # noqa: RUF001
+                            {"val": ")", "info": {"leading": "", "trailing": " "}},
+                        ],
+                    },
+                ],
+            },
+            {"val": ":", "info": {"leading": " ", "trailing": " "}},
+            {"val": "Prop", "info": {"leading": "", "trailing": " "}},
+            {"val": ":=", "info": {"leading": " ", "trailing": " "}},
+            {
+                "kind": "Lean.Parser.Term.byTactic",
+                "args": [
+                    {"val": "by", "info": {"leading": "", "trailing": "\n  "}},
+                    {
+                        "kind": "Lean.Parser.Tactic.tacticSeq",
+                        "args": [
+                            # Set statement
+                            {
+                                "kind": "Lean.Parser.Tactic.tacticSet_",
+                                "args": [
+                                    {"val": "set", "info": {"leading": "", "trailing": " "}},
+                                    {
+                                        "kind": "Lean.Parser.Term.setDecl",
+                                        "args": [
+                                            {
+                                                "kind": "Lean.Parser.Term.setIdDecl",
+                                                "args": [
+                                                    {
+                                                        "kind": "Lean.binderIdent",
+                                                        "args": [{"val": "S", "info": {"leading": "", "trailing": ""}}],
+                                                    },
+                                                ],
+                                            },
+                                            {"val": ":=", "info": {"leading": " ", "trailing": " "}},
+                                            {"val": "Finset.range", "info": {"leading": " ", "trailing": " "}},
+                                            {"val": "10", "info": {"leading": "", "trailing": " "}},
+                                        ],
+                                    },
+                                ],
+                            },
+                            # Match expression
+                            {
+                                "kind": "Lean.Parser.Term.match",
+                                "args": [
+                                    {"val": "match", "info": {"leading": "\n  ", "trailing": " "}},
+                                    {"val": "x", "info": {"leading": "", "trailing": " "}},
+                                    {"val": "with", "info": {"leading": " ", "trailing": "\n    "}},
+                                    # Branch: some n
+                                    {
+                                        "kind": "Lean.Parser.Term.matchAlt",
+                                        "args": [
+                                            {"val": "|", "info": {"leading": "", "trailing": " "}},
+                                            {"val": "some", "info": {"leading": "", "trailing": " "}},
+                                            {
+                                                "kind": "Lean.binderIdent",
+                                                "args": [{"val": "n", "info": {"leading": "", "trailing": ""}}],
+                                            },
+                                            {"val": "=>", "info": {"leading": " ", "trailing": "\n      "}},
+                                            # Have statement using both set and match bindings
+                                            {
+                                                "kind": "Lean.Parser.Tactic.tacticHave_",
+                                                "args": [
+                                                    {"val": "have", "info": {"leading": "", "trailing": " "}},
+                                                    {
+                                                        "kind": "Lean.Parser.Term.haveDecl",
+                                                        "args": [
+                                                            {
+                                                                "kind": "Lean.Parser.Term.haveIdDecl",
+                                                                "args": [
+                                                                    {
+                                                                        "kind": "Lean.Parser.Term.haveId",
+                                                                        "args": [
+                                                                            {
+                                                                                "val": "h1",
+                                                                                "info": {
+                                                                                    "leading": "",
+                                                                                    "trailing": " ",
+                                                                                },
+                                                                            }
+                                                                        ],
+                                                                    }
+                                                                ],
+                                                            },
+                                                            {"val": ":", "info": {"leading": "", "trailing": " "}},
+                                                            {
+                                                                "val": "Finset.prod",
+                                                                "info": {"leading": "", "trailing": " "},
+                                                            },
+                                                            {"val": "S", "info": {"leading": " ", "trailing": " "}},
+                                                            {
+                                                                "val": "(fun _ => n)",
+                                                                "info": {"leading": " ", "trailing": " "},
+                                                            },
+                                                            {"val": "=", "info": {"leading": " ", "trailing": " "}},
+                                                            {"val": "0", "info": {"leading": " ", "trailing": " "}},
+                                                        ],
+                                                    },
+                                                    {"val": ":=", "info": {"leading": " ", "trailing": " "}},
+                                                    {
+                                                        "kind": "Lean.Parser.Term.byTactic",
+                                                        "args": [
+                                                            {"val": "by", "info": {"leading": "", "trailing": " "}},
+                                                            {
+                                                                "kind": "Lean.Parser.Tactic.tacticSeq",
+                                                                "args": [
+                                                                    {
+                                                                        "kind": "Lean.Parser.Tactic.tacticSorry",
+                                                                        "args": [
+                                                                            {
+                                                                                "val": "sorry",
+                                                                                "info": {"leading": "", "trailing": ""},
+                                                                            }
+                                                                        ],
+                                                                    }
+                                                                ],
+                                                            },
+                                                        ],
+                                                    },
+                                                ],
+                                            },
+                                        ],
+                                    },
+                                    # Branch: none
+                                    {
+                                        "kind": "Lean.Parser.Term.matchAlt",
+                                        "args": [
+                                            {"val": "|", "info": {"leading": "\n    ", "trailing": " "}},
+                                            {"val": "none", "info": {"leading": "", "trailing": " "}},
+                                            {"val": "=>", "info": {"leading": " ", "trailing": " "}},
+                                            {
+                                                "kind": "Lean.Parser.Tactic.tacticSorry",
+                                                "args": [{"val": "sorry", "info": {"leading": "", "trailing": ""}}],
+                                            },
+                                        ],
+                                    },
+                                    {"val": "end", "info": {"leading": "\n  ", "trailing": ""}},
+                                ],
+                            },
+                        ],
+                    },
+                ],
+            },
+        ],
+    }
+
+    sorries = [
+        {
+            "pos": {"line": 5, "column": 8},
+            "endPos": {"line": 5, "column": 13},
+            "goal": "x : Option ℕ\nS : Finset ℕ\nn : ℕ\n⊢ Finset.prod S (fun _ => n) = 0",  # noqa: RUF001
+            "proofState": 1,
+        }
+    ]
+
+    ast = AST(ast_dict, sorries)
+    result = ast.get_named_subgoal_code("h1")
+
+    # The result should include all earlier bindings
+    assert "lemma" in result
+    assert "h1" in result
+    # Should include theorem parameter x
+    assert "x" in result
+    # Should include set binding S
+    assert "S" in result
+    # Should include match pattern binding n
+    assert "n" in result
+    assert "ℕ" in result  # noqa: RUF001
