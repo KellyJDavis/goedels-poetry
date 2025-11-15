@@ -1071,3 +1071,725 @@ def test_ast_get_named_subgoal_code_mixed_bindings() -> None:
     # Should include let binding m
     assert "m" in result
     assert "ℕ" in result  # noqa: RUF001
+
+
+def test_ast_get_named_subgoal_code_includes_set_binding() -> None:
+    """Test that get_named_subgoal_code includes earlier set statements."""
+    # Create a theorem with a set statement and a have statement
+    ast_dict = {
+        "kind": "Lean.Parser.Command.theorem",
+        "args": [
+            {"val": "theorem", "info": {"leading": "", "trailing": " "}},
+            {
+                "kind": "Lean.Parser.Command.declId",
+                "args": [{"val": "test_theorem", "info": {"leading": "", "trailing": " "}}],
+            },
+            {
+                "kind": "Lean.Parser.Term.bracketedBinderList",
+                "args": [
+                    {
+                        "kind": "Lean.Parser.Term.explicitBinder",
+                        "args": [
+                            {"val": "(", "info": {"leading": " ", "trailing": ""}},
+                            {
+                                "kind": "Lean.binderIdent",
+                                "args": [{"val": "x", "info": {"leading": "", "trailing": ""}}],
+                            },
+                            {"val": ":", "info": {"leading": " ", "trailing": " "}},
+                            {"val": "ℕ", "info": {"leading": "", "trailing": " "}},  # noqa: RUF001
+                            {"val": ")", "info": {"leading": "", "trailing": " "}},
+                        ],
+                    },
+                ],
+            },
+            {"val": ":", "info": {"leading": " ", "trailing": " "}},
+            {"val": "Prop", "info": {"leading": "", "trailing": " "}},
+            {"val": ":=", "info": {"leading": " ", "trailing": " "}},
+            {
+                "kind": "Lean.Parser.Term.byTactic",
+                "args": [
+                    {"val": "by", "info": {"leading": "", "trailing": "\n  "}},
+                    {
+                        "kind": "Lean.Parser.Tactic.tacticSeq",
+                        "args": [
+                            # Set statement
+                            {
+                                "kind": "Lean.Parser.Tactic.tacticSet_",
+                                "args": [
+                                    {"val": "set", "info": {"leading": "", "trailing": " "}},
+                                    {
+                                        "kind": "Lean.Parser.Term.setDecl",
+                                        "args": [
+                                            {
+                                                "kind": "Lean.Parser.Term.setIdDecl",
+                                                "args": [
+                                                    {
+                                                        "kind": "Lean.binderIdent",
+                                                        "args": [
+                                                            {"val": "odds", "info": {"leading": "", "trailing": ""}}
+                                                        ],
+                                                    },
+                                                ],
+                                            },
+                                            {"val": ":=", "info": {"leading": " ", "trailing": " "}},
+                                            {"val": "Finset.filter", "info": {"leading": " ", "trailing": " "}},
+                                            {"val": "(fun x => ¬Even x)", "info": {"leading": " ", "trailing": " "}},
+                                        ],
+                                    },
+                                ],
+                            },
+                            # Have statement using the set binding
+                            {
+                                "kind": "Lean.Parser.Tactic.tacticHave_",
+                                "args": [
+                                    {"val": "have", "info": {"leading": "\n  ", "trailing": " "}},
+                                    {
+                                        "kind": "Lean.Parser.Term.haveDecl",
+                                        "args": [
+                                            {
+                                                "kind": "Lean.Parser.Term.haveIdDecl",
+                                                "args": [
+                                                    {
+                                                        "kind": "Lean.Parser.Term.haveId",
+                                                        "args": [
+                                                            {"val": "h1", "info": {"leading": "", "trailing": " "}}
+                                                        ],
+                                                    }
+                                                ],
+                                            },
+                                            {"val": ":", "info": {"leading": "", "trailing": " "}},
+                                            {"val": "Finset.prod", "info": {"leading": "", "trailing": " "}},
+                                            {"val": "odds", "info": {"leading": " ", "trailing": " "}},
+                                            {"val": "(id : ℕ → ℕ)", "info": {"leading": " ", "trailing": " "}},  # noqa: RUF001
+                                            {"val": "=", "info": {"leading": " ", "trailing": " "}},
+                                            {"val": "oddProd", "info": {"leading": " ", "trailing": " "}},
+                                        ],
+                                    },
+                                    {"val": ":=", "info": {"leading": " ", "trailing": " "}},
+                                    {
+                                        "kind": "Lean.Parser.Term.byTactic",
+                                        "args": [
+                                            {"val": "by", "info": {"leading": "", "trailing": " "}},
+                                            {
+                                                "kind": "Lean.Parser.Tactic.tacticSeq",
+                                                "args": [
+                                                    {
+                                                        "kind": "Lean.Parser.Tactic.tacticSorry",
+                                                        "args": [
+                                                            {"val": "sorry", "info": {"leading": "", "trailing": ""}}
+                                                        ],
+                                                    }
+                                                ],
+                                            },
+                                        ],
+                                    },
+                                ],
+                            },
+                        ],
+                    },
+                ],
+            },
+        ],
+    }
+
+    sorries = [
+        {
+            "pos": {"line": 3, "column": 4},
+            "endPos": {"line": 3, "column": 9},
+            "goal": "x : ℕ\nodds : Finset ℕ\n⊢ Finset.prod odds (id : ℕ → ℕ) = oddProd",  # noqa: RUF001
+            "proofState": 1,
+        }
+    ]
+
+    ast = AST(ast_dict, sorries)
+    result = ast.get_named_subgoal_code("h1")
+
+    # The result should include the theorem parameter x
+    assert "lemma" in result
+    assert "h1" in result
+    assert "x" in result
+    # Should include the set binding odds as a hypothesis
+    assert "odds" in result
+    assert "Finset" in result
+
+
+def test_ast_get_named_subgoal_code_includes_set_binding_with_type() -> None:
+    """Test that get_named_subgoal_code includes set statements with explicit types."""
+    # Create a theorem with a typed set statement
+    ast_dict = {
+        "kind": "Lean.Parser.Command.theorem",
+        "args": [
+            {"val": "theorem", "info": {"leading": "", "trailing": " "}},
+            {
+                "kind": "Lean.Parser.Command.declId",
+                "args": [{"val": "test_theorem", "info": {"leading": "", "trailing": " "}}],
+            },
+            {"val": ":", "info": {"leading": " ", "trailing": " "}},
+            {"val": "Prop", "info": {"leading": "", "trailing": " "}},
+            {"val": ":=", "info": {"leading": " ", "trailing": " "}},
+            {
+                "kind": "Lean.Parser.Term.byTactic",
+                "args": [
+                    {"val": "by", "info": {"leading": "", "trailing": "\n  "}},
+                    {
+                        "kind": "Lean.Parser.Tactic.tacticSeq",
+                        "args": [
+                            # Set statement with explicit type
+                            {
+                                "kind": "Lean.Parser.Tactic.tacticSet_",
+                                "args": [
+                                    {"val": "set", "info": {"leading": "", "trailing": " "}},
+                                    {
+                                        "kind": "Lean.Parser.Term.setDecl",
+                                        "args": [
+                                            {
+                                                "kind": "Lean.Parser.Term.setIdDecl",
+                                                "args": [
+                                                    {
+                                                        "kind": "Lean.binderIdent",
+                                                        "args": [
+                                                            {"val": "oddProd", "info": {"leading": "", "trailing": ""}}
+                                                        ],
+                                                    },
+                                                ],
+                                            },
+                                            {"val": ":", "info": {"leading": " ", "trailing": " "}},
+                                            {"val": "ℕ", "info": {"leading": "", "trailing": " "}},  # noqa: RUF001
+                                            {"val": ":=", "info": {"leading": " ", "trailing": " "}},
+                                            {"val": "Finset.prod", "info": {"leading": " ", "trailing": " "}},
+                                            {"val": "(Finset.range 5000)", "info": {"leading": " ", "trailing": " "}},
+                                        ],
+                                    },
+                                ],
+                            },
+                            # Have statement using the set binding
+                            {
+                                "kind": "Lean.Parser.Tactic.tacticHave_",
+                                "args": [
+                                    {"val": "have", "info": {"leading": "\n  ", "trailing": " "}},
+                                    {
+                                        "kind": "Lean.Parser.Term.haveDecl",
+                                        "args": [
+                                            {
+                                                "kind": "Lean.Parser.Term.haveIdDecl",
+                                                "args": [
+                                                    {
+                                                        "kind": "Lean.Parser.Term.haveId",
+                                                        "args": [
+                                                            {"val": "h1", "info": {"leading": "", "trailing": " "}}
+                                                        ],
+                                                    }
+                                                ],
+                                            },
+                                            {"val": ":", "info": {"leading": "", "trailing": " "}},
+                                            {"val": "oddProd", "info": {"leading": "", "trailing": " "}},
+                                            {"val": ">", "info": {"leading": " ", "trailing": " "}},
+                                            {"val": "0", "info": {"leading": "", "trailing": " "}},
+                                        ],
+                                    },
+                                    {"val": ":=", "info": {"leading": " ", "trailing": " "}},
+                                    {
+                                        "kind": "Lean.Parser.Term.byTactic",
+                                        "args": [
+                                            {"val": "by", "info": {"leading": "", "trailing": " "}},
+                                            {
+                                                "kind": "Lean.Parser.Tactic.tacticSeq",
+                                                "args": [
+                                                    {
+                                                        "kind": "Lean.Parser.Tactic.tacticSorry",
+                                                        "args": [
+                                                            {"val": "sorry", "info": {"leading": "", "trailing": ""}}
+                                                        ],
+                                                    }
+                                                ],
+                                            },
+                                        ],
+                                    },
+                                ],
+                            },
+                        ],
+                    },
+                ],
+            },
+        ],
+    }
+
+    sorries = [
+        {
+            "pos": {"line": 2, "column": 4},
+            "endPos": {"line": 2, "column": 9},
+            "goal": "oddProd : ℕ\n⊢ oddProd > 0",  # noqa: RUF001
+            "proofState": 1,
+        }
+    ]
+
+    ast = AST(ast_dict, sorries)
+    result = ast.get_named_subgoal_code("h1")
+
+    # The result should include the set binding oddProd with its type
+    assert "lemma" in result
+    assert "h1" in result
+    assert "oddProd" in result
+    assert "ℕ" in result  # noqa: RUF001
+
+
+def test_ast_get_named_subgoal_code_includes_suffices_binding() -> None:
+    """Test that get_named_subgoal_code includes earlier suffices statements."""
+    # Create a theorem with a suffices statement and a have statement
+    ast_dict = {
+        "kind": "Lean.Parser.Command.theorem",
+        "args": [
+            {"val": "theorem", "info": {"leading": "", "trailing": " "}},
+            {
+                "kind": "Lean.Parser.Command.declId",
+                "args": [{"val": "test_theorem", "info": {"leading": "", "trailing": " "}}],
+            },
+            {
+                "kind": "Lean.Parser.Term.bracketedBinderList",
+                "args": [
+                    {
+                        "kind": "Lean.Parser.Term.explicitBinder",
+                        "args": [
+                            {"val": "(", "info": {"leading": " ", "trailing": ""}},
+                            {
+                                "kind": "Lean.binderIdent",
+                                "args": [{"val": "n", "info": {"leading": "", "trailing": ""}}],
+                            },
+                            {"val": ":", "info": {"leading": " ", "trailing": " "}},
+                            {"val": "ℕ", "info": {"leading": "", "trailing": " "}},  # noqa: RUF001
+                            {"val": ")", "info": {"leading": "", "trailing": " "}},
+                        ],
+                    },
+                ],
+            },
+            {"val": ":", "info": {"leading": " ", "trailing": " "}},
+            {"val": "Prop", "info": {"leading": "", "trailing": " "}},
+            {"val": ":=", "info": {"leading": " ", "trailing": " "}},
+            {
+                "kind": "Lean.Parser.Term.byTactic",
+                "args": [
+                    {"val": "by", "info": {"leading": "", "trailing": "\n  "}},
+                    {
+                        "kind": "Lean.Parser.Tactic.tacticSeq",
+                        "args": [
+                            # Suffices statement
+                            {
+                                "kind": "Lean.Parser.Tactic.tacticSuffices_",
+                                "args": [
+                                    {"val": "suffices", "info": {"leading": "", "trailing": " "}},
+                                    {
+                                        "kind": "Lean.Parser.Term.haveDecl",
+                                        "args": [
+                                            {
+                                                "kind": "Lean.Parser.Term.haveIdDecl",
+                                                "args": [
+                                                    {
+                                                        "kind": "Lean.Parser.Term.haveId",
+                                                        "args": [
+                                                            {"val": "h_suff", "info": {"leading": "", "trailing": " "}}
+                                                        ],
+                                                    }
+                                                ],
+                                            },
+                                            {"val": ":", "info": {"leading": "", "trailing": " "}},
+                                            {"val": "n", "info": {"leading": "", "trailing": " "}},
+                                            {"val": ">", "info": {"leading": " ", "trailing": " "}},
+                                            {"val": "0", "info": {"leading": "", "trailing": " "}},
+                                            {"val": "from", "info": {"leading": " ", "trailing": " "}},
+                                            {"val": "Nat.pos_of_ne_zero", "info": {"leading": " ", "trailing": " "}},
+                                        ],
+                                    },
+                                ],
+                            },
+                            # Have statement using the suffices binding
+                            {
+                                "kind": "Lean.Parser.Tactic.tacticHave_",
+                                "args": [
+                                    {"val": "have", "info": {"leading": "\n  ", "trailing": " "}},
+                                    {
+                                        "kind": "Lean.Parser.Term.haveDecl",
+                                        "args": [
+                                            {
+                                                "kind": "Lean.Parser.Term.haveIdDecl",
+                                                "args": [
+                                                    {
+                                                        "kind": "Lean.Parser.Term.haveId",
+                                                        "args": [
+                                                            {"val": "h1", "info": {"leading": "", "trailing": " "}}
+                                                        ],
+                                                    }
+                                                ],
+                                            },
+                                            {"val": ":", "info": {"leading": "", "trailing": " "}},
+                                            {"val": "n", "info": {"leading": "", "trailing": " "}},
+                                            {"val": "+", "info": {"leading": " ", "trailing": " "}},
+                                            {"val": "1", "info": {"leading": "", "trailing": " "}},
+                                            {"val": ">", "info": {"leading": " ", "trailing": " "}},
+                                            {"val": "0", "info": {"leading": "", "trailing": " "}},
+                                        ],
+                                    },
+                                    {"val": ":=", "info": {"leading": " ", "trailing": " "}},
+                                    {
+                                        "kind": "Lean.Parser.Term.byTactic",
+                                        "args": [
+                                            {"val": "by", "info": {"leading": "", "trailing": " "}},
+                                            {
+                                                "kind": "Lean.Parser.Tactic.tacticSeq",
+                                                "args": [
+                                                    {
+                                                        "kind": "Lean.Parser.Tactic.tacticSorry",
+                                                        "args": [
+                                                            {"val": "sorry", "info": {"leading": "", "trailing": ""}}
+                                                        ],
+                                                    }
+                                                ],
+                                            },
+                                        ],
+                                    },
+                                ],
+                            },
+                        ],
+                    },
+                ],
+            },
+        ],
+    }
+
+    sorries = [
+        {
+            "pos": {"line": 3, "column": 4},
+            "endPos": {"line": 3, "column": 9},
+            "goal": "n : ℕ\nh_suff : n > 0\n⊢ n + 1 > 0",  # noqa: RUF001
+            "proofState": 1,
+        }
+    ]
+
+    ast = AST(ast_dict, sorries)
+    result = ast.get_named_subgoal_code("h1")
+
+    # The result should include the theorem parameter n
+    assert "lemma" in result
+    assert "h1" in result
+    assert "n" in result
+    # Should include the suffices binding h_suff as a hypothesis
+    assert "h_suff" in result
+
+
+def test_ast_get_named_subgoal_code_includes_suffices_binding_with_by() -> None:
+    """Test that get_named_subgoal_code includes suffices statements with 'by' syntax."""
+    # Create a theorem with a suffices statement using 'by'
+    ast_dict = {
+        "kind": "Lean.Parser.Command.theorem",
+        "args": [
+            {"val": "theorem", "info": {"leading": "", "trailing": " "}},
+            {
+                "kind": "Lean.Parser.Command.declId",
+                "args": [{"val": "test_theorem", "info": {"leading": "", "trailing": " "}}],
+            },
+            {"val": ":", "info": {"leading": " ", "trailing": " "}},
+            {"val": "Prop", "info": {"leading": "", "trailing": " "}},
+            {"val": ":=", "info": {"leading": " ", "trailing": " "}},
+            {
+                "kind": "Lean.Parser.Term.byTactic",
+                "args": [
+                    {"val": "by", "info": {"leading": "", "trailing": "\n  "}},
+                    {
+                        "kind": "Lean.Parser.Tactic.tacticSeq",
+                        "args": [
+                            # Suffices statement with 'by'
+                            {
+                                "kind": "Lean.Parser.Tactic.tacticSuffices_",
+                                "args": [
+                                    {"val": "suffices", "info": {"leading": "", "trailing": " "}},
+                                    {
+                                        "kind": "Lean.Parser.Term.haveDecl",
+                                        "args": [
+                                            {
+                                                "kind": "Lean.Parser.Term.haveIdDecl",
+                                                "args": [
+                                                    {
+                                                        "kind": "Lean.Parser.Term.haveId",
+                                                        "args": [
+                                                            {"val": "h_base", "info": {"leading": "", "trailing": " "}}
+                                                        ],
+                                                    }
+                                                ],
+                                            },
+                                            {"val": ":", "info": {"leading": "", "trailing": " "}},
+                                            {"val": "4", "info": {"leading": "", "trailing": " "}},
+                                            {"val": "^", "info": {"leading": " ", "trailing": " "}},
+                                            {"val": "2", "info": {"leading": "", "trailing": " "}},
+                                            {"val": "≤", "info": {"leading": " ", "trailing": " "}},
+                                            {"val": "4", "info": {"leading": "", "trailing": " "}},
+                                            {"val": "!", "info": {"leading": "", "trailing": " "}},
+                                            {"val": "by", "info": {"leading": " ", "trailing": " "}},
+                                            {
+                                                "kind": "Lean.Parser.Tactic.tacticSeq",
+                                                "args": [
+                                                    {
+                                                        "kind": "Lean.Parser.Tactic.tacticSorry",
+                                                        "args": [
+                                                            {"val": "sorry", "info": {"leading": "", "trailing": ""}}
+                                                        ],
+                                                    }
+                                                ],
+                                            },
+                                        ],
+                                    },
+                                ],
+                            },
+                            # Have statement using the suffices binding
+                            {
+                                "kind": "Lean.Parser.Tactic.tacticHave_",
+                                "args": [
+                                    {"val": "have", "info": {"leading": "\n  ", "trailing": " "}},
+                                    {
+                                        "kind": "Lean.Parser.Term.haveDecl",
+                                        "args": [
+                                            {
+                                                "kind": "Lean.Parser.Term.haveIdDecl",
+                                                "args": [
+                                                    {
+                                                        "kind": "Lean.Parser.Term.haveId",
+                                                        "args": [
+                                                            {"val": "h1", "info": {"leading": "", "trailing": " "}}
+                                                        ],
+                                                    }
+                                                ],
+                                            },
+                                            {"val": ":", "info": {"leading": "", "trailing": " "}},
+                                            {"val": "∀", "info": {"leading": "", "trailing": " "}},
+                                            {"val": "k", "info": {"leading": " ", "trailing": " "}},
+                                            {"val": "≥", "info": {"leading": " ", "trailing": " "}},
+                                            {"val": "4", "info": {"leading": "", "trailing": " "}},
+                                            {"val": ",", "info": {"leading": "", "trailing": " "}},
+                                            {"val": "k", "info": {"leading": " ", "trailing": " "}},
+                                            {"val": "^", "info": {"leading": " ", "trailing": " "}},
+                                            {"val": "2", "info": {"leading": "", "trailing": " "}},
+                                            {"val": "≤", "info": {"leading": " ", "trailing": " "}},
+                                            {"val": "k", "info": {"leading": "", "trailing": " "}},
+                                            {"val": "!", "info": {"leading": "", "trailing": " "}},
+                                            {"val": "→", "info": {"leading": " ", "trailing": " "}},
+                                            {"val": "(k + 1)", "info": {"leading": " ", "trailing": " "}},
+                                            {"val": "^", "info": {"leading": " ", "trailing": " "}},
+                                            {"val": "2", "info": {"leading": "", "trailing": " "}},
+                                            {"val": "≤", "info": {"leading": " ", "trailing": " "}},
+                                            {"val": "(k + 1)", "info": {"leading": "", "trailing": " "}},
+                                            {"val": "!", "info": {"leading": "", "trailing": " "}},
+                                        ],
+                                    },
+                                    {"val": ":=", "info": {"leading": " ", "trailing": " "}},
+                                    {
+                                        "kind": "Lean.Parser.Term.byTactic",
+                                        "args": [
+                                            {"val": "by", "info": {"leading": "", "trailing": " "}},
+                                            {
+                                                "kind": "Lean.Parser.Tactic.tacticSeq",
+                                                "args": [
+                                                    {
+                                                        "kind": "Lean.Parser.Tactic.tacticSorry",
+                                                        "args": [
+                                                            {"val": "sorry", "info": {"leading": "", "trailing": ""}}
+                                                        ],
+                                                    }
+                                                ],
+                                            },
+                                        ],
+                                    },
+                                ],
+                            },
+                        ],
+                    },
+                ],
+            },
+        ],
+    }
+
+    sorries = [
+        {
+            "pos": {"line": 2, "column": 4},
+            "endPos": {"line": 2, "column": 9},
+            "goal": "h_base : 4 ^ 2 ≤ 4 !\n⊢ ∀ k ≥ 4, k ^ 2 ≤ k ! → (k + 1) ^ 2 ≤ (k + 1) !",
+            "proofState": 1,
+        }
+    ]
+
+    ast = AST(ast_dict, sorries)
+    result = ast.get_named_subgoal_code("h1")
+
+    # The result should include the suffices binding h_base
+    assert "lemma" in result
+    assert "h1" in result
+    assert "h_base" in result
+
+
+def test_ast_get_named_subgoal_code_mixed_set_suffices() -> None:
+    """Test get_named_subgoal_code with mixed set and suffices statements."""
+    # Create a theorem with set, suffices, and have statements
+    ast_dict = {
+        "kind": "Lean.Parser.Command.theorem",
+        "args": [
+            {"val": "theorem", "info": {"leading": "", "trailing": " "}},
+            {
+                "kind": "Lean.Parser.Command.declId",
+                "args": [{"val": "mixed_test", "info": {"leading": "", "trailing": " "}}],
+            },
+            {
+                "kind": "Lean.Parser.Term.bracketedBinderList",
+                "args": [
+                    {
+                        "kind": "Lean.Parser.Term.explicitBinder",
+                        "args": [
+                            {"val": "(", "info": {"leading": " ", "trailing": ""}},
+                            {
+                                "kind": "Lean.binderIdent",
+                                "args": [{"val": "n", "info": {"leading": "", "trailing": ""}}],
+                            },
+                            {"val": ":", "info": {"leading": " ", "trailing": " "}},
+                            {"val": "ℕ", "info": {"leading": "", "trailing": " "}},  # noqa: RUF001
+                            {"val": ")", "info": {"leading": "", "trailing": " "}},
+                        ],
+                    },
+                ],
+            },
+            {"val": ":", "info": {"leading": " ", "trailing": " "}},
+            {"val": "Prop", "info": {"leading": "", "trailing": " "}},
+            {"val": ":=", "info": {"leading": " ", "trailing": " "}},
+            {
+                "kind": "Lean.Parser.Term.byTactic",
+                "args": [
+                    {"val": "by", "info": {"leading": "", "trailing": "\n  "}},
+                    {
+                        "kind": "Lean.Parser.Tactic.tacticSeq",
+                        "args": [
+                            # Set statement
+                            {
+                                "kind": "Lean.Parser.Tactic.tacticSet_",
+                                "args": [
+                                    {"val": "set", "info": {"leading": "", "trailing": " "}},
+                                    {
+                                        "kind": "Lean.Parser.Term.setDecl",
+                                        "args": [
+                                            {
+                                                "kind": "Lean.Parser.Term.setIdDecl",
+                                                "args": [
+                                                    {
+                                                        "kind": "Lean.binderIdent",
+                                                        "args": [
+                                                            {"val": "odds", "info": {"leading": "", "trailing": ""}}
+                                                        ],
+                                                    },
+                                                ],
+                                            },
+                                            {"val": ":=", "info": {"leading": " ", "trailing": " "}},
+                                            {"val": "Finset.filter", "info": {"leading": " ", "trailing": " "}},
+                                        ],
+                                    },
+                                ],
+                            },
+                            # Suffices statement
+                            {
+                                "kind": "Lean.Parser.Tactic.tacticSuffices_",
+                                "args": [
+                                    {"val": "suffices", "info": {"leading": "\n  ", "trailing": " "}},
+                                    {
+                                        "kind": "Lean.Parser.Term.haveDecl",
+                                        "args": [
+                                            {
+                                                "kind": "Lean.Parser.Term.haveIdDecl",
+                                                "args": [
+                                                    {
+                                                        "kind": "Lean.Parser.Term.haveId",
+                                                        "args": [
+                                                            {"val": "h_suff", "info": {"leading": "", "trailing": " "}}
+                                                        ],
+                                                    }
+                                                ],
+                                            },
+                                            {"val": ":", "info": {"leading": "", "trailing": " "}},
+                                            {"val": "Finset.prod", "info": {"leading": "", "trailing": " "}},
+                                            {"val": "odds", "info": {"leading": " ", "trailing": " "}},
+                                            {"val": "(id : ℕ → ℕ)", "info": {"leading": " ", "trailing": " "}},  # noqa: RUF001
+                                            {"val": "=", "info": {"leading": " ", "trailing": " "}},
+                                            {"val": "oddProd", "info": {"leading": "", "trailing": " "}},
+                                            {"val": "from", "info": {"leading": " ", "trailing": " "}},
+                                            {"val": "sorry", "info": {"leading": " ", "trailing": " "}},
+                                        ],
+                                    },
+                                ],
+                            },
+                            # Final have using both earlier bindings
+                            {
+                                "kind": "Lean.Parser.Tactic.tacticHave_",
+                                "args": [
+                                    {"val": "have", "info": {"leading": "\n  ", "trailing": " "}},
+                                    {
+                                        "kind": "Lean.Parser.Term.haveDecl",
+                                        "args": [
+                                            {
+                                                "kind": "Lean.Parser.Term.haveIdDecl",
+                                                "args": [
+                                                    {
+                                                        "kind": "Lean.Parser.Term.haveId",
+                                                        "args": [
+                                                            {"val": "h1", "info": {"leading": "", "trailing": " "}}
+                                                        ],
+                                                    }
+                                                ],
+                                            },
+                                            {"val": ":", "info": {"leading": "", "trailing": " "}},
+                                            {"val": "10000!", "info": {"leading": "", "trailing": " "}},
+                                            {"val": "=", "info": {"leading": " ", "trailing": " "}},
+                                            {"val": "oddProd", "info": {"leading": " ", "trailing": " "}},
+                                            {"val": "*", "info": {"leading": " ", "trailing": " "}},
+                                            {"val": "evenProd", "info": {"leading": "", "trailing": " "}},
+                                        ],
+                                    },
+                                    {"val": ":=", "info": {"leading": " ", "trailing": " "}},
+                                    {
+                                        "kind": "Lean.Parser.Term.byTactic",
+                                        "args": [
+                                            {"val": "by", "info": {"leading": "", "trailing": " "}},
+                                            {
+                                                "kind": "Lean.Parser.Tactic.tacticSeq",
+                                                "args": [
+                                                    {
+                                                        "kind": "Lean.Parser.Tactic.tacticSorry",
+                                                        "args": [
+                                                            {"val": "sorry", "info": {"leading": "", "trailing": ""}}
+                                                        ],
+                                                    }
+                                                ],
+                                            },
+                                        ],
+                                    },
+                                ],
+                            },
+                        ],
+                    },
+                ],
+            },
+        ],
+    }
+
+    sorries = [
+        {
+            "pos": {"line": 4, "column": 4},
+            "endPos": {"line": 4, "column": 9},
+            "goal": "n : ℕ\nodds : Finset ℕ\nh_suff : Finset.prod odds (id : ℕ → ℕ) = oddProd\n⊢ 10000! = oddProd * evenProd",  # noqa: RUF001
+            "proofState": 1,
+        }
+    ]
+
+    ast = AST(ast_dict, sorries)
+    result = ast.get_named_subgoal_code("h1")
+
+    # The result should include all earlier bindings
+    assert "lemma" in result
+    assert "h1" in result
+    # Should include theorem parameter n
+    assert "n" in result
+    # Should include set binding odds
+    assert "odds" in result
+    # Should include suffices binding h_suff
+    assert "h_suff" in result
