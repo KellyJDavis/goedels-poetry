@@ -1793,3 +1793,435 @@ def test_ast_get_named_subgoal_code_mixed_set_suffices() -> None:
     assert "odds" in result
     # Should include suffices binding h_suff
     assert "h_suff" in result
+
+
+def test_ast_get_named_subgoal_code_includes_choose_binding() -> None:
+    """Test that get_named_subgoal_code includes variables from choose statements."""
+    # Create a theorem with a choose statement and a have statement
+    ast_dict = {
+        "kind": "Lean.Parser.Command.theorem",
+        "args": [
+            {"val": "theorem", "info": {"leading": "", "trailing": " "}},
+            {
+                "kind": "Lean.Parser.Command.declId",
+                "args": [{"val": "test_theorem", "info": {"leading": "", "trailing": " "}}],
+            },
+            {
+                "kind": "Lean.Parser.Term.bracketedBinderList",
+                "args": [
+                    {
+                        "kind": "Lean.Parser.Term.explicitBinder",
+                        "args": [
+                            {"val": "(", "info": {"leading": " ", "trailing": ""}},
+                            {
+                                "kind": "Lean.binderIdent",
+                                "args": [{"val": "h", "info": {"leading": "", "trailing": ""}}],
+                            },
+                            {"val": ":", "info": {"leading": " ", "trailing": " "}},
+                            {"val": "∀", "info": {"leading": "", "trailing": " "}},
+                            {"val": "y", "info": {"leading": "", "trailing": " "}},
+                            {"val": ",", "info": {"leading": "", "trailing": " "}},
+                            {"val": "∃", "info": {"leading": "", "trailing": " "}},
+                            {"val": "z", "info": {"leading": "", "trailing": " "}},
+                            {"val": ",", "info": {"leading": "", "trailing": " "}},
+                            {"val": "P", "info": {"leading": "", "trailing": " "}},
+                            {"val": "y", "info": {"leading": "", "trailing": " "}},
+                            {"val": "z", "info": {"leading": "", "trailing": " "}},
+                            {"val": ")", "info": {"leading": "", "trailing": " "}},
+                        ],
+                    },
+                ],
+            },
+            {"val": ":", "info": {"leading": " ", "trailing": " "}},
+            {"val": "Q", "info": {"leading": "", "trailing": " "}},
+            {"val": ":=", "info": {"leading": " ", "trailing": " "}},
+            {
+                "kind": "Lean.Parser.Term.byTactic",
+                "args": [
+                    {"val": "by", "info": {"leading": "", "trailing": "\n  "}},
+                    {
+                        "kind": "Lean.Parser.Tactic.tacticSeq",
+                        "args": [
+                            # Choose statement
+                            {
+                                "kind": "Lean.Parser.Tactic.tacticChoose_",
+                                "args": [
+                                    {"val": "choose", "info": {"leading": "", "trailing": " "}},
+                                    {
+                                        "kind": "Lean.binderIdent",
+                                        "args": [{"val": "x", "info": {"leading": "", "trailing": ""}}],
+                                    },
+                                    {
+                                        "kind": "Lean.binderIdent",
+                                        "args": [{"val": "hx", "info": {"leading": "", "trailing": ""}}],
+                                    },
+                                    {"val": "using", "info": {"leading": " ", "trailing": " "}},
+                                    {"val": "h", "info": {"leading": "", "trailing": " "}},
+                                ],
+                            },
+                            # Have statement using chosen variables
+                            {
+                                "kind": "Lean.Parser.Tactic.tacticHave_",
+                                "args": [
+                                    {"val": "have", "info": {"leading": "\n  ", "trailing": " "}},
+                                    {
+                                        "kind": "Lean.Parser.Term.haveDecl",
+                                        "args": [
+                                            {
+                                                "kind": "Lean.Parser.Term.haveIdDecl",
+                                                "args": [
+                                                    {
+                                                        "kind": "Lean.Parser.Term.haveId",
+                                                        "args": [
+                                                            {"val": "h2", "info": {"leading": "", "trailing": " "}}
+                                                        ],
+                                                    }
+                                                ],
+                                            },
+                                            {"val": ":", "info": {"leading": "", "trailing": " "}},
+                                            {"val": "Q", "info": {"leading": "", "trailing": " "}},
+                                        ],
+                                    },
+                                    {"val": ":=", "info": {"leading": " ", "trailing": " "}},
+                                    {
+                                        "kind": "Lean.Parser.Term.byTactic",
+                                        "args": [
+                                            {"val": "by", "info": {"leading": "", "trailing": " "}},
+                                            {
+                                                "kind": "Lean.Parser.Tactic.tacticSeq",
+                                                "args": [
+                                                    {
+                                                        "kind": "Lean.Parser.Tactic.tacticSorry",
+                                                        "args": [
+                                                            {"val": "sorry", "info": {"leading": "", "trailing": ""}}
+                                                        ],
+                                                    }
+                                                ],
+                                            },
+                                        ],
+                                    },
+                                ],
+                            },
+                        ],
+                    },
+                ],
+            },
+        ],
+    }
+
+    sorries = [
+        {
+            "pos": {"line": 3, "column": 4},
+            "endPos": {"line": 3, "column": 9},
+            "goal": "h : ∀ y, ∃ z, P y z\nx : T → U\nhx : ∀ y, P y (x y)\n⊢ Q",
+            "proofState": 1,
+        }
+    ]
+
+    ast = AST(ast_dict, sorries)
+    result = ast.get_named_subgoal_code("h2")
+
+    # The result should include the theorem hypothesis h
+    assert "lemma" in result
+    assert "h2" in result
+    # Should include chosen variables x and hx as hypotheses
+    assert "x" in result
+    assert "hx" in result
+
+
+def test_ast_get_named_subgoal_code_includes_choose_binding_multiple() -> None:
+    """Test that get_named_subgoal_code includes multiple variables from choose statements."""
+    # Create a theorem with a choose statement introducing multiple variables
+    ast_dict = {
+        "kind": "Lean.Parser.Command.theorem",
+        "args": [
+            {"val": "theorem", "info": {"leading": "", "trailing": " "}},
+            {
+                "kind": "Lean.Parser.Command.declId",
+                "args": [{"val": "test_theorem", "info": {"leading": "", "trailing": " "}}],
+            },
+            {
+                "kind": "Lean.Parser.Term.bracketedBinderList",
+                "args": [
+                    {
+                        "kind": "Lean.Parser.Term.explicitBinder",
+                        "args": [
+                            {"val": "(", "info": {"leading": " ", "trailing": ""}},
+                            {
+                                "kind": "Lean.binderIdent",
+                                "args": [{"val": "h", "info": {"leading": "", "trailing": ""}}],
+                            },
+                            {"val": ":", "info": {"leading": " ", "trailing": " "}},
+                            {"val": "∀", "info": {"leading": "", "trailing": " "}},
+                            {"val": "y", "info": {"leading": "", "trailing": " "}},
+                            {"val": ",", "info": {"leading": "", "trailing": " "}},
+                            {"val": "∃", "info": {"leading": "", "trailing": " "}},
+                            {"val": "z", "info": {"leading": "", "trailing": " "}},
+                            {"val": ",", "info": {"leading": "", "trailing": " "}},
+                            {"val": "P", "info": {"leading": "", "trailing": " "}},
+                            {"val": "y", "info": {"leading": "", "trailing": " "}},
+                            {"val": "z", "info": {"leading": "", "trailing": " "}},
+                            {"val": ")", "info": {"leading": "", "trailing": " "}},
+                        ],
+                    },
+                ],
+            },
+            {"val": ":", "info": {"leading": " ", "trailing": " "}},
+            {"val": "Prop", "info": {"leading": "", "trailing": " "}},
+            {"val": ":=", "info": {"leading": " ", "trailing": " "}},
+            {
+                "kind": "Lean.Parser.Term.byTactic",
+                "args": [
+                    {"val": "by", "info": {"leading": "", "trailing": "\n  "}},
+                    {
+                        "kind": "Lean.Parser.Tactic.tacticSeq",
+                        "args": [
+                            # Choose statement with multiple variables
+                            {
+                                "kind": "Lean.Parser.Tactic.tacticChoose_",
+                                "args": [
+                                    {"val": "choose", "info": {"leading": "", "trailing": " "}},
+                                    {
+                                        "kind": "Lean.binderIdent",
+                                        "args": [{"val": "f", "info": {"leading": "", "trailing": ""}}],
+                                    },
+                                    {
+                                        "kind": "Lean.binderIdent",
+                                        "args": [{"val": "hf", "info": {"leading": "", "trailing": ""}}],
+                                    },
+                                    {
+                                        "kind": "Lean.binderIdent",
+                                        "args": [{"val": "g", "info": {"leading": "", "trailing": ""}}],
+                                    },
+                                    {"val": "using", "info": {"leading": " ", "trailing": " "}},
+                                    {"val": "h", "info": {"leading": "", "trailing": " "}},
+                                ],
+                            },
+                            # Have statement using chosen variables
+                            {
+                                "kind": "Lean.Parser.Tactic.tacticHave_",
+                                "args": [
+                                    {"val": "have", "info": {"leading": "\n  ", "trailing": " "}},
+                                    {
+                                        "kind": "Lean.Parser.Term.haveDecl",
+                                        "args": [
+                                            {
+                                                "kind": "Lean.Parser.Term.haveIdDecl",
+                                                "args": [
+                                                    {
+                                                        "kind": "Lean.Parser.Term.haveId",
+                                                        "args": [
+                                                            {"val": "h1", "info": {"leading": "", "trailing": " "}}
+                                                        ],
+                                                    }
+                                                ],
+                                            },
+                                            {"val": ":", "info": {"leading": "", "trailing": " "}},
+                                            {"val": "f", "info": {"leading": "", "trailing": " "}},
+                                            {"val": "=", "info": {"leading": " ", "trailing": " "}},
+                                            {"val": "g", "info": {"leading": "", "trailing": " "}},
+                                        ],
+                                    },
+                                    {"val": ":=", "info": {"leading": " ", "trailing": " "}},
+                                    {
+                                        "kind": "Lean.Parser.Term.byTactic",
+                                        "args": [
+                                            {"val": "by", "info": {"leading": "", "trailing": " "}},
+                                            {
+                                                "kind": "Lean.Parser.Tactic.tacticSeq",
+                                                "args": [
+                                                    {
+                                                        "kind": "Lean.Parser.Tactic.tacticSorry",
+                                                        "args": [
+                                                            {"val": "sorry", "info": {"leading": "", "trailing": ""}}
+                                                        ],
+                                                    }
+                                                ],
+                                            },
+                                        ],
+                                    },
+                                ],
+                            },
+                        ],
+                    },
+                ],
+            },
+        ],
+    }
+
+    sorries = [
+        {
+            "pos": {"line": 2, "column": 4},
+            "endPos": {"line": 2, "column": 9},
+            "goal": "h : ∀ y, ∃ z, P y z\nf : T → U\ng : T → U\nhf : ∀ y, P y (f y)\n⊢ f = g",
+            "proofState": 1,
+        }
+    ]
+
+    ast = AST(ast_dict, sorries)
+    result = ast.get_named_subgoal_code("h1")
+
+    # The result should include all chosen variables
+    assert "lemma" in result
+    assert "h1" in result
+    assert "f" in result
+    assert "g" in result
+    assert "hf" in result
+
+
+def test_ast_get_named_subgoal_code_mixed_choose_other_bindings() -> None:
+    """Test get_named_subgoal_code with mixed choose and other binding types."""
+    # Create a theorem with choose, set, and have statements
+    ast_dict = {
+        "kind": "Lean.Parser.Command.theorem",
+        "args": [
+            {"val": "theorem", "info": {"leading": "", "trailing": " "}},
+            {
+                "kind": "Lean.Parser.Command.declId",
+                "args": [{"val": "mixed_test", "info": {"leading": "", "trailing": " "}}],
+            },
+            {
+                "kind": "Lean.Parser.Term.bracketedBinderList",
+                "args": [
+                    {
+                        "kind": "Lean.Parser.Term.explicitBinder",
+                        "args": [
+                            {"val": "(", "info": {"leading": " ", "trailing": ""}},
+                            {
+                                "kind": "Lean.binderIdent",
+                                "args": [{"val": "n", "info": {"leading": "", "trailing": ""}}],
+                            },
+                            {"val": ":", "info": {"leading": " ", "trailing": " "}},
+                            {"val": "ℕ", "info": {"leading": "", "trailing": " "}},  # noqa: RUF001
+                            {"val": ")", "info": {"leading": "", "trailing": " "}},
+                        ],
+                    },
+                ],
+            },
+            {"val": ":", "info": {"leading": " ", "trailing": " "}},
+            {"val": "Prop", "info": {"leading": "", "trailing": " "}},
+            {"val": ":=", "info": {"leading": " ", "trailing": " "}},
+            {
+                "kind": "Lean.Parser.Term.byTactic",
+                "args": [
+                    {"val": "by", "info": {"leading": "", "trailing": "\n  "}},
+                    {
+                        "kind": "Lean.Parser.Tactic.tacticSeq",
+                        "args": [
+                            # Set statement
+                            {
+                                "kind": "Lean.Parser.Tactic.tacticSet_",
+                                "args": [
+                                    {"val": "set", "info": {"leading": "", "trailing": " "}},
+                                    {
+                                        "kind": "Lean.Parser.Term.setDecl",
+                                        "args": [
+                                            {
+                                                "kind": "Lean.Parser.Term.setIdDecl",
+                                                "args": [
+                                                    {
+                                                        "kind": "Lean.binderIdent",
+                                                        "args": [{"val": "S", "info": {"leading": "", "trailing": ""}}],
+                                                    },
+                                                ],
+                                            },
+                                            {"val": ":=", "info": {"leading": " ", "trailing": " "}},
+                                            {"val": "Finset.range", "info": {"leading": " ", "trailing": " "}},
+                                            {"val": "n", "info": {"leading": "", "trailing": " "}},
+                                        ],
+                                    },
+                                ],
+                            },
+                            # Choose statement
+                            {
+                                "kind": "Lean.Parser.Tactic.tacticChoose_",
+                                "args": [
+                                    {"val": "choose", "info": {"leading": "\n  ", "trailing": " "}},
+                                    {
+                                        "kind": "Lean.binderIdent",
+                                        "args": [{"val": "f", "info": {"leading": "", "trailing": ""}}],
+                                    },
+                                    {
+                                        "kind": "Lean.binderIdent",
+                                        "args": [{"val": "hf", "info": {"leading": "", "trailing": ""}}],
+                                    },
+                                    {"val": "using", "info": {"leading": " ", "trailing": " "}},
+                                    {"val": "some_hypothesis", "info": {"leading": " ", "trailing": " "}},
+                                ],
+                            },
+                            # Final have using both earlier bindings
+                            {
+                                "kind": "Lean.Parser.Tactic.tacticHave_",
+                                "args": [
+                                    {"val": "have", "info": {"leading": "\n  ", "trailing": " "}},
+                                    {
+                                        "kind": "Lean.Parser.Term.haveDecl",
+                                        "args": [
+                                            {
+                                                "kind": "Lean.Parser.Term.haveIdDecl",
+                                                "args": [
+                                                    {
+                                                        "kind": "Lean.Parser.Term.haveId",
+                                                        "args": [
+                                                            {"val": "h1", "info": {"leading": "", "trailing": " "}}
+                                                        ],
+                                                    }
+                                                ],
+                                            },
+                                            {"val": ":", "info": {"leading": "", "trailing": " "}},
+                                            {"val": "Finset.prod", "info": {"leading": "", "trailing": " "}},
+                                            {"val": "S", "info": {"leading": " ", "trailing": " "}},
+                                            {"val": "f", "info": {"leading": " ", "trailing": " "}},
+                                            {"val": "=", "info": {"leading": " ", "trailing": " "}},
+                                            {"val": "0", "info": {"leading": " ", "trailing": " "}},
+                                        ],
+                                    },
+                                    {"val": ":=", "info": {"leading": " ", "trailing": " "}},
+                                    {
+                                        "kind": "Lean.Parser.Term.byTactic",
+                                        "args": [
+                                            {"val": "by", "info": {"leading": "", "trailing": " "}},
+                                            {
+                                                "kind": "Lean.Parser.Tactic.tacticSeq",
+                                                "args": [
+                                                    {
+                                                        "kind": "Lean.Parser.Tactic.tacticSorry",
+                                                        "args": [
+                                                            {"val": "sorry", "info": {"leading": "", "trailing": ""}}
+                                                        ],
+                                                    }
+                                                ],
+                                            },
+                                        ],
+                                    },
+                                ],
+                            },
+                        ],
+                    },
+                ],
+            },
+        ],
+    }
+
+    sorries = [
+        {
+            "pos": {"line": 4, "column": 4},
+            "endPos": {"line": 4, "column": 9},
+            "goal": "n : ℕ\nS : Finset ℕ\nf : ℕ → ℕ\nhf : Prop\n⊢ Finset.prod S f = 0",  # noqa: RUF001
+            "proofState": 1,
+        }
+    ]
+
+    ast = AST(ast_dict, sorries)
+    result = ast.get_named_subgoal_code("h1")
+
+    # The result should include all earlier bindings
+    assert "lemma" in result
+    assert "h1" in result
+    # Should include theorem parameter n
+    assert "n" in result
+    # Should include set binding S
+    assert "S" in result
+    # Should include chosen variables f and hf
+    assert "f" in result
+    assert "hf" in result

@@ -204,6 +204,12 @@ def __collect_named_decls(ast: Node) -> dict[str, dict]:  # noqa: C901
                 suffices_name = __extract_suffices_name(n)
                 if suffices_name:
                     name_map[suffices_name] = n
+            # Collect choose statements (may introduce multiple names)
+            if k == "Lean.Parser.Tactic.tacticChoose_":
+                chosen_names = __extract_choose_names(n)
+                for name in chosen_names:
+                    if name:
+                        name_map[name] = n
             for v in n.values():
                 rec(v)
         elif isinstance(n, list):
@@ -351,6 +357,12 @@ def __extract_type_ast(node: Any) -> Optional[dict]:  # noqa: C901
     # We rely on goal context for obtain types
     if k == "Lean.Parser.Tactic.tacticObtain_":
         # obtain doesn't have explicit type annotations in the syntax
+        # Types must come from goal context
+        return None
+    # choose: types are inferred from the source, not explicitly in the syntax
+    # We rely on goal context for choose types
+    if k == "Lean.Parser.Tactic.tacticChoose_":
+        # choose doesn't have explicit type annotations in the syntax
         # Types must come from goal context
         return None
     # set: extract type from set binding (if explicitly typed)
@@ -655,10 +667,10 @@ def __find_earlier_bindings(  # noqa: C901
     theorem_node: dict, target_name: str, name_map: dict[str, dict]
 ) -> list[tuple[str, str, dict]]:
     """
-    Find all bindings (have, let, obtain, set, suffices, etc.) that appear textually before the target
+    Find all bindings (have, let, obtain, set, suffices, choose, etc.) that appear textually before the target
     within the given theorem. Returns a list of (name, binding_type, node) tuples.
 
-    Binding types: "have", "let", "obtain", "set", "suffices"
+    Binding types: "have", "let", "obtain", "set", "suffices", "choose"
     """
     earlier_bindings: list[tuple[str, str, dict]] = []
     target_found = False
@@ -749,6 +761,22 @@ def __find_earlier_bindings(  # noqa: C901
                 except Exception:  # noqa: S110
                     pass
 
+            # Check if this is a choose statement
+            # choose x hx using h
+            elif kind == "Lean.Parser.Tactic.tacticChoose_":
+                try:
+                    # Extract names from choose pattern
+                    chosen_names = __extract_choose_names(node)
+                    if target_name in chosen_names:
+                        target_found = True
+                        return
+                    else:
+                        # Add all chosen names as separate bindings
+                        for name in chosen_names:
+                            earlier_bindings.append((name, "choose", node))
+                except Exception:  # noqa: S110
+                    pass
+
             # Recurse into children in order (preserves textual order)
             for v in node.values():
                 if target_found:
@@ -811,6 +839,36 @@ def __extract_obtain_names(obtain_node: dict) -> list[str]:
                 collect_names(item)
 
     collect_names(obtain_node)
+    return names
+
+
+def __extract_choose_names(choose_node: dict) -> list[str]:
+    """
+    Extract variable names from a choose statement.
+    choose x hx using h extracts [x, hx]
+    """
+    names: list[str] = []
+
+    # Look for binderIdent nodes within the choose structure
+    # The structure is: choose x hx using h
+    def collect_names(n: Node) -> None:
+        if isinstance(n, dict):
+            # Look for binder identifiers
+            if n.get("kind") in {"Lean.binderIdent", "Lean.Parser.Term.binderIdent"}:
+                val_node = __find_first(n, lambda x: isinstance(x.get("val"), str) and x.get("val") != "")
+                if val_node and val_node["val"]:
+                    name = val_node["val"]
+                    # Avoid collecting keywords or special symbols
+                    if name not in {"choose", "using", ":=", ":", "(", ")", ",", "⟨", "⟩"}:
+                        names.append(name)
+            # Recurse
+            for v in n.values():
+                collect_names(v)
+        elif isinstance(n, list):
+            for item in n:
+                collect_names(item)
+
+    collect_names(choose_node)
     return names
 
 
