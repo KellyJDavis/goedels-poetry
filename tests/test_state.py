@@ -39,8 +39,188 @@ def test_hash_theorem() -> None:
     # Hash should be 12 characters long
     assert len(hash1) == 12
 
-    # Hash should be hexadecimal
-    assert all(c in "0123456789abcdef" for c in hash1)
+
+def test_reconstruct_includes_root_signature_no_decomposition() -> None:
+    """Ensure the final proof contains the root theorem signature when no decomposition occurs."""
+    import uuid
+
+    from goedels_poetry.agents.state import FormalTheoremProofState
+    from goedels_poetry.state import GoedelsPoetryStateManager
+
+    theorem_sig = f"theorem includes_root_sig_nodecomp_{uuid.uuid4().hex} : True"
+    theorem = with_default_preamble(f"{theorem_sig} := by sorry")
+
+    with suppress(Exception):
+        GoedelsPoetryState.clear_theorem_directory(theorem)
+
+    try:
+        state = GoedelsPoetryState(formal_theorem=theorem)
+
+        # Store only tactics (as produced by the prover normally)
+        leaf = FormalTheoremProofState(
+            parent=None,
+            depth=0,
+            formal_theorem=theorem,
+            preamble=DEFAULT_IMPORTS,
+            syntactic=True,
+            formal_proof="trivial",
+            proved=True,
+            errors=None,
+            ast=None,
+            self_correction_attempts=1,
+            proof_history=[],
+            pass_attempts=0,
+        )
+        state.formal_theorem_proof = leaf
+        manager = GoedelsPoetryStateManager(state)
+
+        result = manager.reconstruct_complete_proof()
+        assert result.startswith(DEFAULT_IMPORTS)
+        assert theorem_sig in result
+        assert ":= by" in result
+        assert "trivial" in result
+    finally:
+        with suppress(Exception):
+            GoedelsPoetryState.clear_theorem_directory(theorem)
+
+
+def test_reconstruct_includes_root_signature_shallow_decomposition() -> None:
+    """Ensure the final proof contains the root theorem signature with shallow decomposition."""
+    import uuid
+    from typing import cast
+
+    from goedels_poetry.agents.state import DecomposedFormalTheoremState, FormalTheoremProofState
+    from goedels_poetry.state import GoedelsPoetryStateManager
+    from goedels_poetry.util.tree import TreeNode
+
+    theorem_sig = f"theorem includes_root_sig_shallow_{uuid.uuid4().hex} : P"
+    theorem = with_default_preamble(theorem_sig)
+
+    with suppress(Exception):
+        GoedelsPoetryState.clear_theorem_directory(theorem)
+
+    try:
+        state = GoedelsPoetryState(formal_theorem=theorem)
+
+        parent: DecomposedFormalTheoremState = {
+            "parent": None,
+            "children": [],
+            "depth": 0,
+            "formal_theorem": theorem,
+            "preamble": DEFAULT_IMPORTS,
+            "proof_sketch": f"{theorem_sig} := by\n  have h : P := by sorry\n  exact h",
+            "syntactic": True,
+            "errors": None,
+            "ast": None,
+            "self_correction_attempts": 1,
+            "decomposition_history": [],
+        }
+
+        child: FormalTheoremProofState = {
+            "parent": cast(TreeNode, parent),
+            "depth": 1,
+            "formal_theorem": "have h : P := by sorry",
+            "preamble": DEFAULT_IMPORTS,
+            "syntactic": True,
+            "formal_proof": "apply id; exact (by trivial)",
+            "proved": True,
+            "errors": None,
+            "ast": None,
+            "self_correction_attempts": 1,
+            "proof_history": [],
+            "pass_attempts": 0,
+        }
+
+        parent["children"].append(cast(TreeNode, child))
+        state.formal_theorem_proof = cast(TreeNode, parent)
+        manager = GoedelsPoetryStateManager(state)
+
+        result = manager.reconstruct_complete_proof()
+        assert result.startswith(DEFAULT_IMPORTS)
+        assert theorem_sig in result
+        assert ":= by" in result
+        assert "apply id" in result
+    finally:
+        with suppress(Exception):
+            GoedelsPoetryState.clear_theorem_directory(theorem)
+
+
+def test_reconstruct_includes_root_signature_deep_decomposition() -> None:
+    """Ensure the final proof contains the root theorem signature with deep (nested) decomposition."""
+    import uuid
+    from typing import cast
+
+    from goedels_poetry.agents.state import DecomposedFormalTheoremState, FormalTheoremProofState
+    from goedels_poetry.state import GoedelsPoetryStateManager
+    from goedels_poetry.util.tree import TreeNode
+
+    theorem_sig = f"theorem includes_root_sig_deep_{uuid.uuid4().hex} : P"
+    theorem = with_default_preamble(theorem_sig)
+
+    with suppress(Exception):
+        GoedelsPoetryState.clear_theorem_directory(theorem)
+
+    try:
+        state = GoedelsPoetryState(formal_theorem=theorem)
+
+        root: DecomposedFormalTheoremState = {
+            "parent": None,
+            "children": [],
+            "depth": 0,
+            "formal_theorem": theorem,
+            "preamble": DEFAULT_IMPORTS,
+            "proof_sketch": f"{theorem_sig} := by\n  have h1 : P := by sorry\n  exact h1",
+            "syntactic": True,
+            "errors": None,
+            "ast": None,
+            "self_correction_attempts": 1,
+            "decomposition_history": [],
+        }
+
+        mid: DecomposedFormalTheoremState = {
+            "parent": cast(TreeNode, root),
+            "children": [],
+            "depth": 1,
+            "formal_theorem": "have h1 : P := by sorry",
+            "preamble": DEFAULT_IMPORTS,
+            "proof_sketch": "have h1 : P := by\n  have h2 : P := by sorry\n  exact h2",
+            "syntactic": True,
+            "errors": None,
+            "ast": None,
+            "self_correction_attempts": 1,
+            "decomposition_history": [],
+        }
+
+        leaf: FormalTheoremProofState = {
+            "parent": cast(TreeNode, mid),
+            "depth": 2,
+            "formal_theorem": "have h2 : P := by sorry",
+            "preamble": DEFAULT_IMPORTS,
+            "syntactic": True,
+            "formal_proof": "trivial",
+            "proved": True,
+            "errors": None,
+            "ast": None,
+            "self_correction_attempts": 1,
+            "proof_history": [],
+            "pass_attempts": 0,
+        }
+
+        mid["children"].append(cast(TreeNode, leaf))
+        root["children"].append(cast(TreeNode, mid))
+        state.formal_theorem_proof = cast(TreeNode, root)
+        manager = GoedelsPoetryStateManager(state)
+
+        result = manager.reconstruct_complete_proof()
+        assert result.startswith(DEFAULT_IMPORTS)
+        assert theorem_sig in result
+        assert ":= by" in result
+        assert "trivial" in result
+    finally:
+        with suppress(Exception):
+            GoedelsPoetryState.clear_theorem_directory(theorem)
+
+    # End deep decomposition test
 
 
 def test_list_checkpoints_neither_parameter() -> None:

@@ -1322,7 +1322,21 @@ class GoedelsPoetryStateManager:
         if isinstance(node, dict) and "formal_proof" in node and "children" not in node:
             formal_proof_state = cast(FormalTheoremProofState, node)
             if formal_proof_state["formal_proof"] is not None:
-                return str(formal_proof_state["formal_proof"])
+                proof_text = str(formal_proof_state["formal_proof"])
+                # If this is the root leaf (no parent), ensure the output includes the theorem header.
+                # Avoid regex: if it already starts with the theorem signature, return as-is.
+                if formal_proof_state["parent"] is None:
+                    theorem_sig = str(formal_proof_state["formal_theorem"]).strip()
+                    # Skip leading empty lines and single-line comments to avoid redundant wrapping
+                    leading_skipped = self._skip_leading_trivia(proof_text)
+                    if leading_skipped.startswith(theorem_sig):
+                        return proof_text
+                    # Otherwise treat stored proof as tactics and wrap once.
+                    indent = " " * PROOF_BODY_INDENT_SPACES
+                    indented_body = self._indent_proof_body(proof_text, indent)
+                    return f"{theorem_sig} := by\n{indented_body}"
+                # Non-root leaves are always tactic bodies used for inlining; return as-is.
+                return proof_text
             else:
                 # No proof yet, return the theorem with sorry
                 return f"{formal_proof_state['formal_theorem']} := by sorry\n"
@@ -1402,6 +1416,31 @@ class GoedelsPoetryStateManager:
         # Extract everything after 'by'
         tactics = proof[match.end() :].strip()
         return tactics
+
+    def _skip_leading_trivia(self, text: str) -> str:
+        """
+        Skip leading empty lines and single-line comments in the given text.
+
+        This removes:
+        - Empty lines
+        - Line comments starting with '--'
+        - Single-line block comments of the form '/- ... -/'
+        """
+        lines = text.split("\n")
+        idx = 0
+        while idx < len(lines):
+            stripped = lines[idx].strip()
+            if stripped == "":
+                idx += 1
+                continue
+            if stripped.startswith("--"):
+                idx += 1
+                continue
+            if stripped.startswith("/-") and stripped.endswith("-/"):
+                idx += 1
+                continue
+            break
+        return "\n".join(lines[idx:]).lstrip()
 
     def _inline_child_proof(self, parent_sketch: str, child: TreeNode, child_proof_body: str) -> str:
         """
