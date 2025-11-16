@@ -79,6 +79,8 @@ def test_reconstruct_includes_root_signature_no_decomposition() -> None:
         assert theorem_sig in result
         assert ":= by" in result
         assert "trivial" in result
+        # Root header must not duplicate any trailing 'sorry' from the original input
+        assert ":= by sorry :=" not in result
     finally:
         with suppress(Exception):
             GoedelsPoetryState.clear_theorem_directory(theorem)
@@ -140,6 +142,7 @@ def test_reconstruct_includes_root_signature_shallow_decomposition() -> None:
         assert theorem_sig in result
         assert ":= by" in result
         assert "apply id" in result
+        assert ":= by sorry :=" not in result
     finally:
         with suppress(Exception):
             GoedelsPoetryState.clear_theorem_directory(theorem)
@@ -216,6 +219,7 @@ def test_reconstruct_includes_root_signature_deep_decomposition() -> None:
         assert theorem_sig in result
         assert ":= by" in result
         assert "trivial" in result
+        assert ":= by sorry :=" not in result
     finally:
         with suppress(Exception):
             GoedelsPoetryState.clear_theorem_directory(theorem)

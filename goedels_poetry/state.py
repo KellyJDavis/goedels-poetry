@@ -1326,7 +1326,8 @@ class GoedelsPoetryStateManager:
                 # If this is the root leaf (no parent), ensure the output includes the theorem header.
                 # Avoid regex: if it already starts with the theorem signature, return as-is.
                 if formal_proof_state["parent"] is None:
-                    theorem_sig = str(formal_proof_state["formal_theorem"]).strip()
+                    theorem_decl_full = str(formal_proof_state["formal_theorem"]).strip()
+                    theorem_sig = self._strip_decl_assignment(theorem_decl_full)
                     # Skip leading empty lines and single-line comments to avoid redundant wrapping
                     leading_skipped = self._skip_leading_trivia(proof_text)
                     if leading_skipped.startswith(theorem_sig):
@@ -1441,6 +1442,13 @@ class GoedelsPoetryStateManager:
                 continue
             break
         return "\n".join(lines[idx:]).lstrip()
+
+    def _strip_decl_assignment(self, formal_decl: str) -> str:
+        """
+        Strip any ':= ...' suffix from a declaration, returning only the header/signature.
+        """
+        idx = formal_decl.find(":=")
+        return formal_decl[:idx].rstrip() if idx != -1 else formal_decl
 
     def _inline_child_proof(self, parent_sketch: str, child: TreeNode, child_proof_body: str) -> str:
         """
