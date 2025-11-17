@@ -1237,6 +1237,73 @@ def __extract_set_value(set_node: dict) -> Optional[dict]:
     return None
 
 
+def __get_binding_type_from_node(node: Optional[dict]) -> Optional[str]:
+    """
+    Determine if a node represents a set or let binding.
+    Returns "set", "let", or None.
+    """
+    if not isinstance(node, dict):
+        return None
+    kind = node.get("kind", "")
+    if kind == "Lean.Parser.Tactic.tacticSet_":
+        return "set"
+    if kind in {"Lean.Parser.Term.let", "Lean.Parser.Tactic.tacticLet_"}:
+        return "let"
+    return None
+
+
+def __handle_set_let_binding_as_equality(
+    var_name: str,
+    binding_type: str,
+    binding_node: dict,
+    existing_names: set[str],
+    variables_in_equality_hypotheses: set[str],
+) -> tuple[Optional[dict], bool]:
+    """
+    Handle a set or let binding by creating an equality hypothesis.
+
+    Parameters
+    ----------
+    var_name: str
+        The variable name from the binding (e.g., "l", "s")
+    binding_type: str
+        Either "set" or "let"
+    binding_node: dict
+        The AST node for the binding
+    existing_names: set[str]
+        Set of names that already exist (for conflict resolution)
+    variables_in_equality_hypotheses: set[str]
+        Set to track variables already handled as equality hypotheses
+
+    Returns
+    -------
+    tuple[Optional[dict], bool]
+        A tuple of (binder, was_handled):
+        - binder: The equality hypothesis binder if successful, None if value extraction failed
+        - was_handled: True if an equality hypothesis was created, False if value extraction failed
+    """
+    # Extract the value expression from the binding
+    value_ast = None
+    if binding_type == "let":
+        value_ast = __extract_let_value(binding_node)
+    elif binding_type == "set":
+        value_ast = __extract_set_value(binding_node)
+
+    if value_ast is not None:
+        # Generate hypothesis name (e.g., "hl" for "l"), avoiding conflicts
+        hypothesis_name = __generate_equality_hypothesis_name(var_name, existing_names)
+        # Add the generated hypothesis name to existing_names to avoid future conflicts
+        existing_names.add(hypothesis_name)
+        # Create equality binder: (hl : l = value)
+        binder = __make_equality_binder(hypothesis_name, var_name, value_ast)
+        # Track that this variable is included as an equality hypothesis
+        variables_in_equality_hypotheses.add(var_name)
+        return (binder, True)
+    else:
+        # Value extraction failed
+        return (None, False)
+
+
 def __generate_equality_hypothesis_name(var_name: str, existing_names: set[str]) -> str:
     """
     Generate a hypothesis name for an equality from a variable name, avoiding conflicts.
@@ -1382,23 +1449,11 @@ def _get_named_subgoal_rewritten_ast(  # noqa: C901
 
         # Handle let and set bindings as equality hypotheses
         if binding_type in {"let", "set"}:
-            # Extract the value expression from the binding
-            value_ast = None
-            if binding_type == "let":
-                value_ast = __extract_let_value(binding_node)
-            elif binding_type == "set":
-                value_ast = __extract_set_value(binding_node)
-
-            if value_ast is not None:
-                # Generate hypothesis name (e.g., "hs" for "s"), avoiding conflicts
-                hypothesis_name = __generate_equality_hypothesis_name(binding_name, existing_names)
-                # Add the generated hypothesis name to existing_names to avoid future conflicts
-                existing_names.add(hypothesis_name)
-                # Create equality binder: (hs : s = value)
-                binder = __make_equality_binder(hypothesis_name, binding_name, value_ast)
-                binders.append(binder)
-                # Track that this variable is included as an equality hypothesis
-                variables_in_equality_hypotheses.add(binding_name)
+            set_let_binder, was_handled = __handle_set_let_binding_as_equality(
+                binding_name, binding_type, binding_node, existing_names, variables_in_equality_hypotheses
+            )
+            if was_handled and set_let_binder is not None:
+                binders.append(set_let_binder)
             else:
                 # Fallback: if we can't extract the value, log a warning and skip
                 logging.warning(f"Could not extract value for {binding_type} binding '{binding_name}', skipping")
@@ -1432,12 +1487,36 @@ def _get_named_subgoal_rewritten_ast(  # noqa: C901
         # Skip if already included as a binder name or as an equality hypothesis variable
         if d in existing_binder_names or d in variables_in_equality_hypotheses:
             continue
+
+        # Check if this dependency came from a set or let statement
+        dep_node = name_map.get(d)
+        dep_binding_type: Optional[str] = None
+        if dep_node is not None:
+            dep_binding_type = __get_binding_type_from_node(dep_node)
+
+        if dep_binding_type in {"set", "let"} and dep_node is not None:
+            set_let_binder, was_handled = __handle_set_let_binding_as_equality(
+                d, dep_binding_type, dep_node, existing_names, variables_in_equality_hypotheses
+            )
+            if was_handled and set_let_binder is not None:
+                binders.append(set_let_binder)
+                continue  # Skip type annotation handling for set/let bindings
+            else:
+                # Fallback: if we can't extract the value, log a warning and use type annotation
+                logging.warning(
+                    f"Could not extract value for {dep_binding_type} dependency '{d}', falling back to type annotation"
+                )
+                # Fall through to type annotation handling below
+
+        # For non-set/let dependencies, or set/let bindings where value extraction failed,
+        # use type annotations. This code path handles:
+        # - Regular variables (not from set/let statements)
+        # - set/let bindings where the value expression couldn't be extracted from the AST
         # Prioritize goal context types (from sorries) as they're more specific and complete
         if d in goal_var_types:
             binder = __make_binder_from_type_string(d, goal_var_types[d])
         else:
             # Fall back to AST extraction if no goal context available
-            dep_node = name_map.get(d)
             dep_type_ast = __extract_type_ast(dep_node) if dep_node is not None else None
             binder = __make_binder(d, dep_type_ast)
         binders.append(binder)

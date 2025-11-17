@@ -1536,6 +1536,416 @@ def test_ast_get_named_subgoal_code_mixed_bindings() -> None:
     assert "ℕ" in result  # noqa: RUF001
 
 
+def test_ast_get_named_subgoal_code_set_dependency_as_equality() -> None:
+    """Test that get_named_subgoal_code creates equality hypotheses for set variables that appear as dependencies."""
+    # This tests the case where a set statement's variable is referenced in the goal,
+    # making it a dependency, and it should be handled as an equality hypothesis
+    # even if it wasn't found as an earlier binding.
+    ast_dict = {
+        "kind": "Lean.Parser.Command.theorem",
+        "args": [
+            {"val": "theorem", "info": {"leading": "", "trailing": " "}},
+            {
+                "kind": "Lean.Parser.Command.declId",
+                "args": [{"val": "test_theorem", "info": {"leading": "", "trailing": " "}}],
+            },
+            {
+                "kind": "Lean.Parser.Term.bracketedBinderList",
+                "args": [
+                    {
+                        "kind": "Lean.Parser.Term.explicitBinder",
+                        "args": [
+                            {"val": "(", "info": {"leading": " ", "trailing": ""}},
+                            {
+                                "kind": "Lean.binderIdent",
+                                "args": [{"val": "x", "info": {"leading": "", "trailing": ""}}],
+                            },
+                            {"val": ":", "info": {"leading": " ", "trailing": " "}},
+                            {"val": "ℕ", "info": {"leading": "", "trailing": " "}},  # noqa: RUF001
+                            {"val": ")", "info": {"leading": "", "trailing": " "}},
+                        ],
+                    },
+                ],
+            },
+            {"val": ":", "info": {"leading": " ", "trailing": " "}},
+            {"val": "Prop", "info": {"leading": "", "trailing": " "}},
+            {"val": ":=", "info": {"leading": " ", "trailing": " "}},
+            {
+                "kind": "Lean.Parser.Term.byTactic",
+                "args": [
+                    {"val": "by", "info": {"leading": "", "trailing": "\n  "}},
+                    {
+                        "kind": "Lean.Parser.Tactic.tacticSeq",
+                        "args": [
+                            # Set binding for "l"
+                            {
+                                "kind": "Lean.Parser.Tactic.tacticSet_",
+                                "args": [
+                                    {"val": "set", "info": {"leading": "", "trailing": " "}},
+                                    {
+                                        "kind": "Lean.Parser.Term.setDecl",
+                                        "args": [
+                                            {
+                                                "kind": "Lean.Parser.Term.setIdDecl",
+                                                "args": [
+                                                    {
+                                                        "kind": "Lean.binderIdent",
+                                                        "args": [{"val": "l", "info": {"leading": "", "trailing": ""}}],
+                                                    },
+                                                ],
+                                            },
+                                            {"val": ":=", "info": {"leading": " ", "trailing": " "}},
+                                            {"val": "x", "info": {"leading": "", "trailing": " "}},
+                                            {"val": "+", "info": {"leading": " ", "trailing": " "}},
+                                            {"val": "1", "info": {"leading": "", "trailing": " "}},
+                                        ],
+                                    },
+                                ],
+                            },
+                            # Have statement that references "l" in the goal
+                            {
+                                "kind": "Lean.Parser.Tactic.tacticHave_",
+                                "args": [
+                                    {"val": "have", "info": {"leading": "\n  ", "trailing": " "}},
+                                    {
+                                        "kind": "Lean.Parser.Term.haveDecl",
+                                        "args": [
+                                            {
+                                                "kind": "Lean.Parser.Term.haveIdDecl",
+                                                "args": [
+                                                    {
+                                                        "kind": "Lean.Parser.Term.haveId",
+                                                        "args": [
+                                                            {"val": "h1", "info": {"leading": "", "trailing": " "}}
+                                                        ],
+                                                    }
+                                                ],
+                                            },
+                                            {"val": ":", "info": {"leading": "", "trailing": " "}},
+                                            {"val": "l", "info": {"leading": "", "trailing": " "}},
+                                            {"val": ">", "info": {"leading": " ", "trailing": " "}},
+                                            {"val": "0", "info": {"leading": "", "trailing": " "}},
+                                        ],
+                                    },
+                                    {"val": ":=", "info": {"leading": " ", "trailing": " "}},
+                                    {
+                                        "kind": "Lean.Parser.Term.byTactic",
+                                        "args": [
+                                            {"val": "by", "info": {"leading": "", "trailing": " "}},
+                                            {
+                                                "kind": "Lean.Parser.Tactic.tacticSeq",
+                                                "args": [
+                                                    {
+                                                        "kind": "Lean.Parser.Tactic.tacticSorry",
+                                                        "args": [
+                                                            {"val": "sorry", "info": {"leading": "", "trailing": ""}}
+                                                        ],
+                                                    }
+                                                ],
+                                            },
+                                        ],
+                                    },
+                                ],
+                            },
+                        ],
+                    },
+                ],
+            },
+        ],
+    }
+
+    sorries = [
+        {
+            "pos": {"line": 3, "column": 4},
+            "endPos": {"line": 3, "column": 9},
+            "goal": "x : ℕ\nl : ℕ\n⊢ l > 0",  # noqa: RUF001
+            "proofState": 1,
+        }
+    ]
+
+    ast = AST(ast_dict, sorries)
+    result = ast.get_named_subgoal_code("h1")
+
+    # The result should include the theorem parameter x
+    assert "lemma" in result
+    assert "h1" in result
+    assert "x" in result
+    # Should include "l" as an equality hypothesis (hl : l = x + 1)
+    # This tests that dependencies from set statements are handled correctly
+    assert "hl" in result  # Hypothesis name
+    assert (
+        "l  = x  + 1" in result or "l = x + 1" in result or "l=x+1" in result
+    )  # Equality format (with possible spaces)
+    # Should NOT include l as a type annotation (l : ℕ) - that would be incorrect  # noqa: RUF003
+    assert result.count("(l :") == 0, (
+        f"Found type annotation for l, but it should only appear in equality hypothesis. Result: {result}"
+    )
+
+
+def test_ast_get_named_subgoal_code_let_dependency_as_equality() -> None:
+    """Test that get_named_subgoal_code creates equality hypotheses for let variables that appear as dependencies."""
+    # This tests the case where a let statement's variable is referenced in the goal,
+    # making it a dependency, and it should be handled as an equality hypothesis.
+    ast_dict = {
+        "kind": "Lean.Parser.Command.theorem",
+        "args": [
+            {"val": "theorem", "info": {"leading": "", "trailing": " "}},
+            {
+                "kind": "Lean.Parser.Command.declId",
+                "args": [{"val": "test_theorem", "info": {"leading": "", "trailing": " "}}],
+            },
+            {
+                "kind": "Lean.Parser.Term.bracketedBinderList",
+                "args": [
+                    {
+                        "kind": "Lean.Parser.Term.explicitBinder",
+                        "args": [
+                            {"val": "(", "info": {"leading": " ", "trailing": ""}},
+                            {
+                                "kind": "Lean.binderIdent",
+                                "args": [{"val": "n", "info": {"leading": "", "trailing": ""}}],
+                            },
+                            {"val": ":", "info": {"leading": " ", "trailing": " "}},
+                            {"val": "ℕ", "info": {"leading": "", "trailing": " "}},  # noqa: RUF001
+                            {"val": ")", "info": {"leading": "", "trailing": " "}},
+                        ],
+                    },
+                ],
+            },
+            {"val": ":", "info": {"leading": " ", "trailing": " "}},
+            {"val": "Prop", "info": {"leading": "", "trailing": " "}},
+            {"val": ":=", "info": {"leading": " ", "trailing": " "}},
+            {
+                "kind": "Lean.Parser.Term.byTactic",
+                "args": [
+                    {"val": "by", "info": {"leading": "", "trailing": "\n  "}},
+                    {
+                        "kind": "Lean.Parser.Tactic.tacticSeq",
+                        "args": [
+                            # Let binding for "m"
+                            {
+                                "kind": "Lean.Parser.Tactic.tacticLet_",
+                                "args": [
+                                    {"val": "let", "info": {"leading": "", "trailing": " "}},
+                                    {
+                                        "kind": "Lean.Parser.Term.letDecl",
+                                        "args": [
+                                            {
+                                                "kind": "Lean.Parser.Term.letIdDecl",
+                                                "args": [
+                                                    {
+                                                        "kind": "Lean.binderIdent",
+                                                        "args": [{"val": "m", "info": {"leading": "", "trailing": ""}}],
+                                                    },
+                                                ],
+                                            },
+                                            {"val": ":=", "info": {"leading": " ", "trailing": " "}},
+                                            {"val": "n", "info": {"leading": "", "trailing": " "}},
+                                            {"val": "*", "info": {"leading": " ", "trailing": " "}},
+                                            {"val": "2", "info": {"leading": "", "trailing": " "}},
+                                        ],
+                                    },
+                                ],
+                            },
+                            # Have statement that references "m" in the goal
+                            {
+                                "kind": "Lean.Parser.Tactic.tacticHave_",
+                                "args": [
+                                    {"val": "have", "info": {"leading": "\n  ", "trailing": " "}},
+                                    {
+                                        "kind": "Lean.Parser.Term.haveDecl",
+                                        "args": [
+                                            {
+                                                "kind": "Lean.Parser.Term.haveIdDecl",
+                                                "args": [
+                                                    {
+                                                        "kind": "Lean.Parser.Term.haveId",
+                                                        "args": [
+                                                            {"val": "h1", "info": {"leading": "", "trailing": " "}}
+                                                        ],
+                                                    }
+                                                ],
+                                            },
+                                            {"val": ":", "info": {"leading": "", "trailing": " "}},
+                                            {"val": "m", "info": {"leading": "", "trailing": " "}},
+                                            {"val": ">", "info": {"leading": " ", "trailing": " "}},
+                                            {"val": "0", "info": {"leading": "", "trailing": " "}},
+                                        ],
+                                    },
+                                    {"val": ":=", "info": {"leading": " ", "trailing": " "}},
+                                    {
+                                        "kind": "Lean.Parser.Term.byTactic",
+                                        "args": [
+                                            {"val": "by", "info": {"leading": "", "trailing": " "}},
+                                            {
+                                                "kind": "Lean.Parser.Tactic.tacticSeq",
+                                                "args": [
+                                                    {
+                                                        "kind": "Lean.Parser.Tactic.tacticSorry",
+                                                        "args": [
+                                                            {"val": "sorry", "info": {"leading": "", "trailing": ""}}
+                                                        ],
+                                                    }
+                                                ],
+                                            },
+                                        ],
+                                    },
+                                ],
+                            },
+                        ],
+                    },
+                ],
+            },
+        ],
+    }
+
+    sorries = [
+        {
+            "pos": {"line": 3, "column": 4},
+            "endPos": {"line": 3, "column": 9},
+            "goal": "n : ℕ\nm : ℕ\n⊢ m > 0",  # noqa: RUF001
+            "proofState": 1,
+        }
+    ]
+
+    ast = AST(ast_dict, sorries)
+    result = ast.get_named_subgoal_code("h1")
+
+    # The result should include the theorem parameter n
+    assert "lemma" in result
+    assert "h1" in result
+    assert "n" in result
+    # Should include "m" as an equality hypothesis (hm : m = n * 2)
+    assert "hm" in result  # Hypothesis name
+    assert (
+        "m  = n  * 2" in result or "m = n * 2" in result or "m=n*2" in result
+    )  # Equality format (with possible spaces)
+    # Should NOT include m as a type annotation (m : ℕ) - that would be incorrect  # noqa: RUF003
+    assert result.count("(m :") == 0, (
+        f"Found type annotation for m, but it should only appear in equality hypothesis. Result: {result}"
+    )
+
+
+def test_ast_get_named_subgoal_code_set_dependency_complex_expression() -> None:
+    """Test that get_named_subgoal_code handles set dependencies with complex expressions."""
+    # Test case similar to the user's example with a complex set statement
+    ast_dict = {
+        "kind": "Lean.Parser.Command.theorem",
+        "args": [
+            {"val": "theorem", "info": {"leading": "", "trailing": " "}},
+            {
+                "kind": "Lean.Parser.Command.declId",
+                "args": [{"val": "test_theorem", "info": {"leading": "", "trailing": " "}}],
+            },
+            {"val": ":", "info": {"leading": " ", "trailing": " "}},
+            {"val": "Prop", "info": {"leading": "", "trailing": " "}},
+            {"val": ":=", "info": {"leading": " ", "trailing": " "}},
+            {
+                "kind": "Lean.Parser.Term.byTactic",
+                "args": [
+                    {"val": "by", "info": {"leading": "", "trailing": "\n  "}},
+                    {
+                        "kind": "Lean.Parser.Tactic.tacticSeq",
+                        "args": [
+                            # Set binding for "l" with a complex expression
+                            {
+                                "kind": "Lean.Parser.Tactic.tacticSet_",
+                                "args": [
+                                    {"val": "set", "info": {"leading": "", "trailing": " "}},
+                                    {
+                                        "kind": "Lean.Parser.Term.setDecl",
+                                        "args": [
+                                            {
+                                                "kind": "Lean.Parser.Term.setIdDecl",
+                                                "args": [
+                                                    {
+                                                        "kind": "Lean.binderIdent",
+                                                        "args": [{"val": "l", "info": {"leading": "", "trailing": ""}}],
+                                                    },
+                                                ],
+                                            },
+                                            {"val": ":=", "info": {"leading": " ", "trailing": " "}},
+                                            {"val": "5", "info": {"leading": "", "trailing": " "}},
+                                        ],
+                                    },
+                                ],
+                            },
+                            # Have statement that references "l" in the goal
+                            {
+                                "kind": "Lean.Parser.Tactic.tacticHave_",
+                                "args": [
+                                    {"val": "have", "info": {"leading": "\n  ", "trailing": " "}},
+                                    {
+                                        "kind": "Lean.Parser.Term.haveDecl",
+                                        "args": [
+                                            {
+                                                "kind": "Lean.Parser.Term.haveIdDecl",
+                                                "args": [
+                                                    {
+                                                        "kind": "Lean.Parser.Term.haveId",
+                                                        "args": [
+                                                            {
+                                                                "val": "h_odd_prod_eq_l",
+                                                                "info": {"leading": "", "trailing": " "},
+                                                            }
+                                                        ],
+                                                    }
+                                                ],
+                                            },
+                                            {"val": ":", "info": {"leading": "", "trailing": " "}},
+                                            {"val": "l", "info": {"leading": "", "trailing": " "}},
+                                            {"val": "=", "info": {"leading": " ", "trailing": " "}},
+                                            {"val": "5", "info": {"leading": "", "trailing": " "}},
+                                        ],
+                                    },
+                                    {"val": ":=", "info": {"leading": " ", "trailing": " "}},
+                                    {
+                                        "kind": "Lean.Parser.Term.byTactic",
+                                        "args": [
+                                            {"val": "by", "info": {"leading": "", "trailing": " "}},
+                                            {
+                                                "kind": "Lean.Parser.Tactic.tacticSeq",
+                                                "args": [
+                                                    {
+                                                        "kind": "Lean.Parser.Tactic.tacticSorry",
+                                                        "args": [
+                                                            {"val": "sorry", "info": {"leading": "", "trailing": ""}}
+                                                        ],
+                                                    }
+                                                ],
+                                            },
+                                        ],
+                                    },
+                                ],
+                            },
+                        ],
+                    },
+                ],
+            },
+        ],
+    }
+
+    sorries = [
+        {
+            "pos": {"line": 3, "column": 4},
+            "endPos": {"line": 3, "column": 9},
+            "goal": "l : ℕ\n⊢ l = 5",  # noqa: RUF001
+            "proofState": 1,
+        }
+    ]
+
+    ast = AST(ast_dict, sorries)
+    result = ast.get_named_subgoal_code("h_odd_prod_eq_l")
+
+    # Should include "l" as an equality hypothesis (hl : l = 5)
+    assert "hl" in result  # Hypothesis name
+    assert "l  = 5" in result or "l = 5" in result or "l=5" in result  # Equality format (with possible spaces)
+    # Should NOT include l as a type annotation (l : ℕ) - that would be incorrect  # noqa: RUF003
+    assert result.count("(l :") == 0, (
+        f"Found type annotation for l, but it should only appear in equality hypothesis. Result: {result}"
+    )
+
+
 def test_ast_get_named_subgoal_code_includes_set_binding_with_type() -> None:
     """Test that get_named_subgoal_code includes set statements with explicit types."""
     # Create a theorem with a typed set statement
