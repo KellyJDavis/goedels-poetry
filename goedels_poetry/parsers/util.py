@@ -104,6 +104,18 @@ def _get_named_subgoal_ast(node: Node, target_name: str) -> Optional[dict[str, A
 # ---------------------------
 def _ast_to_code(node: Any) -> str:
     if isinstance(node, dict):
+        kind = node.get("kind", "")
+        # Handle custom containers
+        if kind == "__value_container":
+            # Just serialize the args directly
+            return "".join(_ast_to_code(arg) for arg in node.get("args", []))
+        if kind == "__type_container":
+            # Just serialize the args directly
+            return "".join(_ast_to_code(arg) for arg in node.get("args", []))
+        if kind == "__equality_expr":
+            # Serialize as "var = value"
+            return "".join(_ast_to_code(arg) for arg in node.get("args", []))
+
         parts = []
         if "val" in node:
             info = node.get("info", {}) or {}
@@ -115,7 +127,7 @@ def _ast_to_code(node: Any) -> str:
             parts.append(_ast_to_code(arg))
         # then traverse other fields conservatively
         for k, v in node.items():
-            if k in {"args", "val", "info"}:
+            if k in {"args", "val", "info", "kind"}:
                 continue
             parts.append(_ast_to_code(v))
         return "".join(parts)
@@ -490,6 +502,51 @@ def __make_binder(name: str, type_ast: Optional[dict]) -> dict:
             {"kind": "Lean.binderIdent", "args": [{"val": name, "info": {"leading": "", "trailing": ""}}]},
             {"val": ":", "info": {"leading": " ", "trailing": " "}},
             inner_type,
+            {"val": ")", "info": {"leading": "", "trailing": " "}},
+        ],
+    }
+    return binder
+
+
+# ---------------------------
+# Make an equality binder AST for "(hname : name = value)"
+# ---------------------------
+def __make_equality_binder(hypothesis_name: str, var_name: str, value_ast: dict) -> dict:
+    """
+    Create a binder for an equality hypothesis like (hs : s = value).
+
+    Parameters
+    ----------
+    hypothesis_name: str
+        The name of the hypothesis (e.g., "hs")
+    var_name: str
+        The name of the variable being defined (e.g., "s")
+    value_ast: dict
+        The AST of the value expression (should be a __value_container or similar)
+    """
+    # Create the equality expression: var_name = value
+    # We'll create a simple structure that serializes as "var_name = value"
+    # The value_ast might be a __value_container, so we extract its args
+    value_args = value_ast.get("args", []) if value_ast.get("kind") == "__value_container" else [value_ast]
+
+    # Create nodes for the equality: var_name, "=", and the value
+    var_node = {"val": var_name, "info": {"leading": "", "trailing": " "}}
+    eq_node = {"val": "=", "info": {"leading": " ", "trailing": " "}}
+
+    # Create a container that will serialize as "var_name = value"
+    # We use a simple structure that _ast_to_code will handle correctly
+    equality_expr = {
+        "kind": "__equality_expr",
+        "args": [var_node, eq_node, *value_args],
+    }
+
+    binder = {
+        "kind": "Lean.Parser.Term.explicitBinder",
+        "args": [
+            {"val": "(", "info": {"leading": " ", "trailing": ""}},
+            {"kind": "Lean.binderIdent", "args": [{"val": hypothesis_name, "info": {"leading": "", "trailing": ""}}]},
+            {"val": ":", "info": {"leading": " ", "trailing": " "}},
+            equality_expr,
             {"val": ")", "info": {"leading": "", "trailing": " "}},
         ],
     }
@@ -1128,6 +1185,93 @@ def __extract_set_name(set_node: dict) -> Optional[str]:
     return None
 
 
+def __extract_let_value(let_node: dict) -> Optional[dict]:
+    """
+    Extract the value expression from a let binding node.
+    Returns the AST of the value expression (everything after :=).
+    """
+    # Look for letDecl which contains the value
+    let_decl = __find_first(let_node, lambda n: n.get("kind") == "Lean.Parser.Term.letDecl")
+    if let_decl and isinstance(let_decl, dict):
+        ld_args = let_decl.get("args", [])
+        # Find ":=" and extract everything after it
+        assign_idx = None
+        for i, arg in enumerate(ld_args):
+            if isinstance(arg, dict) and arg.get("val") == ":=":
+                assign_idx = i
+                break
+
+        # Extract value tokens after ":="
+        if assign_idx is not None and assign_idx + 1 < len(ld_args):
+            value_tokens = ld_args[assign_idx + 1 :]
+            if value_tokens:
+                # Wrap in a container to preserve structure
+                return {"kind": "__value_container", "args": value_tokens}
+
+    return None
+
+
+def __extract_set_value(set_node: dict) -> Optional[dict]:
+    """
+    Extract the value expression from a set statement node.
+    Returns the AST of the value expression (everything after :=).
+    """
+    # Look for setDecl which contains the value
+    set_decl = __find_first(set_node, lambda n: n.get("kind") == "Lean.Parser.Term.setDecl")
+    if set_decl and isinstance(set_decl, dict):
+        sd_args = set_decl.get("args", [])
+        # Find ":=" and extract everything after it
+        assign_idx = None
+        for i, arg in enumerate(sd_args):
+            if isinstance(arg, dict) and arg.get("val") == ":=":
+                assign_idx = i
+                break
+
+        # Extract value tokens after ":="
+        if assign_idx is not None and assign_idx + 1 < len(sd_args):
+            value_tokens = sd_args[assign_idx + 1 :]
+            if value_tokens:
+                # Wrap in a container to preserve structure
+                return {"kind": "__value_container", "args": value_tokens}
+
+    return None
+
+
+def __generate_equality_hypothesis_name(var_name: str, existing_names: set[str]) -> str:
+    """
+    Generate a hypothesis name for an equality from a variable name, avoiding conflicts.
+    Examples: s -> hs, sOdd -> hsOdd, sEven -> hsEven
+    If the base name conflicts, tries h2{var_name}, h3{var_name}, etc.
+
+    Parameters
+    ----------
+    var_name: str
+        The variable name (e.g., "s")
+    existing_names: set[str]
+        Set of names that already exist (binders, hypotheses, etc.)
+
+    Returns
+    -------
+    str
+        A unique hypothesis name (e.g., "hs", "h2s", "h3s", etc.)
+    """
+    base_name = f"h{var_name}"
+    if base_name not in existing_names:
+        return base_name
+
+    # Try numbered variants: h2s, h3s, h4s, etc.
+    counter = 2
+    while True:
+        candidate = f"h{counter}{var_name}"
+        if candidate not in existing_names:
+            return candidate
+        counter += 1
+        # Safety limit to avoid infinite loops
+        if counter > 1000:
+            logging.warning(f"Could not generate unique hypothesis name for '{var_name}' after 1000 attempts")
+            return f"h{counter}{var_name}"
+
+
 def __extract_suffices_name(suffices_node: dict) -> Optional[str]:
     """
     Extract the hypothesis name from a suffices statement node.
@@ -1209,36 +1353,84 @@ def _get_named_subgoal_rewritten_ast(  # noqa: C901
     # First, add theorem binders (parameters and hypotheses from enclosing theorem)
     binders.extend(theorem_binders)
 
+    # Track variables that have been included as equality hypotheses
+    # (so we don't add them again as type annotations)
+    variables_in_equality_hypotheses: set[str] = set()
+
+    # Collect all existing names to avoid hypothesis name conflicts
+    # This includes theorem binders, earlier bindings, and dependencies
+    existing_names: set[str] = set()
+    # Add theorem binder names
+    for binder in theorem_binders:
+        binder_name = __extract_binder_name(binder)
+        if binder_name:
+            existing_names.add(binder_name)
+    # Add earlier binding names (from have, obtain, choose, etc. that will be added)
+    for binding_name, _binding_type, _binding_node in earlier_bindings:
+        if binding_name != target_name:
+            existing_names.add(binding_name)
+    # Add dependency names
+    existing_names.update(deps)
+    # Add target name
+    existing_names.add(target_name)
+
     # Next, add earlier bindings (have, let, obtain) as hypotheses
-    for binding_name, _binding_type, binding_node in earlier_bindings:
+    for binding_name, binding_type, binding_node in earlier_bindings:
         # Skip if this is the target itself or already in theorem binders
         if binding_name == target_name:
             continue
 
-        # Extract the type/conclusion of the binding
-        if binding_name in goal_var_types:
-            # Prioritize goal context types as they're most accurate
-            binder = __make_binder_from_type_string(binding_name, goal_var_types[binding_name])
-        else:
-            # Try to extract type from AST
-            binding_type_ast = __extract_type_ast(binding_node)
-            if binding_type_ast is not None:
-                binder = __make_binder(binding_name, binding_type_ast)
+        # Handle let and set bindings as equality hypotheses
+        if binding_type in {"let", "set"}:
+            # Extract the value expression from the binding
+            value_ast = None
+            if binding_type == "let":
+                value_ast = __extract_let_value(binding_node)
+            elif binding_type == "set":
+                value_ast = __extract_set_value(binding_node)
+
+            if value_ast is not None:
+                # Generate hypothesis name (e.g., "hs" for "s"), avoiding conflicts
+                hypothesis_name = __generate_equality_hypothesis_name(binding_name, existing_names)
+                # Add the generated hypothesis name to existing_names to avoid future conflicts
+                existing_names.add(hypothesis_name)
+                # Create equality binder: (hs : s = value)
+                binder = __make_equality_binder(hypothesis_name, binding_name, value_ast)
+                binders.append(binder)
+                # Track that this variable is included as an equality hypothesis
+                variables_in_equality_hypotheses.add(binding_name)
             else:
-                # For obtain or untyped let, we need goal context
-                # If not available, try to infer or skip
-                if binding_name in goal_var_types:
-                    binder = __make_binder_from_type_string(binding_name, goal_var_types[binding_name])
+                # Fallback: if we can't extract the value, log a warning and skip
+                logging.warning(f"Could not extract value for {binding_type} binding '{binding_name}', skipping")
+        else:
+            # For have, obtain, choose, generalize, match: use type annotations
+            # Extract the type/conclusion of the binding
+            if binding_name in goal_var_types:
+                # Prioritize goal context types as they're most accurate
+                binder = __make_binder_from_type_string(binding_name, goal_var_types[binding_name])
+            else:
+                # Try to extract type from AST
+                binding_type_ast = __extract_type_ast(binding_node)
+                if binding_type_ast is not None:
+                    binder = __make_binder(binding_name, binding_type_ast)
                 else:
-                    # Last resort: use Prop as placeholder (better than nothing)
-                    logging.warning(f"Could not determine type for binding '{binding_name}', using Prop")
-                    binder = __make_binder(binding_name, None)
-        binders.append(binder)
+                    # For obtain or untyped bindings, we need goal context
+                    # If not available, try to infer or skip
+                    if binding_name in goal_var_types:
+                        binder = __make_binder_from_type_string(binding_name, goal_var_types[binding_name])
+                    else:
+                        # Last resort: use Prop as placeholder (better than nothing)
+                        logging.warning(f"Could not determine type for binding '{binding_name}', using Prop")
+                        binder = __make_binder(binding_name, None)
+            binders.append(binder)
+            # Track the binding name in existing_names (it's already there, but this ensures consistency)
+            existing_names.add(binding_name)
 
     # Finally, add any remaining dependencies not yet included
     existing_binder_names = {__extract_binder_name(b) for b in binders}
     for d in sorted(deps):
-        if d in existing_binder_names:
+        # Skip if already included as a binder name or as an equality hypothesis variable
+        if d in existing_binder_names or d in variables_in_equality_hypotheses:
             continue
         # Prioritize goal context types (from sorries) as they're more specific and complete
         if d in goal_var_types:
@@ -1255,8 +1447,13 @@ def _get_named_subgoal_rewritten_ast(  # noqa: C901
     if not theorem_binders:
         defined_in_target = __collect_defined_names(target)
         for var_name in sorted(goal_var_types.keys()):
-            # Skip if already added as dependency or defined within target
-            if var_name not in existing_binder_names and var_name not in defined_in_target and var_name != target_name:
+            # Skip if already added as dependency, defined within target, or included as equality hypothesis
+            if (
+                var_name not in existing_binder_names
+                and var_name not in defined_in_target
+                and var_name != target_name
+                and var_name not in variables_in_equality_hypotheses
+            ):
                 # Check if this variable is actually referenced in the target
                 referenced = __is_referenced_in(target, var_name)
                 if referenced:
