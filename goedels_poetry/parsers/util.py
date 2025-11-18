@@ -1,4 +1,3 @@
-import contextlib
 import logging
 from copy import deepcopy
 from typing import Any, Callable, Optional, Union
@@ -6,27 +5,239 @@ from typing import Any, Callable, Optional, Union
 Node = Union[dict[str, Any], list[Any]]
 
 
+# ---------------------------
+# AST structure validation
+# ---------------------------
+def _validate_ast_structure(ast: Node, raise_on_error: bool = False) -> bool:  # noqa: C901
+    """
+    Validate that the AST has a basic valid structure.
+
+    The AST from kimina-lean-server can be:
+    - A top-level dict with "header" and "commands" fields (from AstExport.lean)
+    - A dict representing a single node with "kind" field
+    - A list of nodes
+    - Any nested combination of the above
+
+    Parameters
+    ----------
+    ast: Node
+        The AST node to validate
+    raise_on_error: bool
+        If True, raise ValueError on invalid structure. If False, return False.
+
+    Returns
+    -------
+    bool
+        True if the AST structure appears valid, False otherwise.
+
+    Raises
+    ------
+    ValueError
+        If raise_on_error is True and the AST structure is invalid.
+    """
+    if ast is None:
+        if raise_on_error:
+            raise ValueError("AST cannot be None")  # noqa: TRY003
+        return False
+
+    # AST must be a dict or list
+    if not isinstance(ast, (dict, list)):
+        if raise_on_error:
+            raise TypeError(f"AST must be a dict or list, got {type(ast).__name__}")  # noqa: TRY003
+        return False
+
+    # If it's a dict, check for expected structure
+    if isinstance(ast, dict):
+        # Top-level AST from AstExport has "header" and/or "commands"
+        if "header" in ast or "commands" in ast:
+            # Validate commands if present
+            if "commands" in ast:
+                commands = ast["commands"]
+                if not isinstance(commands, list):
+                    if raise_on_error:
+                        raise TypeError("AST 'commands' field must be a list")  # noqa: TRY003
+                    return False
+            return True
+
+        # Node-level AST should have "kind" field (though some nodes might not)
+        # We're lenient here - if it's a dict, we consider it potentially valid
+        # The actual structure will be validated during traversal
+        return True
+
+    # If it's a list, validate that all elements are valid nodes
+    if isinstance(ast, list):
+        for item in ast:
+            if not isinstance(item, (dict, list)):
+                if raise_on_error:
+                    raise TypeError(f"AST list contains invalid item type: {type(item).__name__}")  # noqa: TRY003
+                return False
+            # Recursively validate nested structures (with depth limit to avoid infinite recursion)
+            if isinstance(item, dict) and ("header" in item or "commands" in item or "kind" in item):
+                # This looks like a valid node, continue
+                pass
+            elif isinstance(item, (dict, list)):
+                # Nested structure - validate recursively but limit depth
+                # For now, we'll be lenient and just check it's a dict/list
+                pass
+
+    return True
+
+
+# ---------------------------
+# Safe nested value extraction helpers
+# ---------------------------
+def _extract_nested_value(node: dict, path: list[Union[int, str]], default: Any = None) -> Any:
+    """
+    Safely extract value from nested structure using a path.
+
+    Based on Lean's Syntax AST structure from AstExport.lean:
+    - Syntax nodes have structure: {"kind": kind, "args": args, "info": info}
+    - Atoms/Idents have structure: {"val": val, "info": info}
+    - Path can mix string keys and integer indices
+
+    Parameters
+    ----------
+    node: dict
+        Starting node (must be a dict)
+    path: list[Union[int, str]]
+        List of keys/indices to traverse, e.g., ["args", 1, "args", 0, "val"]
+    default: Any
+        Default value to return if path doesn't exist
+
+    Returns
+    -------
+    Any
+        The value at the path, or default if path doesn't exist
+
+    Examples
+    --------
+    >>> node = {"args": [{"val": "test"}]}
+    >>> _extract_nested_value(node, ["args", 0, "val"])
+    'test'
+    >>> _extract_nested_value(node, ["args", 1, "val"], "default")
+    'default'
+    """
+    if not isinstance(node, dict):
+        return default
+
+    current = node
+    for step in path:
+        if isinstance(step, int):
+            # Integer index - access list or dict by position
+            if isinstance(current, list):
+                if step < 0 or step >= len(current):
+                    return default
+                current = current[step]
+            elif isinstance(current, dict):
+                # For dicts, convert to list of values (order may vary)
+                values = list(current.values())
+                if step < 0 or step >= len(values):
+                    return default
+                current = values[step]
+            else:
+                return default
+        else:
+            # String key - access dict
+            if not isinstance(current, dict) or step not in current:
+                return default
+            current = current[step]
+
+    return current
+
+
+def _extract_decl_id_name(node: dict[str, Any]) -> Optional[str]:
+    """
+    Extract the name from a Lean.Parser.Command.declId node.
+
+    Structure (based on Lean parser grammar):
+    - theorem/lemma node: {"kind": "Lean.Parser.Command.theorem", "args": [..., declId, ...]}
+    - declId: {"kind": "Lean.Parser.Command.declId", "args": [name_node, ...]}
+    - name_node: {"val": "theorem_name", "info": {...}} (from Syntax.ident or Syntax.atom)
+
+    Origin: Based on Lean's parser grammar where declId is the first argument after
+    the theorem/lemma keyword, and the name is the first argument of declId.
+
+    Parameters
+    ----------
+    node: dict[str, Any]
+        A theorem or lemma node
+
+    Returns
+    -------
+    Optional[str]
+        The theorem/lemma name, or None if not found
+    """
+    # Structure: node["args"][1] = declId, declId["args"][0] = name_node
+    # Based on Lean parser: theorem declId : type := proof
+    name_node = _extract_nested_value(node, ["args", 1, "args", 0])
+    if isinstance(name_node, dict):
+        return name_node.get("val")
+    return None
+
+
+def _extract_have_id_name(node: dict[str, Any]) -> Optional[str]:
+    """
+    Extract the name from a Lean.Parser.Tactic.tacticHave_ node.
+
+    Structure (based on Lean parser grammar):
+    - tacticHave_: {"kind": "Lean.Parser.Tactic.tacticHave_", "args": [..., haveDecl, ...]}
+    - haveDecl: {"kind": "Lean.Parser.Term.haveDecl", "args": [haveIdDecl, ...]}
+    - haveIdDecl: {"kind": "Lean.Parser.Term.haveIdDecl", "args": [haveId, ...]}
+    - haveId: {"kind": "Lean.Parser.Term.haveId", "args": [name_node, ...]}
+    - name_node: {"val": "have_name", "info": {...}} (from Syntax.ident)
+
+    Origin: Based on Lean's parser grammar where:
+    - haveDecl is the second argument of tacticHave_ (args[1])
+    - haveIdDecl is the first argument of haveDecl (args[0])
+    - haveId is the first argument of haveIdDecl (args[0])
+    - name is the first argument of haveId (args[0])
+
+    This creates the path: args[1] -> args[0] -> args[0] -> args[0] -> val
+
+    Parameters
+    ----------
+    node: dict[str, Any]
+        A tacticHave_ node
+
+    Returns
+    -------
+    Optional[str]
+        The have statement name, or None if not found
+    """
+    # Structure: node["args"][1] = haveDecl
+    #           haveDecl["args"][0] = haveIdDecl
+    #           haveIdDecl["args"][0] = haveId
+    #           haveId["args"][0] = name_node
+    #           name_node["val"] = name
+    # Based on Lean parser: have haveIdDecl : type := proof
+    name_node = _extract_nested_value(node, ["args", 1, "args", 0, "args", 0, "args", 0])
+    if isinstance(name_node, dict):
+        return name_node.get("val")
+    return None
+
+
 def _context_after_decl(node: dict[str, Any], context: dict[str, Optional[str]]) -> dict[str, Optional[str]]:
+    """
+    Update context after encountering a theorem or lemma declaration.
+
+    Structure documented in _extract_decl_id_name().
+    """
     kind = node.get("kind")
     if kind in {"Lean.Parser.Command.theorem", "Lean.Parser.Command.lemma"}:
-        name: Optional[str] = None
-        for arg in node.get("args", []):
-            if isinstance(arg, dict) and arg.get("kind") == "Lean.Parser.Command.declId":
-                with contextlib.suppress(Exception):
-                    name = arg["args"][0]["val"]
+        name = _extract_decl_id_name(node)
         if name:
             return {"theorem": name, "have": None}
     return context
 
 
 def _context_after_have(node: dict[str, Any], context: dict[str, Optional[str]]) -> dict[str, Optional[str]]:
+    """
+    Update context after encountering a have statement.
+
+    Structure documented in _extract_have_id_name().
+    """
     if node.get("kind") == "Lean.Parser.Tactic.tacticHave_":
-        have_name: Optional[str] = None
-        with contextlib.suppress(Exception):
-            have_decl = node["args"][1]
-            have_id_decl = have_decl["args"][0]
-            have_id = have_id_decl["args"][0]["args"][0]["val"]
-            have_name = have_id
+        have_name = _extract_have_id_name(node)
         if have_name:
             return {**context, "have": have_name}
     return context
@@ -59,30 +270,40 @@ def _get_named_subgoal_ast(node: Node, target_name: str) -> Optional[dict[str, A
     """
     Find the sub-AST for a given theorem/lemma/have name.
     Returns the entire subtree rooted at that declaration.
+
+    Parameters
+    ----------
+    node: Node
+        The AST node to search
+    target_name: str
+        The name of the subgoal to find
+
+    Returns
+    -------
+    Optional[dict[str, Any]]
+        The AST of the named subgoal, or None if not found.
     """
+    # Validate target_name
+    if not isinstance(target_name, str) or not target_name:
+        logging.warning(f"Invalid target_name: expected non-empty string, got {type(target_name).__name__}")
+        return None
+
     if isinstance(node, dict):
         kind = node.get("kind")
 
         # Theorem or lemma
+        # Structure documented in _extract_decl_id_name()
         if kind in {"Lean.Parser.Command.theorem", "Lean.Parser.Command.lemma"}:
-            try:
-                decl_id = node["args"][1]  # declId
-                name = decl_id["args"][0]["val"]
-                if name == target_name:
-                    return node
-            except Exception:
-                logging.exception("Exception occurred")
+            name = _extract_decl_id_name(node)
+            if name == target_name:
+                return node
 
         # Have subgoal
+        # Structure documented in _extract_have_id_name()
         if kind == "Lean.Parser.Tactic.tacticHave_":
-            try:
-                have_decl = node["args"][1]  # Term.haveDecl
-                have_id_decl = have_decl["args"][0]
-                have_id = have_id_decl["args"][0]["args"][0]["val"]
-                if have_id == target_name:
-                    return node
-            except Exception:
-                logging.exception("Exception occurred")
+            have_name = _extract_have_id_name(node)
+            if have_name == target_name:
+                return node
 
         # Recurse into children
         for val in node.values():
@@ -444,10 +665,10 @@ def __extract_type_ast(node: Any, binding_name: Optional[str] = None) -> Optiona
                         f"Could not find obtain binding '{binding_name}' in node when extracting type, returning None"
                     )
                     return None
-            except Exception:
+            except (KeyError, IndexError, TypeError, AttributeError) as e:
                 # If extraction fails due to malformed AST, log and return None
                 logging.debug(
-                    f"Exception extracting obtain names for binding '{binding_name}', returning None",
+                    f"Exception extracting obtain names for binding '{binding_name}': {e}, returning None",
                     exc_info=True,
                 )
                 return None
@@ -467,10 +688,10 @@ def __extract_type_ast(node: Any, binding_name: Optional[str] = None) -> Optiona
                         f"Could not find choose binding '{binding_name}' in node when extracting type, returning None"
                     )
                     return None
-            except Exception:
+            except (KeyError, IndexError, TypeError, AttributeError) as e:
                 # If extraction fails due to malformed AST, log and return None
                 logging.debug(
-                    f"Exception extracting choose names for binding '{binding_name}', returning None",
+                    f"Exception extracting choose names for binding '{binding_name}': {e}, returning None",
                     exc_info=True,
                 )
                 return None
@@ -490,10 +711,10 @@ def __extract_type_ast(node: Any, binding_name: Optional[str] = None) -> Optiona
                         f"Could not find generalize binding '{binding_name}' in node when extracting type, returning None"
                     )
                     return None
-            except Exception:
+            except (KeyError, IndexError, TypeError, AttributeError) as e:
                 # If extraction fails due to malformed AST, log and return None
                 logging.debug(
-                    f"Exception extracting generalize names for binding '{binding_name}', returning None",
+                    f"Exception extracting generalize names for binding '{binding_name}': {e}, returning None",
                     exc_info=True,
                 )
                 return None
@@ -513,10 +734,10 @@ def __extract_type_ast(node: Any, binding_name: Optional[str] = None) -> Optiona
                         f"Could not find match binding '{binding_name}' in node when extracting type, returning None"
                     )
                     return None
-            except Exception:
+            except (KeyError, IndexError, TypeError, AttributeError) as e:
                 # If extraction fails due to malformed AST, log and return None
                 logging.debug(
-                    f"Exception extracting match names for binding '{binding_name}', returning None",
+                    f"Exception extracting match names for binding '{binding_name}': {e}, returning None",
                     exc_info=True,
                 )
                 return None
@@ -779,8 +1000,16 @@ def __parse_goal_context(goal: str) -> dict[str, str]:
         ⊢ some_goal"
 
     Returns a dict mapping variable names to their types.
+
+    Notes:
+    - Uses rsplit(":", 1) to handle types that may contain colons (though rare in goal context)
+    - Filters out empty and whitespace-only names
+    - Validates that names are non-empty after processing
     """
     var_types: dict[str, str] = {}
+    if not isinstance(goal, str):
+        return var_types
+
     lines = goal.split("\n")
 
     for line in lines:
@@ -789,11 +1018,17 @@ def __parse_goal_context(goal: str) -> dict[str, str]:
         if line.startswith("⊢"):
             break
 
+        # Skip empty lines
+        if not line:
+            continue
+
         # Check if line contains a type declaration (has colon)
         if ":" not in line:
             continue
 
         # Split at the last colon to separate name(s) from type
+        # Using rsplit(":", 1) handles cases where type might contain colons
+        # (though this is rare in Lean goal context, it's defensive)
         parts = line.rsplit(":", 1)
         if len(parts) != 2:
             continue
@@ -801,8 +1036,20 @@ def __parse_goal_context(goal: str) -> dict[str, str]:
         names_part = parts[0].strip()
         type_part = parts[1].strip()
 
+        # Skip if no names or no type
+        if not names_part or not type_part:
+            continue
+
         # Handle multiple variables with same type (e.g., "O A C B D : Complex")
-        names = names_part.split()
+        # Filter out empty strings and whitespace-only strings
+        names = [n.strip() for n in names_part.split() if n.strip()]
+
+        # Validate names are non-empty after filtering
+        if not names:
+            continue
+
+        # Add each valid name with its type
+        # Names are already validated (non-empty, non-whitespace) from the list comprehension above
         for name in names:
             var_types[name] = type_part
 
@@ -854,14 +1101,10 @@ def __contains_target_name(node: Node, target_name: str, name_map: dict[str, dic
         # Check various node types that might contain the target
         kind = node.get("kind", "")
         if kind == "Lean.Parser.Tactic.tacticHave_":
-            try:
-                have_decl = node["args"][1]
-                have_id_decl = have_decl["args"][0]
-                have_id = have_id_decl["args"][0]["args"][0]["val"]
-                if have_id == target_name:
-                    return True
-            except Exception:  # noqa: S110
-                pass
+            # Structure documented in _extract_have_id_name()
+            have_name = _extract_have_id_name(node)
+            if have_name == target_name:
+                return True
         # Recurse into children
         for v in node.values():
             if __contains_target_name(v, target_name, name_map):
@@ -885,23 +1128,16 @@ def __find_enclosing_theorem(ast: Node, target_name: str) -> Optional[dict]:  # 
             # Check for theorem/lemma names
             kind = node.get("kind", "")
             if kind in {"Lean.Parser.Command.theorem", "Lean.Parser.Command.lemma"}:
-                try:
-                    decl_id = node["args"][1]
-                    name = decl_id["args"][0]["val"]
-                    if name == target_name:
-                        return True
-                except Exception:  # noqa: S110
-                    pass
+                # Structure documented in _extract_decl_id_name()
+                name = _extract_decl_id_name(node)
+                if name == target_name:
+                    return True
             # Check for have statement names
+            # Structure documented in _extract_have_id_name()
             if kind == "Lean.Parser.Tactic.tacticHave_":
-                try:
-                    have_decl = node["args"][1]
-                    have_id_decl = have_decl["args"][0]
-                    have_id = have_id_decl["args"][0]["args"][0]["val"]
-                    if have_id == target_name:
-                        return True
-                except Exception:  # noqa: S110
-                    pass
+                have_name = _extract_have_id_name(node)
+                if have_name == target_name:
+                    return True
             # Recurse into children
             for v in node.values():
                 if contains_target(v):
@@ -1001,21 +1237,17 @@ def __find_earlier_bindings(  # noqa: C901
             kind = node.get("kind", "")
 
             # Check if this is a have statement
+            # Structure documented in _extract_have_id_name()
             if kind == "Lean.Parser.Tactic.tacticHave_":
-                try:
-                    have_decl = node["args"][1]
-                    have_id_decl = have_decl["args"][0]
-                    have_id = have_id_decl["args"][0]["args"][0]["val"]
-
-                    if have_id == target_name:
+                have_name = _extract_have_id_name(node)
+                if have_name:
+                    if have_name == target_name:
                         # Found the target, stop collecting
                         target_found = True
                         return
                     else:
                         # This is an earlier have, collect it
-                        earlier_bindings.append((have_id, "have", node))
-                except Exception:  # noqa: S110
-                    pass
+                        earlier_bindings.append((have_name, "have", node))
 
             # Check if this is a let binding
             # Let can appear as: let name := value or let name : type := value
@@ -1030,7 +1262,8 @@ def __find_earlier_bindings(  # noqa: C901
                             return
                         else:
                             earlier_bindings.append((let_name, "let", node))
-                except Exception:  # noqa: S110
+                except (KeyError, IndexError, TypeError, AttributeError):
+                    # Silently handle expected errors from malformed AST structures
                     pass
 
             # Check if this is an obtain statement
@@ -1046,7 +1279,8 @@ def __find_earlier_bindings(  # noqa: C901
                         # Add all obtained names as separate bindings
                         for name in obtained_names:
                             earlier_bindings.append((name, "obtain", node))
-                except Exception:  # noqa: S110
+                except (KeyError, IndexError, TypeError, AttributeError):
+                    # Silently handle expected errors from malformed AST structures
                     pass
 
             # Check if this is a set statement
@@ -1060,7 +1294,8 @@ def __find_earlier_bindings(  # noqa: C901
                             return
                         else:
                             earlier_bindings.append((set_name, "set", node))
-                except Exception:  # noqa: S110
+                except (KeyError, IndexError, TypeError, AttributeError):
+                    # Silently handle expected errors from malformed AST structures
                     pass
 
             # Check if this is a suffices statement
@@ -1074,7 +1309,8 @@ def __find_earlier_bindings(  # noqa: C901
                             return
                         else:
                             earlier_bindings.append((suffices_name, "suffices", node))
-                except Exception:  # noqa: S110
+                except (KeyError, IndexError, TypeError, AttributeError):
+                    # Silently handle expected errors from malformed AST structures
                     pass
 
             # Check if this is a choose statement
@@ -1090,7 +1326,8 @@ def __find_earlier_bindings(  # noqa: C901
                         # Add all chosen names as separate bindings
                         for name in chosen_names:
                             earlier_bindings.append((name, "choose", node))
-                except Exception:  # noqa: S110
+                except (KeyError, IndexError, TypeError, AttributeError):
+                    # Silently handle expected errors from malformed AST structures
                     pass
 
             # Check if this is a generalize statement
@@ -1106,7 +1343,8 @@ def __find_earlier_bindings(  # noqa: C901
                         # Add all generalized names as separate bindings
                         for name in generalized_names:
                             earlier_bindings.append((name, "generalize", node))
-                except Exception:  # noqa: S110
+                except (KeyError, IndexError, TypeError, AttributeError):
+                    # Silently handle expected errors from malformed AST structures
                     pass
 
             # Check if this is a match expression
@@ -1150,7 +1388,8 @@ def __find_earlier_bindings(  # noqa: C901
                                             return
                     # If target not found in any branch, continue normal traversal
                     # (to handle cases where match appears before target but target is outside)
-                except Exception:  # noqa: S110
+                except (KeyError, IndexError, TypeError, AttributeError):
+                    # Silently handle expected errors from malformed AST structures
                     # If match handling fails, continue with normal traversal
                     pass
 
@@ -1175,25 +1414,46 @@ def __find_earlier_bindings(  # noqa: C901
 def __extract_let_name(let_node: dict) -> Optional[str]:
     """
     Extract the variable name from a let binding node.
+
+    Returns None if the name cannot be extracted, with debug logging for failures.
     """
+    if not isinstance(let_node, dict):
+        logging.debug("__extract_let_name: let_node is not a dict")
+        return None
+
     # Look for letIdDecl or letId patterns
     let_id = __find_first(
         let_node,
         lambda n: n.get("kind") in {"Lean.Parser.Term.letId", "Lean.Parser.Term.letIdDecl", "Lean.binderIdent"},
     )
-    if let_id:
-        val_node = __find_first(let_id, lambda n: isinstance(n.get("val"), str) and n.get("val") != "")
-        if val_node:
-            val = val_node.get("val")
-            return str(val) if val is not None else None
-    return None
+    if not let_id:
+        logging.debug("__extract_let_name: Could not find letId/letIdDecl/binderIdent in let_node")
+        return None
+
+    val_node = __find_first(let_id, lambda n: isinstance(n.get("val"), str) and n.get("val") != "")
+    if not val_node:
+        logging.debug("__extract_let_name: Could not find val node with non-empty string in letId")
+        return None
+
+    val = val_node.get("val")
+    if val is None:
+        logging.debug("__extract_let_name: val node exists but val is None")
+        return None
+
+    return str(val)
 
 
-def __extract_obtain_names(obtain_node: dict) -> list[str]:
+def __extract_obtain_names(obtain_node: dict) -> list[str]:  # noqa: C901
     """
     Extract variable names from an obtain statement.
     obtain ⟨x, y, hz⟩ := proof extracts [x, y, hz]
+
+    Returns empty list if no names found, with debug logging for failures.
     """
+    if not isinstance(obtain_node, dict):
+        logging.debug("__extract_obtain_names: obtain_node is not a dict")
+        return []
+
     names: list[str] = []
 
     # Look for pattern/rcases pattern which contains the destructured names
@@ -1216,14 +1476,22 @@ def __extract_obtain_names(obtain_node: dict) -> list[str]:
                 collect_names(item)
 
     collect_names(obtain_node)
+    if not names:
+        logging.debug("__extract_obtain_names: No names extracted from obtain_node (may be unnamed binding)")
     return names
 
 
-def __extract_choose_names(choose_node: dict) -> list[str]:
+def __extract_choose_names(choose_node: dict) -> list[str]:  # noqa: C901
     """
     Extract variable names from a choose statement.
     choose x hx using h extracts [x, hx]
+
+    Returns empty list if no names found, with debug logging for failures.
     """
+    if not isinstance(choose_node, dict):
+        logging.debug("__extract_choose_names: choose_node is not a dict")
+        return []
+
     names: list[str] = []
 
     # Look for binderIdent nodes within the choose structure
@@ -1246,16 +1514,24 @@ def __extract_choose_names(choose_node: dict) -> list[str]:
                 collect_names(item)
 
     collect_names(choose_node)
+    if not names:
+        logging.debug("__extract_choose_names: No names extracted from choose_node (may be unnamed binding)")
     return names
 
 
-def __extract_generalize_names(generalize_node: dict) -> list[str]:
+def __extract_generalize_names(generalize_node: dict) -> list[str]:  # noqa: C901
     """
     Extract variable names from a generalize statement.
     generalize h : e = x extracts [h, x]
     generalize e = x extracts [x]
     generalize h : e = x, h2 : e2 = x2 extracts [h, x, h2, x2]
+
+    Returns empty list if no names found, with debug logging for failures.
     """
+    if not isinstance(generalize_node, dict):
+        logging.debug("__extract_generalize_names: generalize_node is not a dict")
+        return []
+
     names: list[str] = []
 
     # Look for binderIdent nodes within the generalize structure
@@ -1278,6 +1554,8 @@ def __extract_generalize_names(generalize_node: dict) -> list[str]:
                 collect_names(item)
 
     collect_names(generalize_node)
+    if not names:
+        logging.debug("__extract_generalize_names: No names extracted from generalize_node (may be unnamed binding)")
     return names
 
 
@@ -1289,12 +1567,15 @@ def __extract_match_names(match_node: dict) -> list[str]:  # noqa: C901
     Note: This extracts names from all branches, including nested match expressions.
     Match pattern bindings are scoped to their branch, but we collect all names
     to verify if a binding_name exists anywhere in the match structure.
-    """
-    names: list[str] = []
 
+    Returns empty list if no names found, with debug logging for failures.
+    """
     # Input validation: ensure match_node is a dict
     if not isinstance(match_node, dict):
+        logging.debug("__extract_match_names: match_node is not a dict")
         return []
+
+    names: list[str] = []
 
     # Find all matchAlt nodes in the match expression
     def find_match_alts(n: Node) -> None:
@@ -1305,10 +1586,10 @@ def __extract_match_names(match_node: dict) -> list[str]:  # noqa: C901
                 try:
                     branch_names = __extract_match_pattern_names(n)
                     names.extend(branch_names)
-                except Exception:
+                except (KeyError, IndexError, TypeError, AttributeError) as e:
                     # Log and skip this branch, continue with others
                     logging.debug(
-                        "Exception extracting names from matchAlt branch, skipping",
+                        f"Exception extracting names from matchAlt branch: {e}, skipping",
                         exc_info=True,
                     )
             # Recurse
@@ -1326,6 +1607,10 @@ def __extract_match_names(match_node: dict) -> list[str]:  # noqa: C901
         if name not in seen:
             seen.add(name)
             unique_names.append(name)
+    if not unique_names:
+        logging.debug(
+            "__extract_match_names: No names extracted from match_node (may be unnamed bindings or no matchAlt branches)"
+        )
     return unique_names
 
 
@@ -1399,28 +1684,53 @@ def __extract_match_pattern_names(match_alt_node: dict) -> list[str]:  # noqa: C
 def __extract_binder_name(binder: dict) -> Optional[str]:
     """
     Extract the variable name from a binder AST node.
+
+    Returns None if the name cannot be extracted, with debug logging for failures.
     """
+    if not isinstance(binder, dict):
+        logging.debug("__extract_binder_name: binder is not a dict")
+        return None
+
     # Look for binderIdent node
     binder_ident = __find_first(binder, lambda n: n.get("kind") in {"Lean.binderIdent", "Lean.Parser.Term.binderIdent"})
-    if binder_ident:
-        name_node = __find_first(binder_ident, lambda n: isinstance(n.get("val"), str) and n.get("val") != "")
-        if name_node:
-            val = name_node.get("val")
-            return str(val) if val is not None else None
-    return None
+    if not binder_ident:
+        logging.debug("__extract_binder_name: Could not find binderIdent in binder")
+        return None
+
+    name_node = __find_first(binder_ident, lambda n: isinstance(n.get("val"), str) and n.get("val") != "")
+    if not name_node:
+        logging.debug("__extract_binder_name: Could not find val node with non-empty string in binderIdent")
+        return None
+
+    val = name_node.get("val")
+    if val is None:
+        logging.debug("__extract_binder_name: val node exists but val is None")
+        return None
+
+    return str(val)
 
 
 def __extract_set_name(set_node: dict) -> Optional[str]:
     """
     Extract the variable name from a set statement node.
     set x := value or set x : Type := value
+
+    Returns None if the name cannot be extracted, with debug logging for failures.
     """
+    if not isinstance(set_node, dict):
+        logging.debug("__extract_set_name: set_node is not a dict")
+        return None
+
     # Look for setIdDecl or similar patterns
     # The structure is similar to let: [set_keyword, setDecl, ...]
     set_id = __find_first(
         set_node,
         lambda n: n.get("kind") in {"Lean.Parser.Term.setId", "Lean.Parser.Term.setIdDecl", "Lean.binderIdent"},
     )
+    if not set_id:
+        logging.debug("__extract_set_name: Could not find setId/setIdDecl/binderIdent in set_node")
+        return None
+
     if set_id:
         val_node = __find_first(set_id, lambda n: isinstance(n.get("val"), str) and n.get("val") != "")
         if val_node:
@@ -1803,6 +2113,22 @@ def __extract_suffices_name(suffices_node: dict) -> Optional[str]:
 def _get_named_subgoal_rewritten_ast(  # noqa: C901
     ast: Node, target_name: str, sorries: Optional[list[dict[str, Any]]] = None
 ) -> dict:
+    # Validate AST structure
+    if not _validate_ast_structure(ast, raise_on_error=False):
+        raise ValueError("Invalid AST structure: AST must be a dict or list")  # noqa: TRY003
+
+    # Validate target_name
+    if not isinstance(target_name, str) or not target_name:
+        raise ValueError("target_name must be a non-empty string")  # noqa: TRY003
+
+    # Validate sorries if provided
+    if sorries is not None:
+        if not isinstance(sorries, list):
+            raise ValueError("sorries must be a list or None")  # noqa: TRY003
+        for i, sorry in enumerate(sorries):
+            if not isinstance(sorry, dict):
+                raise TypeError(f"sorries[{i}] must be a dict")  # noqa: TRY003
+
     name_map = __collect_named_decls(ast)
     if target_name not in name_map:
         raise KeyError(f"target '{target_name}' not found in AST")  # noqa: TRY003
