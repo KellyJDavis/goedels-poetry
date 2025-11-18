@@ -25,7 +25,17 @@ class AST:
             The AST representation provided by the Kimin server.
         sorries: Optional[list[dict[str, Any]]]
             Optional list of sorry entries from check response containing goal context with type information.
+
+        Raises
+        ------
+        ValueError
+            If the AST structure is invalid.
         """
+        from goedels_poetry.parsers.util import _validate_ast_structure
+
+        # Validate AST structure (will raise ValueError if invalid)
+        _validate_ast_structure(ast, raise_on_error=True)
+
         self._ast: dict[str, Any] = ast
         self._sorries: list[dict[str, Any]] = sorries or []
 
