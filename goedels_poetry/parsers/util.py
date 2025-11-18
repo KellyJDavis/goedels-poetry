@@ -319,15 +319,15 @@ def __extract_type_ast(node: Any, binding_name: Optional[str] = None) -> Optiona
     node: Any
         The AST node to extract type from
     binding_name: Optional[str]
-        For let/set/suffices/choose/obtain/generalize bindings, if provided, only extract type
+        For let/set/suffices/choose/obtain/generalize/match bindings, if provided, only extract type
         from the binding matching this name. If None, extract from the first binding found.
-        For choose/obtain/generalize, types come from goal context (not AST), so this parameter
+        For choose/obtain/generalize/match, types come from goal context (not AST), so this parameter
         is used for verification only.
 
     Returns
     -------
     Optional[dict]
-        The type AST, or None if not found. For choose/obtain/generalize, always returns None
+        The type AST, or None if not found. For choose/obtain/generalize/match, always returns None
         as types come from goal context, not the AST.
     """
     if not isinstance(node, dict):
@@ -504,6 +504,23 @@ def __extract_type_ast(node: Any, binding_name: Optional[str] = None) -> Optiona
     if k in {"Lean.Parser.Term.match", "Lean.Parser.Tactic.tacticMatch_"}:
         # match pattern bindings don't have explicit type annotations in the syntax
         # Types must come from goal context
+        # However, if binding_name is provided, verify it matches one of the match pattern names
+        if binding_name is not None:
+            try:
+                match_names = __extract_match_names(node)
+                if binding_name not in match_names:
+                    logging.debug(
+                        f"Could not find match binding '{binding_name}' in node when extracting type, returning None"
+                    )
+                    return None
+            except Exception:
+                # If extraction fails due to malformed AST, log and return None
+                logging.debug(
+                    f"Exception extracting match names for binding '{binding_name}', returning None",
+                    exc_info=True,
+                )
+                return None
+        # Types come from goal context, not AST, so return None
         return None
     # set: extract type from set binding (if explicitly typed)
     # set x : T := value or set x := value (inferred type)
@@ -1262,6 +1279,54 @@ def __extract_generalize_names(generalize_node: dict) -> list[str]:
 
     collect_names(generalize_node)
     return names
+
+
+def __extract_match_names(match_node: dict) -> list[str]:  # noqa: C901
+    """
+    Extract variable names from all match pattern branches.
+    match x with | some n => ... | (a, b) => ... extracts [n, a, b] from all branches
+
+    Note: This extracts names from all branches, including nested match expressions.
+    Match pattern bindings are scoped to their branch, but we collect all names
+    to verify if a binding_name exists anywhere in the match structure.
+    """
+    names: list[str] = []
+
+    # Input validation: ensure match_node is a dict
+    if not isinstance(match_node, dict):
+        return []
+
+    # Find all matchAlt nodes in the match expression
+    def find_match_alts(n: Node) -> None:
+        if isinstance(n, dict):
+            if n.get("kind") in {"Lean.Parser.Term.matchAlt", "Lean.Parser.Tactic.matchAlt"}:
+                # Extract names from this branch
+                # Handle exceptions for malformed matchAlt nodes gracefully
+                try:
+                    branch_names = __extract_match_pattern_names(n)
+                    names.extend(branch_names)
+                except Exception:
+                    # Log and skip this branch, continue with others
+                    logging.debug(
+                        "Exception extracting names from matchAlt branch, skipping",
+                        exc_info=True,
+                    )
+            # Recurse
+            for v in n.values():
+                find_match_alts(v)
+        elif isinstance(n, list):
+            for item in n:
+                find_match_alts(item)
+
+    find_match_alts(match_node)
+    # Remove duplicates while preserving order
+    seen = set()
+    unique_names = []
+    for name in names:
+        if name not in seen:
+            seen.add(name)
+            unique_names.append(name)
+    return unique_names
 
 
 def __extract_match_pattern_names(match_alt_node: dict) -> list[str]:  # noqa: C901

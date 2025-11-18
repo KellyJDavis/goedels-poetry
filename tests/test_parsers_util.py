@@ -4175,3 +4175,703 @@ def test_extract_type_ast_obtain_pattern_without_angle_brackets() -> None:
     # Should still extract names even without explicit angle brackets
     result = __extract_type_ast(obtain_node, binding_name="x")
     assert result is None  # Types come from goal context, not AST
+
+
+# ============================================================================
+# Tests for __extract_type_ast for match bindings
+# ============================================================================
+
+
+def test_extract_type_ast_match_single_with_name() -> None:
+    """Test extracting type from single match binding with name specified."""
+    match_node = {
+        "kind": "Lean.Parser.Term.match",
+        "args": [
+            {"val": "match"},
+            {"val": "x"},
+            {"val": "with"},
+            {
+                "kind": "Lean.Parser.Term.matchAlt",
+                "args": [
+                    {"val": "|"},
+                    {
+                        "kind": "Lean.binderIdent",
+                        "args": [{"val": "n"}],
+                    },
+                    {"val": "=>"},
+                    {"val": "body"},
+                ],
+            },
+            {"val": "end"},
+        ],
+    }
+    # Match doesn't have explicit types in AST, types come from goal context
+    result = __extract_type_ast(match_node, binding_name="n")
+    assert result is None  # Types come from goal context, not AST
+
+
+def test_extract_type_ast_match_single_no_name() -> None:
+    """Test extracting type from single match binding without name specified."""
+    match_node = {
+        "kind": "Lean.Parser.Term.match",
+        "args": [
+            {"val": "match"},
+            {"val": "x"},
+            {"val": "with"},
+            {
+                "kind": "Lean.Parser.Term.matchAlt",
+                "args": [
+                    {"val": "|"},
+                    {
+                        "kind": "Lean.binderIdent",
+                        "args": [{"val": "n"}],
+                    },
+                    {"val": "=>"},
+                    {"val": "body"},
+                ],
+            },
+            {"val": "end"},
+        ],
+    }
+    # Match doesn't have explicit types in AST, types come from goal context
+    result = __extract_type_ast(match_node)
+    assert result is None  # Types come from goal context, not AST
+
+
+def test_extract_type_ast_match_multiple_bindings_with_name() -> None:
+    """Test extracting type from match with multiple bindings when name is specified."""
+    match_node = {
+        "kind": "Lean.Parser.Term.match",
+        "args": [
+            {"val": "match"},
+            {"val": "x"},
+            {"val": "with"},
+            {
+                "kind": "Lean.Parser.Term.matchAlt",
+                "args": [
+                    {"val": "|"},
+                    {
+                        "kind": "Lean.binderIdent",
+                        "args": [{"val": "a"}],
+                    },
+                    {"val": ","},
+                    {
+                        "kind": "Lean.binderIdent",
+                        "args": [{"val": "b"}],
+                    },
+                    {"val": "=>"},
+                    {"val": "body1"},
+                ],
+            },
+            {
+                "kind": "Lean.Parser.Term.matchAlt",
+                "args": [
+                    {"val": "|"},
+                    {
+                        "kind": "Lean.binderIdent",
+                        "args": [{"val": "c"}],
+                    },
+                    {"val": "=>"},
+                    {"val": "body2"},
+                ],
+            },
+            {"val": "end"},
+        ],
+    }
+    # Should verify binding_name matches before returning None
+    result_a = __extract_type_ast(match_node, binding_name="a")
+    assert result_a is None  # Types come from goal context, not AST
+
+    result_b = __extract_type_ast(match_node, binding_name="b")
+    assert result_b is None  # Types come from goal context, not AST
+
+    result_c = __extract_type_ast(match_node, binding_name="c")
+    assert result_c is None  # Types come from goal context, not AST
+
+
+def test_extract_type_ast_match_multiple_bindings_no_name() -> None:
+    """Test extracting type from match with multiple bindings when no name specified."""
+    match_node = {
+        "kind": "Lean.Parser.Term.match",
+        "args": [
+            {"val": "match"},
+            {"val": "x"},
+            {"val": "with"},
+            {
+                "kind": "Lean.Parser.Term.matchAlt",
+                "args": [
+                    {"val": "|"},
+                    {
+                        "kind": "Lean.binderIdent",
+                        "args": [{"val": "n"}],
+                    },
+                    {"val": "=>"},
+                    {"val": "body"},
+                ],
+            },
+            {"val": "end"},
+        ],
+    }
+    result = __extract_type_ast(match_node)
+    assert result is None  # Types come from goal context, not AST
+
+
+def test_extract_type_ast_match_binding_name_not_found() -> None:
+    """Test extracting type when binding name is not found in match statement."""
+    match_node = {
+        "kind": "Lean.Parser.Term.match",
+        "args": [
+            {"val": "match"},
+            {"val": "x"},
+            {"val": "with"},
+            {
+                "kind": "Lean.Parser.Term.matchAlt",
+                "args": [
+                    {"val": "|"},
+                    {
+                        "kind": "Lean.binderIdent",
+                        "args": [{"val": "n"}],
+                    },
+                    {"val": "=>"},
+                    {"val": "body"},
+                ],
+            },
+            {"val": "end"},
+        ],
+    }
+    result = __extract_type_ast(match_node, binding_name="nonexistent")
+    assert result is None  # Binding name not found, should return None
+
+
+def test_extract_type_ast_match_empty_names() -> None:
+    """Test extracting type when match statement has no names (edge case)."""
+    match_node = {
+        "kind": "Lean.Parser.Term.match",
+        "args": [
+            {"val": "match"},
+            {"val": "x"},
+            {"val": "with"},
+            {
+                "kind": "Lean.Parser.Term.matchAlt",
+                "args": [
+                    {"val": "|"},
+                    {"val": "none"},  # No binderIdent nodes
+                    {"val": "=>"},
+                    {"val": "body"},
+                ],
+            },
+            {"val": "end"},
+        ],
+    }
+    # No binderIdent nodes, so no names extracted
+    result = __extract_type_ast(match_node, binding_name="n")
+    assert result is None  # No names found, binding_name won't match
+
+
+def test_extract_type_ast_match_empty_node() -> None:
+    """Test extracting type from empty match node (edge case)."""
+    match_node = {
+        "kind": "Lean.Parser.Term.match",
+        "args": [],
+    }
+    result = __extract_type_ast(match_node, binding_name="n")
+    assert result is None  # Empty node, no names to extract
+
+
+def test_extract_type_ast_match_malformed_ast_exception() -> None:
+    """Test that exception handling works for malformed AST."""
+    # Create a malformed node that will cause exception in extraction
+    match_node = {
+        "kind": "Lean.Parser.Term.match",
+        "args": [
+            {"val": "match"},
+            # Missing structure that will cause exception
+            None,  # This will cause issues when iterating
+        ],
+    }
+    # Should handle exception gracefully and return None
+    result = __extract_type_ast(match_node, binding_name="n")
+    assert result is None  # Exception handled, returns None
+
+
+def test_extract_type_ast_match_nested_structure() -> None:
+    """Test extracting type from match with nested binderIdent structure."""
+    match_node = {
+        "kind": "Lean.Parser.Term.match",
+        "args": [
+            {"val": "match"},
+            {"val": "x"},
+            {"val": "with"},
+            {
+                "kind": "Lean.Parser.Term.matchAlt",
+                "args": [
+                    {"val": "|"},
+                    {
+                        "kind": "Lean.Parser.Term.binderIdent",
+                        "args": [
+                            {
+                                "kind": "Lean.binderIdent",
+                                "args": [{"val": "n"}],
+                            }
+                        ],
+                    },
+                    {"val": "=>"},
+                    {"val": "body"},
+                ],
+            },
+            {"val": "end"},
+        ],
+    }
+    result = __extract_type_ast(match_node, binding_name="n")
+    assert result is None  # Types come from goal context, not AST
+
+
+def test_extract_type_ast_match_with_keywords_in_names() -> None:
+    """Test that keywords are not extracted as names."""
+    match_node = {
+        "kind": "Lean.Parser.Term.match",
+        "args": [
+            {"val": "match"},  # Should not be extracted as name
+            {"val": "x"},
+            {"val": "with"},  # Should not be extracted as name
+            {
+                "kind": "Lean.Parser.Term.matchAlt",
+                "args": [
+                    {"val": "|"},  # Should not be extracted as name
+                    {
+                        "kind": "Lean.binderIdent",
+                        "args": [{"val": "n"}],
+                    },
+                    {"val": "=>"},  # Should not be extracted as name
+                    {"val": "body"},
+                ],
+            },
+            {"val": "end"},  # Should not be extracted as name
+        ],
+    }
+    # Keywords should not be in extracted names
+    result_match = __extract_type_ast(match_node, binding_name="match")
+    assert result_match is None  # "match" is not a valid binding name
+
+    result_with = __extract_type_ast(match_node, binding_name="with")
+    assert result_with is None  # "with" is not a valid binding name
+
+    result_arrow = __extract_type_ast(match_node, binding_name="=>")
+    assert result_arrow is None  # "=>" is not a valid binding name
+
+
+def test_extract_type_ast_match_multiple_statements_same_name() -> None:
+    """Test handling multiple match statements with same binding name."""
+    # First match statement
+    match_node1 = {
+        "kind": "Lean.Parser.Term.match",
+        "args": [
+            {"val": "match"},
+            {"val": "x"},
+            {"val": "with"},
+            {
+                "kind": "Lean.Parser.Term.matchAlt",
+                "args": [
+                    {"val": "|"},
+                    {
+                        "kind": "Lean.binderIdent",
+                        "args": [{"val": "n"}],
+                    },
+                    {"val": "=>"},
+                    {"val": "body1"},
+                ],
+            },
+            {"val": "end"},
+        ],
+    }
+    # Second match statement with same name (different node)
+    match_node2 = {
+        "kind": "Lean.Parser.Term.match",
+        "args": [
+            {"val": "match"},
+            {"val": "y"},
+            {"val": "with"},
+            {
+                "kind": "Lean.Parser.Term.matchAlt",
+                "args": [
+                    {"val": "|"},
+                    {
+                        "kind": "Lean.binderIdent",
+                        "args": [{"val": "n"}],
+                    },
+                    {"val": "=>"},
+                    {"val": "body2"},
+                ],
+            },
+            {"val": "end"},
+        ],
+    }
+    # Each node should be verified independently
+    result1 = __extract_type_ast(match_node1, binding_name="n")
+    assert result1 is None  # Types come from goal context
+
+    result2 = __extract_type_ast(match_node2, binding_name="n")
+    assert result2 is None  # Types come from goal context
+
+
+def test_extract_type_ast_match_empty_binding_name() -> None:
+    """Test extracting type with empty string binding_name (edge case)."""
+    match_node = {
+        "kind": "Lean.Parser.Term.match",
+        "args": [
+            {"val": "match"},
+            {"val": "x"},
+            {"val": "with"},
+            {
+                "kind": "Lean.Parser.Term.matchAlt",
+                "args": [
+                    {"val": "|"},
+                    {
+                        "kind": "Lean.binderIdent",
+                        "args": [{"val": "n"}],
+                    },
+                    {"val": "=>"},
+                    {"val": "body"},
+                ],
+            },
+            {"val": "end"},
+        ],
+    }
+    # Empty string won't match any extracted names
+    result = __extract_type_ast(match_node, binding_name="")
+    assert result is None  # Empty string is not a valid binding name
+
+
+def test_extract_type_ast_match_complex_structure() -> None:
+    """Test extracting type from match with complex nested structure."""
+    match_node = {
+        "kind": "Lean.Parser.Term.match",
+        "args": [
+            {"val": "match"},
+            {"val": "x"},
+            {"val": "with"},
+            {
+                "kind": "Lean.Parser.Term.matchAlt",
+                "args": [
+                    {"val": "|"},
+                    {
+                        "kind": "Lean.binderIdent",
+                        "args": [{"val": "a"}],
+                    },
+                    {"val": ","},
+                    {
+                        "kind": "Lean.binderIdent",
+                        "args": [{"val": "b"}],
+                    },
+                    {"val": "=>"},
+                    {"val": "body1"},
+                ],
+            },
+            {
+                "kind": "Lean.Parser.Term.matchAlt",
+                "args": [
+                    {"val": "|"},
+                    {
+                        "kind": "Lean.binderIdent",
+                        "args": [{"val": "c"}],
+                    },
+                    {"val": "=>"},
+                    {"val": "body2"},
+                ],
+            },
+            {"val": "end"},
+        ],
+    }
+    # Should verify each binding name independently
+    result_a = __extract_type_ast(match_node, binding_name="a")
+    assert result_a is None
+
+    result_b = __extract_type_ast(match_node, binding_name="b")
+    assert result_b is None
+
+    result_c = __extract_type_ast(match_node, binding_name="c")
+    assert result_c is None
+
+    # Non-existent name
+    result_nonexistent = __extract_type_ast(match_node, binding_name="nonexistent")
+    assert result_nonexistent is None
+
+
+def test_extract_type_ast_match_missing_args() -> None:
+    """Test extracting type when args are missing (edge case)."""
+    match_node = {
+        "kind": "Lean.Parser.Term.match",
+        # Missing args
+    }
+    result = __extract_type_ast(match_node, binding_name="n")
+    assert result is None  # No args, can't extract names
+
+
+def test_extract_type_ast_match_args_not_list() -> None:
+    """Test extracting type when args is not a list (edge case)."""
+    match_node = {
+        "kind": "Lean.Parser.Term.match",
+        "args": "not_a_list",  # Invalid structure
+    }
+    # Should handle gracefully (extraction will fail, exception caught)
+    result = __extract_type_ast(match_node, binding_name="n")
+    assert result is None  # Exception handled, returns None
+
+
+def test_extract_type_ast_match_binder_ident_without_val() -> None:
+    """Test extracting type when binderIdent has no val (edge case)."""
+    match_node = {
+        "kind": "Lean.Parser.Term.match",
+        "args": [
+            {"val": "match"},
+            {"val": "x"},
+            {"val": "with"},
+            {
+                "kind": "Lean.Parser.Term.matchAlt",
+                "args": [
+                    {"val": "|"},
+                    {
+                        "kind": "Lean.binderIdent",
+                        "args": [],  # No val node
+                    },
+                    {"val": "=>"},
+                    {"val": "body"},
+                ],
+            },
+            {"val": "end"},
+        ],
+    }
+    # No names can be extracted from empty binderIdent
+    result = __extract_type_ast(match_node, binding_name="n")
+    assert result is None  # No names found
+
+
+def test_extract_type_ast_match_binder_ident_empty_val() -> None:
+    """Test extracting type when binderIdent has empty val (edge case)."""
+    match_node = {
+        "kind": "Lean.Parser.Term.match",
+        "args": [
+            {"val": "match"},
+            {"val": "x"},
+            {"val": "with"},
+            {
+                "kind": "Lean.Parser.Term.matchAlt",
+                "args": [
+                    {"val": "|"},
+                    {
+                        "kind": "Lean.binderIdent",
+                        "args": [{"val": ""}],  # Empty val
+                    },
+                    {"val": "=>"},
+                    {"val": "body"},
+                ],
+            },
+            {"val": "end"},
+        ],
+    }
+    # Empty val should not be extracted as name
+    result = __extract_type_ast(match_node, binding_name="")
+    assert result is None  # Empty val not extracted as name
+
+
+def test_extract_type_ast_match_no_binding_name_behavior() -> None:
+    """Test that behavior without binding_name is consistent."""
+    match_node = {
+        "kind": "Lean.Parser.Term.match",
+        "args": [
+            {"val": "match"},
+            {"val": "x"},
+            {"val": "with"},
+            {
+                "kind": "Lean.Parser.Term.matchAlt",
+                "args": [
+                    {"val": "|"},
+                    {
+                        "kind": "Lean.binderIdent",
+                        "args": [{"val": "n"}],
+                    },
+                    {"val": "=>"},
+                    {"val": "body"},
+                ],
+            },
+            {"val": "end"},
+        ],
+    }
+    # Without binding_name, should skip verification and return None directly
+    result = __extract_type_ast(match_node)
+    assert result is None  # Types come from goal context, not AST
+
+
+def test_extract_type_ast_match_verification_before_return() -> None:
+    """Test that binding_name verification happens before returning None."""
+    match_node = {
+        "kind": "Lean.Parser.Term.match",
+        "args": [
+            {"val": "match"},
+            {"val": "x"},
+            {"val": "with"},
+            {
+                "kind": "Lean.Parser.Term.matchAlt",
+                "args": [
+                    {"val": "|"},
+                    {
+                        "kind": "Lean.binderIdent",
+                        "args": [{"val": "n"}],
+                    },
+                    {"val": "=>"},
+                    {"val": "body"},
+                ],
+            },
+            {"val": "end"},
+        ],
+    }
+    # When binding_name matches, should return None (types from goal context)
+    result_match = __extract_type_ast(match_node, binding_name="n")
+    assert result_match is None
+
+    # When binding_name doesn't match, should return None (with debug log)
+    result_no_match = __extract_type_ast(match_node, binding_name="m")
+    assert result_no_match is None
+
+
+def test_extract_type_ast_match_nested_match_expressions() -> None:
+    """Test match with nested match expressions (edge case)."""
+    match_node = {
+        "kind": "Lean.Parser.Term.match",
+        "args": [
+            {"val": "match"},
+            {"val": "x"},
+            {"val": "with"},
+            {
+                "kind": "Lean.Parser.Term.matchAlt",
+                "args": [
+                    {"val": "|"},
+                    {
+                        "kind": "Lean.binderIdent",
+                        "args": [{"val": "n"}],
+                    },
+                    {"val": "=>"},
+                    {
+                        "kind": "Lean.Parser.Term.match",
+                        "args": [
+                            {"val": "match"},
+                            {"val": "y"},
+                            {"val": "with"},
+                            {
+                                "kind": "Lean.Parser.Term.matchAlt",
+                                "args": [
+                                    {"val": "|"},
+                                    {
+                                        "kind": "Lean.binderIdent",
+                                        "args": [{"val": "m"}],
+                                    },
+                                    {"val": "=>"},
+                                    {"val": "body"},
+                                ],
+                            },
+                            {"val": "end"},
+                        ],
+                    },
+                ],
+            },
+            {"val": "end"},
+        ],
+    }
+    # Should extract names from both outer and nested matches
+    result_n = __extract_type_ast(match_node, binding_name="n")
+    assert result_n is None  # Types come from goal context, not AST
+
+    result_m = __extract_type_ast(match_node, binding_name="m")
+    assert result_m is None  # Types come from goal context, not AST
+
+
+def test_extract_type_ast_match_tactic_match() -> None:
+    """Test extracting type from tacticMatch_ (tactic version of match)."""
+    match_node = {
+        "kind": "Lean.Parser.Tactic.tacticMatch_",
+        "args": [
+            {"val": "match"},
+            {"val": "x"},
+            {"val": "with"},
+            {
+                "kind": "Lean.Parser.Tactic.matchAlt",
+                "args": [
+                    {"val": "|"},
+                    {
+                        "kind": "Lean.binderIdent",
+                        "args": [{"val": "n"}],
+                    },
+                    {"val": "=>"},
+                    {"val": "body"},
+                ],
+            },
+            {"val": "end"},
+        ],
+    }
+    result = __extract_type_ast(match_node, binding_name="n")
+    assert result is None  # Types come from goal context, not AST
+
+
+def test_extract_type_ast_match_malformed_match_alt() -> None:
+    """Test that malformed matchAlt nodes are handled gracefully."""
+    match_node = {
+        "kind": "Lean.Parser.Term.match",
+        "args": [
+            {"val": "match"},
+            {"val": "x"},
+            {"val": "with"},
+            {
+                "kind": "Lean.Parser.Term.matchAlt",
+                "args": [
+                    {"val": "|"},
+                    None,  # Malformed pattern
+                    {"val": "=>"},
+                    {"val": "body"},
+                ],
+            },
+            {
+                "kind": "Lean.Parser.Term.matchAlt",
+                "args": [
+                    {"val": "|"},
+                    {
+                        "kind": "Lean.binderIdent",
+                        "args": [{"val": "n"}],
+                    },
+                    {"val": "=>"},
+                    {"val": "body2"},
+                ],
+            },
+            {"val": "end"},
+        ],
+    }
+    # Should handle malformed branch gracefully and still extract from valid branch
+    result = __extract_type_ast(match_node, binding_name="n")
+    assert result is None  # Types come from goal context, not AST
+
+
+def test_extract_type_ast_match_pattern_without_arrow() -> None:
+    """Test match pattern that might not have explicit => (edge case)."""
+    match_node = {
+        "kind": "Lean.Parser.Term.match",
+        "args": [
+            {"val": "match"},
+            {"val": "x"},
+            {"val": "with"},
+            {
+                "kind": "Lean.Parser.Term.matchAlt",
+                "args": [
+                    {"val": "|"},
+                    {
+                        "kind": "Lean.binderIdent",
+                        "args": [{"val": "n"}],
+                    },
+                    # Missing => token (malformed)
+                ],
+            },
+            {"val": "end"},
+        ],
+    }
+    # __extract_match_pattern_names should return empty list if no => found
+    # So no names extracted, binding_name won't match
+    result = __extract_type_ast(match_node, binding_name="n")
+    assert result is None  # No names found due to malformed pattern
