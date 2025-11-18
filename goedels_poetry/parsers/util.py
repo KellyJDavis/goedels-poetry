@@ -312,20 +312,23 @@ __TYPE_KIND_CANDIDATES = {
 
 def __extract_type_ast(node: Any, binding_name: Optional[str] = None) -> Optional[dict]:  # noqa: C901
     """
-    Extract type AST from a node (theorem, have, let, set, etc.).
+    Extract type AST from a node (theorem, have, let, set, suffices, choose, obtain, generalize, etc.).
 
     Parameters
     ----------
     node: Any
         The AST node to extract type from
     binding_name: Optional[str]
-        For let/set bindings, if provided, only extract type from the binding matching this name.
-        If None, extract from the first binding found.
+        For let/set/suffices/choose/obtain/generalize bindings, if provided, only extract type
+        from the binding matching this name. If None, extract from the first binding found.
+        For choose/obtain/generalize, types come from goal context (not AST), so this parameter
+        is used for verification only.
 
     Returns
     -------
     Optional[dict]
-        The type AST, or None if not found.
+        The type AST, or None if not found. For choose/obtain/generalize, always returns None
+        as types come from goal context, not the AST.
     """
     if not isinstance(node, dict):
         return None
@@ -432,18 +435,69 @@ def __extract_type_ast(node: Any, binding_name: Optional[str] = None) -> Optiona
     if k == "Lean.Parser.Tactic.tacticObtain_":
         # obtain doesn't have explicit type annotations in the syntax
         # Types must come from goal context
+        # However, if binding_name is provided, verify it matches one of the obtained names
+        if binding_name is not None:
+            try:
+                obtained_names = __extract_obtain_names(node)
+                if binding_name not in obtained_names:
+                    logging.debug(
+                        f"Could not find obtain binding '{binding_name}' in node when extracting type, returning None"
+                    )
+                    return None
+            except Exception:
+                # If extraction fails due to malformed AST, log and return None
+                logging.debug(
+                    f"Exception extracting obtain names for binding '{binding_name}', returning None",
+                    exc_info=True,
+                )
+                return None
+        # Types come from goal context, not AST, so return None
         return None
     # choose: types are inferred from the source, not explicitly in the syntax
     # We rely on goal context for choose types
     if k == "Lean.Parser.Tactic.tacticChoose_":
         # choose doesn't have explicit type annotations in the syntax
         # Types must come from goal context
+        # However, if binding_name is provided, verify it matches one of the chosen names
+        if binding_name is not None:
+            try:
+                chosen_names = __extract_choose_names(node)
+                if binding_name not in chosen_names:
+                    logging.debug(
+                        f"Could not find choose binding '{binding_name}' in node when extracting type, returning None"
+                    )
+                    return None
+            except Exception:
+                # If extraction fails due to malformed AST, log and return None
+                logging.debug(
+                    f"Exception extracting choose names for binding '{binding_name}', returning None",
+                    exc_info=True,
+                )
+                return None
+        # Types come from goal context, not AST, so return None
         return None
     # generalize: types are inferred from the source, not explicitly in the syntax
     # We rely on goal context for generalize types
     if k == "Lean.Parser.Tactic.tacticGeneralize_":
         # generalize doesn't have explicit type annotations in the syntax
         # Types must come from goal context
+        # However, if binding_name is provided, verify it matches one of the generalized names
+        if binding_name is not None:
+            try:
+                generalized_names = __extract_generalize_names(node)
+                if binding_name not in generalized_names:
+                    logging.debug(
+                        f"Could not find generalize binding '{binding_name}' in node when extracting type, returning None"
+                    )
+                    return None
+            except Exception:
+                # If extraction fails due to malformed AST, log and return None
+                logging.debug(
+                    f"Exception extracting generalize names for binding '{binding_name}', returning None",
+                    exc_info=True,
+                )
+                return None
+        # Types come from goal context, not AST, so return None
         return None
     # match: types are inferred from the pattern matching, not explicitly in the syntax
     # We rely on goal context for match pattern bindings

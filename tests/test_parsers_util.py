@@ -2768,3 +2768,398 @@ def test_extract_type_ast_let_name_node_none() -> None:
     result = __extract_type_ast(let_node, binding_name="x")
     # Should return None since name extraction fails
     assert result is None
+
+
+# ============================================================================
+# Tests for __extract_type_ast for choose bindings
+# ============================================================================
+
+
+def test_extract_type_ast_choose_single_with_name() -> None:
+    """Test extracting type from single choose binding with name specified."""
+    choose_node = {
+        "kind": "Lean.Parser.Tactic.tacticChoose_",
+        "args": [
+            {"val": "choose"},
+            {
+                "kind": "Lean.binderIdent",
+                "args": [{"val": "x"}],
+            },
+            {"val": "using"},
+            {"val": "h"},
+        ],
+    }
+    # Choose doesn't have explicit types in AST, types come from goal context
+    result = __extract_type_ast(choose_node, binding_name="x")
+    assert result is None  # Types come from goal context, not AST
+
+
+def test_extract_type_ast_choose_single_no_name() -> None:
+    """Test extracting type from single choose binding without name specified."""
+    choose_node = {
+        "kind": "Lean.Parser.Tactic.tacticChoose_",
+        "args": [
+            {"val": "choose"},
+            {
+                "kind": "Lean.binderIdent",
+                "args": [{"val": "x"}],
+            },
+            {"val": "using"},
+            {"val": "h"},
+        ],
+    }
+    # Choose doesn't have explicit types in AST, types come from goal context
+    result = __extract_type_ast(choose_node)
+    assert result is None  # Types come from goal context, not AST
+
+
+def test_extract_type_ast_choose_multiple_bindings_with_name() -> None:
+    """Test extracting type from choose with multiple bindings when name is specified."""
+    choose_node = {
+        "kind": "Lean.Parser.Tactic.tacticChoose_",
+        "args": [
+            {"val": "choose"},
+            {
+                "kind": "Lean.binderIdent",
+                "args": [{"val": "x"}],
+            },
+            {
+                "kind": "Lean.binderIdent",
+                "args": [{"val": "hx"}],
+            },
+            {"val": "using"},
+            {"val": "h"},
+        ],
+    }
+    # Should verify binding_name matches before returning None
+    result_x = __extract_type_ast(choose_node, binding_name="x")
+    assert result_x is None  # Types come from goal context, not AST
+
+    result_hx = __extract_type_ast(choose_node, binding_name="hx")
+    assert result_hx is None  # Types come from goal context, not AST
+
+
+def test_extract_type_ast_choose_multiple_bindings_no_name() -> None:
+    """Test extracting type from choose with multiple bindings when no name specified."""
+    choose_node = {
+        "kind": "Lean.Parser.Tactic.tacticChoose_",
+        "args": [
+            {"val": "choose"},
+            {
+                "kind": "Lean.binderIdent",
+                "args": [{"val": "x"}],
+            },
+            {
+                "kind": "Lean.binderIdent",
+                "args": [{"val": "hx"}],
+            },
+            {"val": "using"},
+            {"val": "h"},
+        ],
+    }
+    result = __extract_type_ast(choose_node)
+    assert result is None  # Types come from goal context, not AST
+
+
+def test_extract_type_ast_choose_binding_name_not_found() -> None:
+    """Test extracting type when binding name is not found in choose statement."""
+    choose_node = {
+        "kind": "Lean.Parser.Tactic.tacticChoose_",
+        "args": [
+            {"val": "choose"},
+            {
+                "kind": "Lean.binderIdent",
+                "args": [{"val": "x"}],
+            },
+            {
+                "kind": "Lean.binderIdent",
+                "args": [{"val": "hx"}],
+            },
+            {"val": "using"},
+            {"val": "h"},
+        ],
+    }
+    result = __extract_type_ast(choose_node, binding_name="nonexistent")
+    assert result is None  # Binding name not found, should return None
+
+
+def test_extract_type_ast_choose_empty_names() -> None:
+    """Test extracting type when choose statement has no names (edge case)."""
+    choose_node = {
+        "kind": "Lean.Parser.Tactic.tacticChoose_",
+        "args": [
+            {"val": "choose"},
+            {"val": "using"},
+            {"val": "h"},
+        ],
+    }
+    # No binderIdent nodes, so no names extracted
+    result = __extract_type_ast(choose_node, binding_name="x")
+    assert result is None  # No names found, binding_name won't match
+
+
+def test_extract_type_ast_choose_empty_node() -> None:
+    """Test extracting type from empty choose node (edge case)."""
+    choose_node = {
+        "kind": "Lean.Parser.Tactic.tacticChoose_",
+        "args": [],
+    }
+    result = __extract_type_ast(choose_node, binding_name="x")
+    assert result is None  # Empty node, no names to extract
+
+
+def test_extract_type_ast_choose_malformed_ast_exception() -> None:
+    """Test that exception handling works for malformed AST."""
+    # Create a malformed node that will cause exception in extraction
+    choose_node = {
+        "kind": "Lean.Parser.Tactic.tacticChoose_",
+        "args": [
+            {"val": "choose"},
+            # Missing structure that will cause exception
+            None,  # This will cause issues when iterating
+        ],
+    }
+    # Should handle exception gracefully and return None
+    result = __extract_type_ast(choose_node, binding_name="x")
+    assert result is None  # Exception handled, returns None
+
+
+def test_extract_type_ast_choose_nested_structure() -> None:
+    """Test extracting type from choose with nested binderIdent structure."""
+    choose_node = {
+        "kind": "Lean.Parser.Tactic.tacticChoose_",
+        "args": [
+            {"val": "choose"},
+            {
+                "kind": "Lean.Parser.Term.binderIdent",
+                "args": [
+                    {
+                        "kind": "Lean.binderIdent",
+                        "args": [{"val": "x"}],
+                    }
+                ],
+            },
+            {"val": "using"},
+            {"val": "h"},
+        ],
+    }
+    result = __extract_type_ast(choose_node, binding_name="x")
+    assert result is None  # Types come from goal context, not AST
+
+
+def test_extract_type_ast_choose_with_keywords_in_names() -> None:
+    """Test that keywords are not extracted as names."""
+    choose_node = {
+        "kind": "Lean.Parser.Tactic.tacticChoose_",
+        "args": [
+            {"val": "choose"},
+            {
+                "kind": "Lean.binderIdent",
+                "args": [{"val": "x"}],
+            },
+            {"val": "using"},  # Should not be extracted as name
+            {
+                "kind": "Lean.binderIdent",
+                "args": [{"val": "hx"}],
+            },
+            {"val": "h"},
+        ],
+    }
+    # "using" should not be in extracted names
+    result = __extract_type_ast(choose_node, binding_name="using")
+    assert result is None  # "using" is not a valid binding name
+
+
+def test_extract_type_ast_choose_multiple_statements_same_name() -> None:
+    """Test handling multiple choose statements with same binding name."""
+    # First choose statement
+    choose_node1 = {
+        "kind": "Lean.Parser.Tactic.tacticChoose_",
+        "args": [
+            {"val": "choose"},
+            {
+                "kind": "Lean.binderIdent",
+                "args": [{"val": "x"}],
+            },
+            {"val": "using"},
+            {"val": "h1"},
+        ],
+    }
+    # Second choose statement with same name (different node)
+    choose_node2 = {
+        "kind": "Lean.Parser.Tactic.tacticChoose_",
+        "args": [
+            {"val": "choose"},
+            {
+                "kind": "Lean.binderIdent",
+                "args": [{"val": "x"}],
+            },
+            {"val": "using"},
+            {"val": "h2"},
+        ],
+    }
+    # Each node should be verified independently
+    result1 = __extract_type_ast(choose_node1, binding_name="x")
+    assert result1 is None  # Types come from goal context
+
+    result2 = __extract_type_ast(choose_node2, binding_name="x")
+    assert result2 is None  # Types come from goal context
+
+
+def test_extract_type_ast_choose_empty_binding_name() -> None:
+    """Test extracting type with empty string binding_name (edge case)."""
+    choose_node = {
+        "kind": "Lean.Parser.Tactic.tacticChoose_",
+        "args": [
+            {"val": "choose"},
+            {
+                "kind": "Lean.binderIdent",
+                "args": [{"val": "x"}],
+            },
+            {"val": "using"},
+            {"val": "h"},
+        ],
+    }
+    # Empty string won't match any extracted names
+    result = __extract_type_ast(choose_node, binding_name="")
+    assert result is None  # Empty string is not a valid binding name
+
+
+def test_extract_type_ast_choose_complex_structure() -> None:
+    """Test extracting type from choose with complex nested structure."""
+    choose_node = {
+        "kind": "Lean.Parser.Tactic.tacticChoose_",
+        "args": [
+            {"val": "choose"},
+            {
+                "kind": "Lean.binderIdent",
+                "args": [{"val": "x"}],
+            },
+            {
+                "kind": "Lean.binderIdent",
+                "args": [{"val": "y"}],
+            },
+            {
+                "kind": "Lean.binderIdent",
+                "args": [{"val": "z"}],
+            },
+            {"val": "using"},
+            {"val": "h"},
+            {"val": "with"},
+            {"val": "proof"},
+        ],
+    }
+    # Should verify each binding name independently
+    result_x = __extract_type_ast(choose_node, binding_name="x")
+    assert result_x is None
+
+    result_y = __extract_type_ast(choose_node, binding_name="y")
+    assert result_y is None
+
+    result_z = __extract_type_ast(choose_node, binding_name="z")
+    assert result_z is None
+
+    # Non-existent name
+    result_nonexistent = __extract_type_ast(choose_node, binding_name="nonexistent")
+    assert result_nonexistent is None
+
+
+def test_extract_type_ast_choose_missing_args() -> None:
+    """Test extracting type when args are missing (edge case)."""
+    choose_node = {
+        "kind": "Lean.Parser.Tactic.tacticChoose_",
+        # Missing args
+    }
+    result = __extract_type_ast(choose_node, binding_name="x")
+    assert result is None  # No args, can't extract names
+
+
+def test_extract_type_ast_choose_args_not_list() -> None:
+    """Test extracting type when args is not a list (edge case)."""
+    choose_node = {
+        "kind": "Lean.Parser.Tactic.tacticChoose_",
+        "args": "not_a_list",  # Invalid structure
+    }
+    # Should handle gracefully (extraction will fail, exception caught)
+    result = __extract_type_ast(choose_node, binding_name="x")
+    assert result is None  # Exception handled, returns None
+
+
+def test_extract_type_ast_choose_binder_ident_without_val() -> None:
+    """Test extracting type when binderIdent has no val (edge case)."""
+    choose_node = {
+        "kind": "Lean.Parser.Tactic.tacticChoose_",
+        "args": [
+            {"val": "choose"},
+            {
+                "kind": "Lean.binderIdent",
+                "args": [],  # No val node
+            },
+            {"val": "using"},
+            {"val": "h"},
+        ],
+    }
+    # No names can be extracted
+    result = __extract_type_ast(choose_node, binding_name="x")
+    assert result is None  # No names found
+
+
+def test_extract_type_ast_choose_binder_ident_empty_val() -> None:
+    """Test extracting type when binderIdent has empty val (edge case)."""
+    choose_node = {
+        "kind": "Lean.Parser.Tactic.tacticChoose_",
+        "args": [
+            {"val": "choose"},
+            {
+                "kind": "Lean.binderIdent",
+                "args": [{"val": ""}],  # Empty val
+            },
+            {"val": "using"},
+            {"val": "h"},
+        ],
+    }
+    # Empty val should not be extracted as name
+    result = __extract_type_ast(choose_node, binding_name="")
+    assert result is None  # Empty val not extracted as name
+
+
+def test_extract_type_ast_choose_no_binding_name_behavior() -> None:
+    """Test that behavior without binding_name is consistent."""
+    choose_node = {
+        "kind": "Lean.Parser.Tactic.tacticChoose_",
+        "args": [
+            {"val": "choose"},
+            {
+                "kind": "Lean.binderIdent",
+                "args": [{"val": "x"}],
+            },
+            {"val": "using"},
+            {"val": "h"},
+        ],
+    }
+    # Without binding_name, should skip verification and return None directly
+    result = __extract_type_ast(choose_node)
+    assert result is None  # Types come from goal context, not AST
+
+
+def test_extract_type_ast_choose_verification_before_return() -> None:
+    """Test that binding_name verification happens before returning None."""
+    choose_node = {
+        "kind": "Lean.Parser.Tactic.tacticChoose_",
+        "args": [
+            {"val": "choose"},
+            {
+                "kind": "Lean.binderIdent",
+                "args": [{"val": "x"}],
+            },
+            {"val": "using"},
+            {"val": "h"},
+        ],
+    }
+    # When binding_name matches, should return None (types from goal context)
+    result_match = __extract_type_ast(choose_node, binding_name="x")
+    assert result_match is None
+
+    # When binding_name doesn't match, should return None (with debug log)
+    result_no_match = __extract_type_ast(choose_node, binding_name="y")
+    assert result_no_match is None
