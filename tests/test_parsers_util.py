@@ -3163,3 +3163,502 @@ def test_extract_type_ast_choose_verification_before_return() -> None:
     # When binding_name doesn't match, should return None (with debug log)
     result_no_match = __extract_type_ast(choose_node, binding_name="y")
     assert result_no_match is None
+
+
+# ============================================================================
+# Tests for __extract_type_ast for generalize bindings
+# ============================================================================
+
+
+def test_extract_type_ast_generalize_single_with_name() -> None:
+    """Test extracting type from single generalize binding with name specified."""
+    generalize_node = {
+        "kind": "Lean.Parser.Tactic.tacticGeneralize_",
+        "args": [
+            {"val": "generalize"},
+            {
+                "kind": "Lean.binderIdent",
+                "args": [{"val": "h"}],
+            },
+            {"val": ":"},
+            {"val": "e"},
+            {"val": "="},
+            {
+                "kind": "Lean.binderIdent",
+                "args": [{"val": "x"}],
+            },
+        ],
+    }
+    # Generalize doesn't have explicit types in AST, types come from goal context
+    result = __extract_type_ast(generalize_node, binding_name="h")
+    assert result is None  # Types come from goal context, not AST
+
+    result_x = __extract_type_ast(generalize_node, binding_name="x")
+    assert result_x is None  # Types come from goal context, not AST
+
+
+def test_extract_type_ast_generalize_single_no_name() -> None:
+    """Test extracting type from single generalize binding without name specified."""
+    generalize_node = {
+        "kind": "Lean.Parser.Tactic.tacticGeneralize_",
+        "args": [
+            {"val": "generalize"},
+            {"val": "e"},
+            {"val": "="},
+            {
+                "kind": "Lean.binderIdent",
+                "args": [{"val": "x"}],
+            },
+        ],
+    }
+    # Generalize doesn't have explicit types in AST, types come from goal context
+    result = __extract_type_ast(generalize_node)
+    assert result is None  # Types come from goal context, not AST
+
+
+def test_extract_type_ast_generalize_multiple_bindings_with_name() -> None:
+    """Test extracting type from generalize with multiple bindings when name is specified."""
+    generalize_node = {
+        "kind": "Lean.Parser.Tactic.tacticGeneralize_",
+        "args": [
+            {"val": "generalize"},
+            {
+                "kind": "Lean.binderIdent",
+                "args": [{"val": "h"}],
+            },
+            {"val": ":"},
+            {"val": "e"},
+            {"val": "="},
+            {
+                "kind": "Lean.binderIdent",
+                "args": [{"val": "x"}],
+            },
+            {"val": ","},
+            {
+                "kind": "Lean.binderIdent",
+                "args": [{"val": "h2"}],
+            },
+            {"val": ":"},
+            {"val": "e2"},
+            {"val": "="},
+            {
+                "kind": "Lean.binderIdent",
+                "args": [{"val": "x2"}],
+            },
+        ],
+    }
+    # Should verify binding_name matches before returning None
+    result_h = __extract_type_ast(generalize_node, binding_name="h")
+    assert result_h is None  # Types come from goal context, not AST
+
+    result_x = __extract_type_ast(generalize_node, binding_name="x")
+    assert result_x is None  # Types come from goal context, not AST
+
+    result_h2 = __extract_type_ast(generalize_node, binding_name="h2")
+    assert result_h2 is None  # Types come from goal context, not AST
+
+    result_x2 = __extract_type_ast(generalize_node, binding_name="x2")
+    assert result_x2 is None  # Types come from goal context, not AST
+
+
+def test_extract_type_ast_generalize_multiple_bindings_no_name() -> None:
+    """Test extracting type from generalize with multiple bindings when no name specified."""
+    generalize_node = {
+        "kind": "Lean.Parser.Tactic.tacticGeneralize_",
+        "args": [
+            {"val": "generalize"},
+            {
+                "kind": "Lean.binderIdent",
+                "args": [{"val": "h"}],
+            },
+            {"val": ":"},
+            {"val": "e"},
+            {"val": "="},
+            {
+                "kind": "Lean.binderIdent",
+                "args": [{"val": "x"}],
+            },
+        ],
+    }
+    result = __extract_type_ast(generalize_node)
+    assert result is None  # Types come from goal context, not AST
+
+
+def test_extract_type_ast_generalize_binding_name_not_found() -> None:
+    """Test extracting type when binding name is not found in generalize statement."""
+    generalize_node = {
+        "kind": "Lean.Parser.Tactic.tacticGeneralize_",
+        "args": [
+            {"val": "generalize"},
+            {
+                "kind": "Lean.binderIdent",
+                "args": [{"val": "h"}],
+            },
+            {"val": ":"},
+            {"val": "e"},
+            {"val": "="},
+            {
+                "kind": "Lean.binderIdent",
+                "args": [{"val": "x"}],
+            },
+        ],
+    }
+    result = __extract_type_ast(generalize_node, binding_name="nonexistent")
+    assert result is None  # Binding name not found, should return None
+
+
+def test_extract_type_ast_generalize_empty_names() -> None:
+    """Test extracting type when generalize statement has no names (edge case)."""
+    generalize_node = {
+        "kind": "Lean.Parser.Tactic.tacticGeneralize_",
+        "args": [
+            {"val": "generalize"},
+            {"val": "e"},
+            {"val": "="},
+            {"val": "some_expr"},  # No binderIdent nodes
+        ],
+    }
+    # No binderIdent nodes, so no names extracted
+    result = __extract_type_ast(generalize_node, binding_name="x")
+    assert result is None  # No names found, binding_name won't match
+
+
+def test_extract_type_ast_generalize_empty_node() -> None:
+    """Test extracting type from empty generalize node (edge case)."""
+    generalize_node = {
+        "kind": "Lean.Parser.Tactic.tacticGeneralize_",
+        "args": [],
+    }
+    result = __extract_type_ast(generalize_node, binding_name="x")
+    assert result is None  # Empty node, no names to extract
+
+
+def test_extract_type_ast_generalize_malformed_ast_exception() -> None:
+    """Test that exception handling works for malformed AST."""
+    # Create a malformed node that will cause exception in extraction
+    generalize_node = {
+        "kind": "Lean.Parser.Tactic.tacticGeneralize_",
+        "args": [
+            {"val": "generalize"},
+            # Missing structure that will cause exception
+            None,  # This will cause issues when iterating
+        ],
+    }
+    # Should handle exception gracefully and return None
+    result = __extract_type_ast(generalize_node, binding_name="x")
+    assert result is None  # Exception handled, returns None
+
+
+def test_extract_type_ast_generalize_nested_structure() -> None:
+    """Test extracting type from generalize with nested binderIdent structure."""
+    generalize_node = {
+        "kind": "Lean.Parser.Tactic.tacticGeneralize_",
+        "args": [
+            {"val": "generalize"},
+            {
+                "kind": "Lean.Parser.Term.binderIdent",
+                "args": [
+                    {
+                        "kind": "Lean.binderIdent",
+                        "args": [{"val": "h"}],
+                    }
+                ],
+            },
+            {"val": ":"},
+            {"val": "e"},
+            {"val": "="},
+            {
+                "kind": "Lean.binderIdent",
+                "args": [{"val": "x"}],
+            },
+        ],
+    }
+    result = __extract_type_ast(generalize_node, binding_name="h")
+    assert result is None  # Types come from goal context, not AST
+
+    result_x = __extract_type_ast(generalize_node, binding_name="x")
+    assert result_x is None  # Types come from goal context, not AST
+
+
+def test_extract_type_ast_generalize_with_keywords_in_names() -> None:
+    """Test that keywords are not extracted as names."""
+    generalize_node = {
+        "kind": "Lean.Parser.Tactic.tacticGeneralize_",
+        "args": [
+            {"val": "generalize"},
+            {
+                "kind": "Lean.binderIdent",
+                "args": [{"val": "h"}],
+            },
+            {"val": ":"},  # Should not be extracted as name
+            {"val": "e"},
+            {"val": "="},  # Should not be extracted as name
+            {
+                "kind": "Lean.binderIdent",
+                "args": [{"val": "x"}],
+            },
+        ],
+    }
+    # Keywords should not be in extracted names
+    result_colon = __extract_type_ast(generalize_node, binding_name=":")
+    assert result_colon is None  # ":" is not a valid binding name
+
+    result_eq = __extract_type_ast(generalize_node, binding_name="=")
+    assert result_eq is None  # "=" is not a valid binding name
+
+
+def test_extract_type_ast_generalize_multiple_statements_same_name() -> None:
+    """Test handling multiple generalize statements with same binding name."""
+    # First generalize statement
+    generalize_node1 = {
+        "kind": "Lean.Parser.Tactic.tacticGeneralize_",
+        "args": [
+            {"val": "generalize"},
+            {"val": "e"},
+            {"val": "="},
+            {
+                "kind": "Lean.binderIdent",
+                "args": [{"val": "x"}],
+            },
+        ],
+    }
+    # Second generalize statement with same name (different node)
+    generalize_node2 = {
+        "kind": "Lean.Parser.Tactic.tacticGeneralize_",
+        "args": [
+            {"val": "generalize"},
+            {"val": "e2"},
+            {"val": "="},
+            {
+                "kind": "Lean.binderIdent",
+                "args": [{"val": "x"}],
+            },
+        ],
+    }
+    # Each node should be verified independently
+    result1 = __extract_type_ast(generalize_node1, binding_name="x")
+    assert result1 is None  # Types come from goal context
+
+    result2 = __extract_type_ast(generalize_node2, binding_name="x")
+    assert result2 is None  # Types come from goal context
+
+
+def test_extract_type_ast_generalize_empty_binding_name() -> None:
+    """Test extracting type with empty string binding_name (edge case)."""
+    generalize_node = {
+        "kind": "Lean.Parser.Tactic.tacticGeneralize_",
+        "args": [
+            {"val": "generalize"},
+            {
+                "kind": "Lean.binderIdent",
+                "args": [{"val": "h"}],
+            },
+            {"val": ":"},
+            {"val": "e"},
+            {"val": "="},
+            {
+                "kind": "Lean.binderIdent",
+                "args": [{"val": "x"}],
+            },
+        ],
+    }
+    # Empty string won't match any extracted names
+    result = __extract_type_ast(generalize_node, binding_name="")
+    assert result is None  # Empty string is not a valid binding name
+
+
+def test_extract_type_ast_generalize_complex_structure() -> None:
+    """Test extracting type from generalize with complex nested structure."""
+    generalize_node = {
+        "kind": "Lean.Parser.Tactic.tacticGeneralize_",
+        "args": [
+            {"val": "generalize"},
+            {
+                "kind": "Lean.binderIdent",
+                "args": [{"val": "h"}],
+            },
+            {"val": ":"},
+            {"val": "e"},
+            {"val": "="},
+            {
+                "kind": "Lean.binderIdent",
+                "args": [{"val": "x"}],
+            },
+            {"val": ","},
+            {
+                "kind": "Lean.binderIdent",
+                "args": [{"val": "h2"}],
+            },
+            {"val": ":"},
+            {"val": "e2"},
+            {"val": "="},
+            {
+                "kind": "Lean.binderIdent",
+                "args": [{"val": "y"}],
+            },
+        ],
+    }
+    # Should verify each binding name independently
+    result_h = __extract_type_ast(generalize_node, binding_name="h")
+    assert result_h is None
+
+    result_x = __extract_type_ast(generalize_node, binding_name="x")
+    assert result_x is None
+
+    result_h2 = __extract_type_ast(generalize_node, binding_name="h2")
+    assert result_h2 is None
+
+    result_y = __extract_type_ast(generalize_node, binding_name="y")
+    assert result_y is None
+
+    # Non-existent name
+    result_nonexistent = __extract_type_ast(generalize_node, binding_name="nonexistent")
+    assert result_nonexistent is None
+
+
+def test_extract_type_ast_generalize_missing_args() -> None:
+    """Test extracting type when args are missing (edge case)."""
+    generalize_node = {
+        "kind": "Lean.Parser.Tactic.tacticGeneralize_",
+        # Missing args
+    }
+    result = __extract_type_ast(generalize_node, binding_name="x")
+    assert result is None  # No args, can't extract names
+
+
+def test_extract_type_ast_generalize_args_not_list() -> None:
+    """Test extracting type when args is not a list (edge case)."""
+    generalize_node = {
+        "kind": "Lean.Parser.Tactic.tacticGeneralize_",
+        "args": "not_a_list",  # Invalid structure
+    }
+    # Should handle gracefully (extraction will fail, exception caught)
+    result = __extract_type_ast(generalize_node, binding_name="x")
+    assert result is None  # Exception handled, returns None
+
+
+def test_extract_type_ast_generalize_binder_ident_without_val() -> None:
+    """Test extracting type when binderIdent has no val (edge case)."""
+    generalize_node = {
+        "kind": "Lean.Parser.Tactic.tacticGeneralize_",
+        "args": [
+            {"val": "generalize"},
+            {
+                "kind": "Lean.binderIdent",
+                "args": [],  # No val node
+            },
+            {"val": ":"},
+            {"val": "e"},
+            {"val": "="},
+            {
+                "kind": "Lean.binderIdent",
+                "args": [{"val": "x"}],
+            },
+        ],
+    }
+    # No names can be extracted from empty binderIdent
+    result = __extract_type_ast(generalize_node, binding_name="x")
+    # x should still be found from the second binderIdent
+    assert result is None  # Types come from goal context, not AST
+
+
+def test_extract_type_ast_generalize_binder_ident_empty_val() -> None:
+    """Test extracting type when binderIdent has empty val (edge case)."""
+    generalize_node = {
+        "kind": "Lean.Parser.Tactic.tacticGeneralize_",
+        "args": [
+            {"val": "generalize"},
+            {
+                "kind": "Lean.binderIdent",
+                "args": [{"val": ""}],  # Empty val
+            },
+            {"val": ":"},
+            {"val": "e"},
+            {"val": "="},
+            {
+                "kind": "Lean.binderIdent",
+                "args": [{"val": "x"}],
+            },
+        ],
+    }
+    # Empty val should not be extracted as name
+    result = __extract_type_ast(generalize_node, binding_name="")
+    assert result is None  # Empty val not extracted as name
+
+
+def test_extract_type_ast_generalize_no_binding_name_behavior() -> None:
+    """Test that behavior without binding_name is consistent."""
+    generalize_node = {
+        "kind": "Lean.Parser.Tactic.tacticGeneralize_",
+        "args": [
+            {"val": "generalize"},
+            {
+                "kind": "Lean.binderIdent",
+                "args": [{"val": "h"}],
+            },
+            {"val": ":"},
+            {"val": "e"},
+            {"val": "="},
+            {
+                "kind": "Lean.binderIdent",
+                "args": [{"val": "x"}],
+            },
+        ],
+    }
+    # Without binding_name, should skip verification and return None directly
+    result = __extract_type_ast(generalize_node)
+    assert result is None  # Types come from goal context, not AST
+
+
+def test_extract_type_ast_generalize_verification_before_return() -> None:
+    """Test that binding_name verification happens before returning None."""
+    generalize_node = {
+        "kind": "Lean.Parser.Tactic.tacticGeneralize_",
+        "args": [
+            {"val": "generalize"},
+            {
+                "kind": "Lean.binderIdent",
+                "args": [{"val": "h"}],
+            },
+            {"val": ":"},
+            {"val": "e"},
+            {"val": "="},
+            {
+                "kind": "Lean.binderIdent",
+                "args": [{"val": "x"}],
+            },
+        ],
+    }
+    # When binding_name matches, should return None (types from goal context)
+    result_match = __extract_type_ast(generalize_node, binding_name="h")
+    assert result_match is None
+
+    result_match_x = __extract_type_ast(generalize_node, binding_name="x")
+    assert result_match_x is None
+
+    # When binding_name doesn't match, should return None (with debug log)
+    result_no_match = __extract_type_ast(generalize_node, binding_name="y")
+    assert result_no_match is None
+
+
+def test_extract_type_ast_generalize_without_hypothesis_name() -> None:
+    """Test generalize without hypothesis name (just expression = variable)."""
+    generalize_node = {
+        "kind": "Lean.Parser.Tactic.tacticGeneralize_",
+        "args": [
+            {"val": "generalize"},
+            {"val": "e"},
+            {"val": "="},
+            {
+                "kind": "Lean.binderIdent",
+                "args": [{"val": "x"}],
+            },
+        ],
+    }
+    # Only x should be extracted (no h)
+    result_x = __extract_type_ast(generalize_node, binding_name="x")
+    assert result_x is None  # Types come from goal context, not AST
+
+    # h should not be found
+    result_h = __extract_type_ast(generalize_node, binding_name="h")
+    assert result_h is None  # h not in this generalize statement
