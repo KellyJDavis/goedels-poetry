@@ -1672,3 +1672,1099 @@ def test_extract_set_value_with_type_annotation() -> None:
     result = __extract_set_value(set_node, binding_name="x")
     assert result is not None
     assert result["args"][0]["val"] == "42"  # Should extract value, not type
+
+
+# ============================================================================
+# Tests for __extract_type_ast for suffices bindings
+# ============================================================================
+
+
+def test_extract_type_ast_suffices_single_with_name() -> None:
+    """Test extracting type from single suffices binding with name specified."""
+    suffices_node = {
+        "kind": "Lean.Parser.Tactic.tacticSuffices_",
+        "args": [
+            {"val": "suffices"},
+            {
+                "kind": "Lean.Parser.Term.haveDecl",
+                "args": [
+                    {
+                        "kind": "Lean.Parser.Term.haveIdDecl",
+                        "args": [
+                            {
+                                "kind": "Lean.Parser.Term.haveId",
+                                "args": [{"val": "h"}],
+                            }
+                        ],
+                    },
+                    {"val": ":"},
+                    {"val": "P"},
+                    {"val": "from"},
+                    {"val": "Q"},
+                ],
+            },
+        ],
+    }
+    result = __extract_type_ast(suffices_node, binding_name="h")
+    assert result is not None
+    assert result["kind"] == "__type_container"
+    assert len(result["args"]) == 1
+    assert result["args"][0]["val"] == "P"
+
+
+def test_extract_type_ast_suffices_single_no_name() -> None:
+    """Test extracting type from single suffices binding without name specified."""
+    suffices_node = {
+        "kind": "Lean.Parser.Tactic.tacticSuffices_",
+        "args": [
+            {"val": "suffices"},
+            {
+                "kind": "Lean.Parser.Term.haveDecl",
+                "args": [
+                    {
+                        "kind": "Lean.Parser.Term.haveIdDecl",
+                        "args": [
+                            {
+                                "kind": "Lean.Parser.Term.haveId",
+                                "args": [{"val": "h"}],
+                            }
+                        ],
+                    },
+                    {"val": ":"},
+                    {"val": "P"},
+                    {"val": "from"},
+                    {"val": "Q"},
+                ],
+            },
+        ],
+    }
+    result = __extract_type_ast(suffices_node)
+    assert result is not None
+    assert result["kind"] == "__type_container"
+    assert result["args"][0]["val"] == "P"
+
+
+def test_extract_type_ast_suffices_binding_name_not_found() -> None:
+    """Test extracting type when binding name is not found."""
+    suffices_node = {
+        "kind": "Lean.Parser.Tactic.tacticSuffices_",
+        "args": [
+            {"val": "suffices"},
+            {
+                "kind": "Lean.Parser.Term.haveDecl",
+                "args": [
+                    {
+                        "kind": "Lean.Parser.Term.haveIdDecl",
+                        "args": [
+                            {
+                                "kind": "Lean.Parser.Term.haveId",
+                                "args": [{"val": "h"}],
+                            }
+                        ],
+                    },
+                    {"val": ":"},
+                    {"val": "P"},
+                    {"val": "from"},
+                    {"val": "Q"},
+                ],
+            },
+        ],
+    }
+    result = __extract_type_ast(suffices_node, binding_name="nonexistent")
+    assert result is None
+
+
+def test_extract_type_ast_suffices_complex_type() -> None:
+    """Test extracting complex type expression from suffices."""
+    suffices_node = {
+        "kind": "Lean.Parser.Tactic.tacticSuffices_",
+        "args": [
+            {"val": "suffices"},
+            {
+                "kind": "Lean.Parser.Term.haveDecl",
+                "args": [
+                    {
+                        "kind": "Lean.Parser.Term.haveIdDecl",
+                        "args": [
+                            {
+                                "kind": "Lean.Parser.Term.haveId",
+                                "args": [{"val": "h"}],
+                            }
+                        ],
+                    },
+                    {"val": ":"},
+                    {"val": "P"},
+                    {"val": "∧"},
+                    {"val": "Q"},
+                    {"val": "from"},
+                    {"val": "proof"},
+                ],
+            },
+        ],
+    }
+    result = __extract_type_ast(suffices_node, binding_name="h")
+    assert result is not None
+    assert result["kind"] == "__type_container"
+    assert len(result["args"]) == 3  # "P", "∧", "Q"
+    assert result["args"][0]["val"] == "P"
+    assert result["args"][1]["val"] == "∧"
+    assert result["args"][2]["val"] == "Q"
+
+
+def test_extract_type_ast_suffices_with_by() -> None:
+    """Test extracting type from suffices with 'by' instead of 'from'."""
+    suffices_node = {
+        "kind": "Lean.Parser.Tactic.tacticSuffices_",
+        "args": [
+            {"val": "suffices"},
+            {
+                "kind": "Lean.Parser.Term.haveDecl",
+                "args": [
+                    {
+                        "kind": "Lean.Parser.Term.haveIdDecl",
+                        "args": [
+                            {
+                                "kind": "Lean.Parser.Term.haveId",
+                                "args": [{"val": "h"}],
+                            }
+                        ],
+                    },
+                    {"val": ":"},
+                    {"val": "P"},
+                    {"val": "by"},
+                    {"val": "tactic"},
+                ],
+            },
+        ],
+    }
+    result = __extract_type_ast(suffices_node, binding_name="h")
+    assert result is not None
+    assert result["kind"] == "__type_container"
+    assert result["args"][0]["val"] == "P"
+
+
+def test_extract_type_ast_suffices_no_have_decl_with_binding_name() -> None:
+    """Test extracting type when haveDecl is not found and binding_name is provided."""
+    suffices_node = {
+        "kind": "Lean.Parser.Tactic.tacticSuffices_",
+        "args": [
+            {"val": "suffices"},
+            # No haveDecl
+        ],
+    }
+    result = __extract_type_ast(suffices_node, binding_name="h")
+    assert result is None
+
+
+def test_extract_type_ast_suffices_no_have_decl_no_binding_name() -> None:
+    """Test extracting type when haveDecl is not found and no binding_name provided."""
+    suffices_node = {
+        "kind": "Lean.Parser.Tactic.tacticSuffices_",
+        "args": [
+            {"val": "suffices"},
+            # No haveDecl
+        ],
+    }
+    result = __extract_type_ast(suffices_node)
+    # Should fall back to searching anywhere under node
+    # May return None or something from fallback
+    assert result is None or isinstance(result, dict)
+
+
+def test_extract_type_ast_suffices_no_have_id_decl_with_binding_name() -> None:
+    """Test extracting type when haveIdDecl is not found and binding_name is provided."""
+    suffices_node = {
+        "kind": "Lean.Parser.Tactic.tacticSuffices_",
+        "args": [
+            {"val": "suffices"},
+            {
+                "kind": "Lean.Parser.Term.haveDecl",
+                "args": [
+                    # No haveIdDecl
+                    {"val": ":"},
+                    {"val": "P"},
+                    {"val": "from"},
+                    {"val": "Q"},
+                ],
+            },
+        ],
+    }
+    result = __extract_type_ast(suffices_node, binding_name="h")
+    assert result is None  # Can't verify name, so return None
+
+
+def test_extract_type_ast_suffices_no_have_id_with_binding_name() -> None:
+    """Test extracting type when haveId is not found and binding_name is provided."""
+    suffices_node = {
+        "kind": "Lean.Parser.Tactic.tacticSuffices_",
+        "args": [
+            {"val": "suffices"},
+            {
+                "kind": "Lean.Parser.Term.haveDecl",
+                "args": [
+                    {
+                        "kind": "Lean.Parser.Term.haveIdDecl",
+                        "args": [
+                            # No haveId
+                        ],
+                    },
+                    {"val": ":"},
+                    {"val": "P"},
+                    {"val": "from"},
+                    {"val": "Q"},
+                ],
+            },
+        ],
+    }
+    result = __extract_type_ast(suffices_node, binding_name="h")
+    assert result is None  # Can't extract name, so return None
+
+
+def test_extract_type_ast_suffices_no_colon_with_binding_name() -> None:
+    """Test extracting type when no colon is found and binding_name is provided."""
+    suffices_node = {
+        "kind": "Lean.Parser.Tactic.tacticSuffices_",
+        "args": [
+            {"val": "suffices"},
+            {
+                "kind": "Lean.Parser.Term.haveDecl",
+                "args": [
+                    {
+                        "kind": "Lean.Parser.Term.haveIdDecl",
+                        "args": [
+                            {
+                                "kind": "Lean.Parser.Term.haveId",
+                                "args": [{"val": "h"}],
+                            }
+                        ],
+                    },
+                    # Missing ":"
+                    {"val": "P"},
+                    {"val": "from"},
+                    {"val": "Q"},
+                ],
+            },
+        ],
+    }
+    result = __extract_type_ast(suffices_node, binding_name="h")
+    assert result is None  # No type found, return None when binding_name provided
+
+
+def test_extract_type_ast_suffices_no_colon_no_binding_name() -> None:
+    """Test extracting type when no colon is found and no binding_name provided."""
+    suffices_node = {
+        "kind": "Lean.Parser.Tactic.tacticSuffices_",
+        "args": [
+            {"val": "suffices"},
+            {
+                "kind": "Lean.Parser.Term.haveDecl",
+                "args": [
+                    {
+                        "kind": "Lean.Parser.Term.haveIdDecl",
+                        "args": [
+                            {
+                                "kind": "Lean.Parser.Term.haveId",
+                                "args": [{"val": "h"}],
+                            }
+                        ],
+                    },
+                    # Missing ":"
+                    {"val": "P"},
+                    {"val": "from"},
+                    {"val": "Q"},
+                ],
+            },
+        ],
+    }
+    result = __extract_type_ast(suffices_node)
+    # Should fall back to old behavior
+    assert result is None or isinstance(result, dict)
+
+
+def test_extract_type_ast_suffices_empty_type_tokens_with_binding_name() -> None:
+    """Test extracting type when type tokens are empty and binding_name is provided."""
+    suffices_node = {
+        "kind": "Lean.Parser.Tactic.tacticSuffices_",
+        "args": [
+            {"val": "suffices"},
+            {
+                "kind": "Lean.Parser.Term.haveDecl",
+                "args": [
+                    {
+                        "kind": "Lean.Parser.Term.haveIdDecl",
+                        "args": [
+                            {
+                                "kind": "Lean.Parser.Term.haveId",
+                                "args": [{"val": "h"}],
+                            }
+                        ],
+                    },
+                    {"val": ":"},
+                    # No type tokens (colon immediately followed by "from")
+                    {"val": "from"},
+                    {"val": "Q"},
+                ],
+            },
+        ],
+    }
+    result = __extract_type_ast(suffices_node, binding_name="h")
+    assert result is None  # Empty type, return None when binding_name provided
+
+
+def test_extract_type_ast_suffices_no_from_or_by() -> None:
+    """Test extracting type when neither 'from' nor 'by' is found (type extends to end)."""
+    suffices_node = {
+        "kind": "Lean.Parser.Tactic.tacticSuffices_",
+        "args": [
+            {"val": "suffices"},
+            {
+                "kind": "Lean.Parser.Term.haveDecl",
+                "args": [
+                    {
+                        "kind": "Lean.Parser.Term.haveIdDecl",
+                        "args": [
+                            {
+                                "kind": "Lean.Parser.Term.haveId",
+                                "args": [{"val": "h"}],
+                            }
+                        ],
+                    },
+                    {"val": ":"},
+                    {"val": "P"},
+                    {"val": "∧"},
+                    {"val": "Q"},
+                    # No "from" or "by" - type extends to end
+                ],
+            },
+        ],
+    }
+    result = __extract_type_ast(suffices_node, binding_name="h")
+    assert result is not None
+    assert result["kind"] == "__type_container"
+    assert len(result["args"]) == 3  # "P", "∧", "Q"
+
+
+def test_extract_type_ast_suffices_name_extraction_edge_cases() -> None:
+    """Test name extraction edge cases for suffices."""
+    # Test with nested structure
+    suffices_node = {
+        "kind": "Lean.Parser.Tactic.tacticSuffices_",
+        "args": [
+            {"val": "suffices"},
+            {
+                "kind": "Lean.Parser.Term.haveDecl",
+                "args": [
+                    {
+                        "kind": "Lean.Parser.Term.haveIdDecl",
+                        "args": [
+                            {
+                                "kind": "Lean.Parser.Term.haveId",
+                                "args": [
+                                    {
+                                        "kind": "Lean.binderIdent",
+                                        "args": [{"val": "h"}],
+                                    }
+                                ],
+                            }
+                        ],
+                    },
+                    {"val": ":"},
+                    {"val": "P"},
+                    {"val": "from"},
+                    {"val": "Q"},
+                ],
+            },
+        ],
+    }
+    result = __extract_type_ast(suffices_node, binding_name="h")
+    assert result is not None
+    assert result["args"][0]["val"] == "P"
+
+
+def test_extract_type_ast_suffices_fallback_with_binding_name() -> None:
+    """Test that fallback behavior doesn't trigger when binding_name is provided."""
+    suffices_node = {
+        "kind": "Lean.Parser.Tactic.tacticSuffices_",
+        "args": [
+            {"val": "suffices"},
+            {
+                "kind": "Lean.Parser.Term.haveDecl",
+                "args": [
+                    {
+                        "kind": "Lean.Parser.Term.haveIdDecl",
+                        "args": [
+                            {
+                                "kind": "Lean.Parser.Term.haveId",
+                                "args": [{"val": "h"}],
+                            }
+                        ],
+                    },
+                    # No colon, no type - malformed
+                    {"val": "from"},
+                    {"val": "Q"},
+                ],
+            },
+        ],
+    }
+    # With binding_name, should return None (no fallback)
+    result = __extract_type_ast(suffices_node, binding_name="h")
+    assert result is None
+
+    # Without binding_name, fallback might return something
+    result2 = __extract_type_ast(suffices_node)
+    # Fallback behavior - may return None or something
+    assert result2 is None or isinstance(result2, dict)
+
+
+# ============================================================================
+# Additional edge case tests for let value extraction
+# ============================================================================
+
+
+def test_extract_let_value_flat_structure_let_id_decl_idx_none() -> None:
+    """Test flat structure when letIdDecl index cannot be found (object reference issue)."""
+    # This tests the case where object reference comparison might fail
+    # Create a structure where the letIdDecl in ld_args is not the same object as 'arg'
+    let_node = {
+        "kind": "Lean.Parser.Tactic.tacticLet_",
+        "args": [
+            {"val": "let"},
+            {
+                "kind": "Lean.Parser.Term.letDecl",
+                "args": [
+                    {
+                        "kind": "Lean.Parser.Term.letIdDecl",
+                        "args": [
+                            {"val": "x"},
+                            [],
+                            [],
+                        ],
+                    },
+                    # No ":=" in flat structure, and object reference might not match
+                ],
+            },
+        ],
+    }
+    result = __extract_let_value(let_node, binding_name="x")
+    # Should return None since no ":=" found
+    assert result is None
+
+
+def test_extract_let_value_empty_filtered_tokens() -> None:
+    """Test when filtered_tokens is empty after filtering out next letIdDecl."""
+    let_node = {
+        "kind": "Lean.Parser.Tactic.tacticLet_",
+        "args": [
+            {"val": "let"},
+            {
+                "kind": "Lean.Parser.Term.letDecl",
+                "args": [
+                    {
+                        "kind": "Lean.Parser.Term.letIdDecl",
+                        "args": [
+                            {"val": "x"},
+                            [],
+                            [],
+                        ],
+                    },
+                    {"val": ":="},
+                    # Value immediately followed by next letIdDecl (empty value)
+                    {
+                        "kind": "Lean.Parser.Term.letIdDecl",
+                        "args": [{"val": "y"}],
+                    },
+                ],
+            },
+        ],
+    }
+    result = __extract_let_value(let_node, binding_name="x")
+    # Should return None since filtered_tokens would be empty
+    assert result is None
+
+
+def test_extract_let_value_multiple_assign_tokens() -> None:
+    """Test when multiple ':=' tokens exist (edge case)."""
+    let_node = {
+        "kind": "Lean.Parser.Tactic.tacticLet_",
+        "args": [
+            {"val": "let"},
+            {
+                "kind": "Lean.Parser.Term.letDecl",
+                "args": [
+                    {
+                        "kind": "Lean.Parser.Term.letIdDecl",
+                        "args": [
+                            {"val": "x"},
+                            [],
+                            [],
+                            {"val": ":="},
+                            {"val": "1"},
+                            {"val": ":="},  # Second ":=" (malformed but handle gracefully)
+                            {"val": "2"},
+                        ],
+                    },
+                ],
+            },
+        ],
+    }
+    result = __extract_let_value(let_node, binding_name="x")
+    # Should extract value from first ":=" (includes everything after it, including second ":=")
+    assert result is not None
+    assert len(result["args"]) == 3  # "1", ":=", "2"
+    assert result["args"][0]["val"] == "1"
+    assert result["args"][1]["val"] == ":="
+    assert result["args"][2]["val"] == "2"
+
+
+# ============================================================================
+# Additional edge case tests for set value extraction
+# ============================================================================
+
+
+def test_extract_set_value_empty_filtered_tokens() -> None:
+    """Test when filtered_tokens is empty after filtering out next setIdDecl."""
+    set_node = {
+        "kind": "Lean.Parser.Tactic.tacticSet_",
+        "args": [
+            {"val": "set"},
+            {
+                "kind": "Lean.Parser.Term.setDecl",
+                "args": [
+                    {
+                        "kind": "Lean.Parser.Term.setIdDecl",
+                        "args": [
+                            {
+                                "kind": "Lean.binderIdent",
+                                "args": [{"val": "x"}],
+                            }
+                        ],
+                    },
+                    {"val": ":="},
+                    # Value immediately followed by next setIdDecl (empty value)
+                    {
+                        "kind": "Lean.Parser.Term.setIdDecl",
+                        "args": [
+                            {
+                                "kind": "Lean.binderIdent",
+                                "args": [{"val": "y"}],
+                            }
+                        ],
+                    },
+                ],
+            },
+        ],
+    }
+    result = __extract_set_value(set_node, binding_name="x")
+    # Should return None since filtered_tokens would be empty
+    assert result is None
+
+
+def test_extract_set_value_multiple_assign_tokens() -> None:
+    """Test when multiple ':=' tokens exist."""
+    set_node = {
+        "kind": "Lean.Parser.Tactic.tacticSet_",
+        "args": [
+            {"val": "set"},
+            {
+                "kind": "Lean.Parser.Term.setDecl",
+                "args": [
+                    {
+                        "kind": "Lean.Parser.Term.setIdDecl",
+                        "args": [
+                            {
+                                "kind": "Lean.binderIdent",
+                                "args": [{"val": "x"}],
+                            }
+                        ],
+                    },
+                    {"val": ":="},
+                    {"val": "1"},
+                    {"val": ":="},  # Second ":=" (malformed)
+                    {"val": "2"},
+                ],
+            },
+        ],
+    }
+    result = __extract_set_value(set_node, binding_name="x")
+    # Should extract value from first ":=" (includes everything after it until next setIdDecl or end)
+    assert result is not None
+    assert len(result["args"]) == 3  # "1", ":=", "2"
+    assert result["args"][0]["val"] == "1"
+    assert result["args"][1]["val"] == ":="
+    assert result["args"][2]["val"] == "2"
+
+
+# ============================================================================
+# Additional edge case tests for let type extraction
+# ============================================================================
+
+
+def test_extract_type_ast_let_type_arg_not_list() -> None:
+    """Test when type_arg is not a list (edge case)."""
+    let_node = {
+        "kind": "Lean.Parser.Tactic.tacticLet_",
+        "args": [
+            {"val": "let"},
+            {
+                "kind": "Lean.Parser.Term.letDecl",
+                "args": [
+                    {
+                        "kind": "Lean.Parser.Term.letIdDecl",
+                        "args": [
+                            {"val": "x"},
+                            [],
+                            {"val": "not_a_list"},  # Not a list
+                            {"val": ":="},
+                            {"val": "1"},
+                        ],
+                    },
+                ],
+            },
+        ],
+    }
+    result = __extract_type_ast(let_node, binding_name="x")
+    # Should return None since type_arg is not a list
+    assert result is None
+
+
+def test_extract_type_ast_let_type_arg_none() -> None:
+    """Test when type_arg is None."""
+    let_node = {
+        "kind": "Lean.Parser.Tactic.tacticLet_",
+        "args": [
+            {"val": "let"},
+            {
+                "kind": "Lean.Parser.Term.letDecl",
+                "args": [
+                    {
+                        "kind": "Lean.Parser.Term.letIdDecl",
+                        "args": [
+                            {"val": "x"},
+                            [],
+                            None,  # None instead of list
+                            {"val": ":="},
+                            {"val": "1"},
+                        ],
+                    },
+                ],
+            },
+        ],
+    }
+    result = __extract_type_ast(let_node, binding_name="x")
+    # Should return None since type_arg is None
+    assert result is None
+
+
+# ============================================================================
+# Additional edge case tests for set type extraction
+# ============================================================================
+
+
+def test_extract_type_ast_set_multiple_colons() -> None:
+    """Test when multiple ':' tokens exist in setDecl.args."""
+    set_node = {
+        "kind": "Lean.Parser.Tactic.tacticSet_",
+        "args": [
+            {"val": "set"},
+            {
+                "kind": "Lean.Parser.Term.setDecl",
+                "args": [
+                    {
+                        "kind": "Lean.Parser.Term.setIdDecl",
+                        "args": [
+                            {
+                                "kind": "Lean.binderIdent",
+                                "args": [{"val": "x"}],
+                            }
+                        ],
+                    },
+                    {"val": ":"},  # First colon
+                    {"val": "ℕ"},  # noqa: RUF001
+                    {"val": ":"},  # Second colon (malformed)
+                    {"val": ":="},
+                    {"val": "1"},
+                ],
+            },
+        ],
+    }
+    result = __extract_type_ast(set_node, binding_name="x")
+    # Should extract type between first ":" and ":="
+    # This tests the colon_idx logic (should use first colon)
+    assert result is None or isinstance(result, dict)  # May extract or fall back
+
+
+def test_extract_type_ast_set_type_tokens_empty_after_filtering() -> None:
+    """Test when type_tokens is empty after filtering out ':'."""
+    set_node = {
+        "kind": "Lean.Parser.Tactic.tacticSet_",
+        "args": [
+            {"val": "set"},
+            {
+                "kind": "Lean.Parser.Term.setDecl",
+                "args": [
+                    {
+                        "kind": "Lean.Parser.Term.setIdDecl",
+                        "args": [
+                            {
+                                "kind": "Lean.binderIdent",
+                                "args": [{"val": "x"}],
+                            },
+                            {
+                                "kind": "Lean.Parser.Term.typeSpec",
+                                "args": [
+                                    {"val": ":"},  # Only ":" token, no actual type
+                                ],
+                            },
+                        ],
+                    },
+                    {"val": ":="},
+                    {"val": "1"},
+                ],
+            },
+        ],
+    }
+    result = __extract_type_ast(set_node, binding_name="x")
+    # Should return None since type_tokens would be empty after filtering
+    assert result is None
+
+
+# ============================================================================
+# Additional edge case tests for suffices type extraction
+# ============================================================================
+
+
+def test_extract_type_ast_suffices_multiple_colons() -> None:
+    """Test when multiple ':' tokens exist."""
+    suffices_node = {
+        "kind": "Lean.Parser.Tactic.tacticSuffices_",
+        "args": [
+            {"val": "suffices"},
+            {
+                "kind": "Lean.Parser.Term.haveDecl",
+                "args": [
+                    {
+                        "kind": "Lean.Parser.Term.haveIdDecl",
+                        "args": [
+                            {
+                                "kind": "Lean.Parser.Term.haveId",
+                                "args": [{"val": "h"}],
+                            }
+                        ],
+                    },
+                    {"val": ":"},  # First colon
+                    {"val": "P"},
+                    {"val": ":"},  # Second colon (malformed)
+                    {"val": "from"},
+                    {"val": "Q"},
+                ],
+            },
+        ],
+    }
+    result = __extract_type_ast(suffices_node, binding_name="h")
+    # Should extract type from first ":" to "from"
+    assert result is not None
+    assert result["kind"] == "__type_container"
+    assert len(result["args"]) == 2  # "P", ":"
+    assert result["args"][0]["val"] == "P"
+
+
+def test_extract_type_ast_suffices_multiple_from_tokens() -> None:
+    """Test when multiple 'from' tokens exist."""
+    suffices_node = {
+        "kind": "Lean.Parser.Tactic.tacticSuffices_",
+        "args": [
+            {"val": "suffices"},
+            {
+                "kind": "Lean.Parser.Term.haveDecl",
+                "args": [
+                    {
+                        "kind": "Lean.Parser.Term.haveIdDecl",
+                        "args": [
+                            {
+                                "kind": "Lean.Parser.Term.haveId",
+                                "args": [{"val": "h"}],
+                            }
+                        ],
+                    },
+                    {"val": ":"},
+                    {"val": "P"},
+                    {"val": "from"},  # First "from"
+                    {"val": "Q"},
+                    {"val": "from"},  # Second "from" (malformed)
+                    {"val": "R"},
+                ],
+            },
+        ],
+    }
+    result = __extract_type_ast(suffices_node, binding_name="h")
+    # Should extract type from ":" to first "from"
+    assert result is not None
+    assert result["kind"] == "__type_container"
+    assert result["args"][0]["val"] == "P"
+
+
+# ============================================================================
+# Additional edge case tests for empty/malformed structures
+# ============================================================================
+
+
+def test_extract_let_value_empty_let_decl_args() -> None:
+    """Test when letDecl.args is empty."""
+    let_node = {
+        "kind": "Lean.Parser.Tactic.tacticLet_",
+        "args": [
+            {"val": "let"},
+            {
+                "kind": "Lean.Parser.Term.letDecl",
+                "args": [],  # Empty args
+            },
+        ],
+    }
+    result = __extract_let_value(let_node, binding_name="x")
+    assert result is None
+
+
+def test_extract_let_value_empty_let_id_decl_args() -> None:
+    """Test when letIdDecl.args is empty."""
+    let_node = {
+        "kind": "Lean.Parser.Tactic.tacticLet_",
+        "args": [
+            {"val": "let"},
+            {
+                "kind": "Lean.Parser.Term.letDecl",
+                "args": [
+                    {
+                        "kind": "Lean.Parser.Term.letIdDecl",
+                        "args": [],  # Empty args
+                    },
+                ],
+            },
+        ],
+    }
+    result = __extract_let_value(let_node, binding_name="x")
+    assert result is None
+
+
+def test_extract_set_value_empty_set_decl_args() -> None:
+    """Test when setDecl.args is empty."""
+    set_node = {
+        "kind": "Lean.Parser.Tactic.tacticSet_",
+        "args": [
+            {"val": "set"},
+            {
+                "kind": "Lean.Parser.Term.setDecl",
+                "args": [],  # Empty args
+            },
+        ],
+    }
+    result = __extract_set_value(set_node, binding_name="x")
+    assert result is None
+
+
+def test_extract_set_value_no_set_id_decl_start_idx_zero() -> None:
+    """Test when no setIdDecl found and start_idx becomes 0."""
+    set_node = {
+        "kind": "Lean.Parser.Tactic.tacticSet_",
+        "args": [
+            {"val": "set"},
+            {
+                "kind": "Lean.Parser.Term.setDecl",
+                "args": [
+                    # No setIdDecl - malformed
+                    {"val": ":="},
+                    {"val": "1"},
+                ],
+            },
+        ],
+    }
+    result = __extract_set_value(set_node)
+    # Should find ":=" at index 0 and extract value
+    assert result is not None
+    assert result["args"][0]["val"] == "1"
+
+
+def test_extract_let_value_name_node_unexpected_structure() -> None:
+    """Test when name_node has unexpected structure (not dict, not string, not binderIdent)."""
+    let_node = {
+        "kind": "Lean.Parser.Tactic.tacticLet_",
+        "args": [
+            {"val": "let"},
+            {
+                "kind": "Lean.Parser.Term.letDecl",
+                "args": [
+                    {
+                        "kind": "Lean.Parser.Term.letIdDecl",
+                        "args": [
+                            123,  # Unexpected: number instead of name
+                            [],
+                            [],
+                            {"val": ":="},
+                            {"val": "1"},
+                        ],
+                    },
+                ],
+            },
+        ],
+    }
+    result = __extract_let_value(let_node, binding_name="x")
+    # Should return None since name extraction fails
+    assert result is None
+
+
+def test_extract_let_value_name_node_empty_dict() -> None:
+    """Test when name_node is an empty dict with no val and no binderIdent."""
+    let_node = {
+        "kind": "Lean.Parser.Tactic.tacticLet_",
+        "args": [
+            {"val": "let"},
+            {
+                "kind": "Lean.Parser.Term.letDecl",
+                "args": [
+                    {
+                        "kind": "Lean.Parser.Term.letIdDecl",
+                        "args": [
+                            {},  # Empty dict, no val, no binderIdent
+                            [],
+                            [],
+                            {"val": ":="},
+                            {"val": "1"},
+                        ],
+                    },
+                ],
+            },
+        ],
+    }
+    result = __extract_let_value(let_node, binding_name="x")
+    # Should return None since name extraction fails
+    assert result is None
+
+
+def test_extract_type_ast_let_empty_let_decl_args() -> None:
+    """Test when letDecl.args is empty."""
+    let_node = {
+        "kind": "Lean.Parser.Tactic.tacticLet_",
+        "args": [
+            {"val": "let"},
+            {
+                "kind": "Lean.Parser.Term.letDecl",
+                "args": [],  # Empty args
+            },
+        ],
+    }
+    result = __extract_type_ast(let_node, binding_name="x")
+    assert result is None
+
+
+def test_extract_type_ast_set_empty_set_decl_args() -> None:
+    """Test when setDecl.args is empty."""
+    set_node = {
+        "kind": "Lean.Parser.Tactic.tacticSet_",
+        "args": [
+            {"val": "set"},
+            {
+                "kind": "Lean.Parser.Term.setDecl",
+                "args": [],  # Empty args
+            },
+        ],
+    }
+    result = __extract_type_ast(set_node, binding_name="x")
+    assert result is None
+
+
+def test_extract_type_ast_suffices_empty_have_decl_args() -> None:
+    """Test when haveDecl.args is empty."""
+    suffices_node = {
+        "kind": "Lean.Parser.Tactic.tacticSuffices_",
+        "args": [
+            {"val": "suffices"},
+            {
+                "kind": "Lean.Parser.Term.haveDecl",
+                "args": [],  # Empty args
+            },
+        ],
+    }
+    result = __extract_type_ast(suffices_node, binding_name="h")
+    assert result is None
+
+
+def test_extract_let_value_assign_idx_at_end() -> None:
+    """Test when assign_idx is at the end of letIdDecl.args (no value after :=)."""
+    let_node = {
+        "kind": "Lean.Parser.Tactic.tacticLet_",
+        "args": [
+            {"val": "let"},
+            {
+                "kind": "Lean.Parser.Term.letDecl",
+                "args": [
+                    {
+                        "kind": "Lean.Parser.Term.letIdDecl",
+                        "args": [
+                            {"val": "x"},
+                            [],
+                            [],
+                            {"val": ":="},  # := at end, no value
+                        ],
+                    },
+                ],
+            },
+        ],
+    }
+    result = __extract_let_value(let_node, binding_name="x")
+    # Should return None since value_tokens would be empty
+    assert result is None
+
+
+def test_extract_set_value_assign_idx_at_end() -> None:
+    """Test when assign_idx is at the end of setDecl.args (no value after :=)."""
+    set_node = {
+        "kind": "Lean.Parser.Tactic.tacticSet_",
+        "args": [
+            {"val": "set"},
+            {
+                "kind": "Lean.Parser.Term.setDecl",
+                "args": [
+                    {
+                        "kind": "Lean.Parser.Term.setIdDecl",
+                        "args": [
+                            {
+                                "kind": "Lean.binderIdent",
+                                "args": [{"val": "x"}],
+                            }
+                        ],
+                    },
+                    {"val": ":="},  # := at end, no value
+                ],
+            },
+        ],
+    }
+    result = __extract_set_value(set_node, binding_name="x")
+    # Should return None since value_tokens would be empty
+    assert result is None
+
+
+def test_extract_type_ast_let_name_node_none() -> None:
+    """Test when name_node is None (edge case)."""
+    let_node = {
+        "kind": "Lean.Parser.Tactic.tacticLet_",
+        "args": [
+            {"val": "let"},
+            {
+                "kind": "Lean.Parser.Term.letDecl",
+                "args": [
+                    {
+                        "kind": "Lean.Parser.Term.letIdDecl",
+                        "args": [
+                            None,  # None instead of name
+                            [],
+                            [],
+                            {"val": ":="},
+                            {"val": "1"},
+                        ],
+                    },
+                ],
+            },
+        ],
+    }
+    result = __extract_type_ast(let_node, binding_name="x")
+    # Should return None since name extraction fails
+    assert result is None

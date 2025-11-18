@@ -532,6 +532,28 @@ def __extract_type_ast(node: Any, binding_name: Optional[str] = None) -> Optiona
         have_decl = __find_first(node, lambda n: n.get("kind") == "Lean.Parser.Term.haveDecl")
         if have_decl and isinstance(have_decl, dict):
             hd_args = have_decl.get("args", [])
+
+            # If binding_name is provided, verify it matches this suffices statement
+            matched_binding = False
+            if binding_name is not None:
+                # Extract name from haveIdDecl/haveId (similar to __extract_suffices_name)
+                extracted_name = None
+                have_id_decl = __find_first(node, lambda n: n.get("kind") == "Lean.Parser.Term.haveIdDecl")
+                if have_id_decl:
+                    have_id = __find_first(have_id_decl, lambda n: n.get("kind") == "Lean.Parser.Term.haveId")
+                    if have_id:
+                        val_node = __find_first(have_id, lambda n: isinstance(n.get("val"), str) and n.get("val") != "")
+                        if val_node:
+                            extracted_name = val_node.get("val")
+
+                # If name doesn't match, return None
+                if extracted_name != binding_name:
+                    logging.debug(
+                        f"Could not find suffices binding '{binding_name}' in node when extracting type, returning None"
+                    )
+                    return None
+                matched_binding = True
+
             # Find index of ":"
             colon_idx = None
             for i, arg in enumerate(hd_args):
@@ -555,14 +577,27 @@ def __extract_type_ast(node: Any, binding_name: Optional[str] = None) -> Optiona
                 if type_tokens:
                     return {"kind": "__type_container", "args": type_tokens}
 
-            # Fallback to old behavior
+            # If binding_name was provided and we matched, but no type found, return None
+            # (don't fall back to old behavior - this binding has no type)
+            if binding_name is not None and matched_binding:
+                return None
+
+            # Fallback to old behavior (only if no specific binding requested)
             if len(hd_args) > 1 and isinstance(hd_args[1], dict):
                 return deepcopy(hd_args[1])
             cand = __find_first(have_decl, lambda n: n.get("kind") in __TYPE_KIND_CANDIDATES)
             return deepcopy(cand) if cand is not None else None
-    # fallback: search anywhere under node
-    cand = __find_first(node, lambda n: n.get("kind") in __TYPE_KIND_CANDIDATES)
-    return deepcopy(cand) if cand is not None else None
+        # If binding_name was provided but no haveDecl found, return None
+        if binding_name is not None:
+            logging.debug(
+                f"Could not find suffices binding '{binding_name}' in node when extracting type (no haveDecl), returning None"
+            )
+            return None
+    # fallback: search anywhere under node (only if no specific binding requested)
+    if binding_name is None:
+        cand = __find_first(node, lambda n: n.get("kind") in __TYPE_KIND_CANDIDATES)
+        return deepcopy(cand) if cand is not None else None
+    return None
 
 
 # ---------------------------
