@@ -310,7 +310,23 @@ __TYPE_KIND_CANDIDATES = {
 }
 
 
-def __extract_type_ast(node: Any) -> Optional[dict]:  # noqa: C901
+def __extract_type_ast(node: Any, binding_name: Optional[str] = None) -> Optional[dict]:  # noqa: C901
+    """
+    Extract type AST from a node (theorem, have, let, set, etc.).
+
+    Parameters
+    ----------
+    node: Any
+        The AST node to extract type from
+    binding_name: Optional[str]
+        For let/set bindings, if provided, only extract type from the binding matching this name.
+        If None, extract from the first binding found.
+
+    Returns
+    -------
+    Optional[dict]
+        The type AST, or None if not found.
+    """
     if not isinstance(node, dict):
         return None
     k = node.get("kind", "")
@@ -355,22 +371,62 @@ def __extract_type_ast(node: Any) -> Optional[dict]:  # noqa: C901
         let_decl = __find_first(node, lambda n: n.get("kind") == "Lean.Parser.Term.letDecl")
         if let_decl and isinstance(let_decl, dict):
             ld_args = let_decl.get("args", [])
-            # Find ":" and extract type between ":" and ":="
-            colon_idx = None
-            assign_idx = None
-            for i, arg in enumerate(ld_args):
-                if isinstance(arg, dict):
-                    if arg.get("val") == ":" and colon_idx is None:
-                        colon_idx = i
-                    elif arg.get("val") == ":=":
-                        assign_idx = i
-                        break
-
-            # Extract type if explicitly provided
-            if colon_idx is not None and assign_idx is not None and assign_idx > colon_idx + 1:
-                type_tokens = ld_args[colon_idx + 1 : assign_idx]
-                if type_tokens:
-                    return {"kind": "__type_container", "args": type_tokens}
+            # Iterate through letDecl.args to find all letIdDecl nodes
+            # Structure: letDecl.args[i] = letIdDecl
+            # Inside letIdDecl: args[0]=name, args[1]=[], args[2]=type_array_or_empty, args[3]=":=", args[4]=value
+            matched_binding = False
+            for arg in ld_args:
+                if isinstance(arg, dict) and arg.get("kind") == "Lean.Parser.Term.letIdDecl":
+                    let_id_decl_args = arg.get("args", [])
+                    # If binding_name is provided, check if this letIdDecl matches
+                    if binding_name is not None:
+                        # Extract name from letIdDecl.args[0]
+                        extracted_name = None
+                        if len(let_id_decl_args) > 0:
+                            name_node = let_id_decl_args[0]
+                            # name_node might be a dict with "val", a binderIdent node, or a string
+                            if isinstance(name_node, dict):
+                                if name_node.get("val"):
+                                    extracted_name = name_node.get("val")
+                                else:
+                                    # Look for binderIdent inside
+                                    binder_ident = __find_first(
+                                        name_node,
+                                        lambda n: n.get("kind") in {"Lean.binderIdent", "Lean.Parser.Term.binderIdent"},
+                                    )
+                                    if binder_ident:
+                                        val_node = __find_first(
+                                            binder_ident,
+                                            lambda n: isinstance(n.get("val"), str) and n.get("val") != "",
+                                        )
+                                        if val_node:
+                                            extracted_name = val_node.get("val")
+                            elif isinstance(name_node, str):
+                                # Direct string name (unlikely but handle it)
+                                extracted_name = name_node
+                        # Skip this letIdDecl if name doesn't match
+                        if extracted_name != binding_name:
+                            continue
+                        matched_binding = True
+                    # Check args[2] which contains the type annotation (if present)
+                    # args[2] is either [] (no type) or [typeSpec] (with type)
+                    if len(let_id_decl_args) > 2:
+                        type_arg = let_id_decl_args[2]
+                        # If type_arg is a non-empty array, it contains the type
+                        if isinstance(type_arg, list) and len(type_arg) > 0:
+                            # The type is in args[2] as an array containing typeSpec
+                            return {"kind": "__type_container", "args": type_arg}
+                    # If binding_name was provided and we matched, but no type found, return None
+                    # (don't continue searching other bindings)
+                    if binding_name is not None and matched_binding:
+                        return None
+                    # If no type found in this letIdDecl and no specific binding requested, continue to next one
+            # If binding_name was provided but no match found, log a warning and return None
+            if binding_name is not None and not matched_binding:
+                logging.debug(
+                    f"Could not find let binding '{binding_name}' in node when extracting type, returning None"
+                )
+                return None
     # obtain: types are inferred from the source, not explicitly in the syntax
     # We rely on goal context for obtain types
     if k == "Lean.Parser.Tactic.tacticObtain_":
@@ -398,29 +454,77 @@ def __extract_type_ast(node: Any) -> Optional[dict]:  # noqa: C901
     # set: extract type from set binding (if explicitly typed)
     # set x : T := value or set x := value (inferred type)
     if k == "Lean.Parser.Tactic.tacticSet_":
-        # Look for setDecl which contains type information (similar to letDecl)
+        # Look for setDecl which contains type information
         set_decl = __find_first(node, lambda n: n.get("kind") == "Lean.Parser.Term.setDecl")
         if set_decl and isinstance(set_decl, dict):
             sd_args = set_decl.get("args", [])
-            # Find ":" and extract type between ":" and ":="
-            colon_idx = None
-            assign_idx = None
-            for i, arg in enumerate(sd_args):
-                if isinstance(arg, dict):
-                    if arg.get("val") == ":" and colon_idx is None:
-                        colon_idx = i
-                    elif arg.get("val") == ":=":
-                        assign_idx = i
-                        break
+            # Structure for set: setDecl.args = [setIdDecl, ":=", value, ...]
+            # First check if type is directly in setDecl.args (between ":" and ":=")
+            # But only if we're not looking for a specific binding
+            if binding_name is None:
+                colon_idx = None
+                assign_idx = None
+                for i, arg in enumerate(sd_args):
+                    if isinstance(arg, dict):
+                        if arg.get("val") == ":" and colon_idx is None:
+                            colon_idx = i
+                        elif arg.get("val") == ":=":
+                            assign_idx = i
+                            break
 
-            # Extract type if explicitly provided
-            if colon_idx is not None and assign_idx is not None and assign_idx > colon_idx + 1:
-                type_tokens = sd_args[colon_idx + 1 : assign_idx]
-                if type_tokens:
-                    return {"kind": "__type_container", "args": type_tokens}
-        # Fallback: try to find type in the node structure
-        cand = __find_first(node, lambda n: n.get("kind") in __TYPE_KIND_CANDIDATES)
-        return deepcopy(cand) if cand is not None else None
+                # Extract type if found directly in setDecl.args
+                if colon_idx is not None and assign_idx is not None and assign_idx > colon_idx + 1:
+                    type_tokens = sd_args[colon_idx + 1 : assign_idx]
+                    if type_tokens:
+                        return {"kind": "__type_container", "args": type_tokens}
+
+            # Fallback: check inside setIdDecl nodes for type annotation
+            # Similar to let, the type might be nested inside setIdDecl
+            # Check all setIdDecl nodes in case of multiple bindings
+            matched_binding = False
+            for arg in sd_args:
+                if isinstance(arg, dict) and arg.get("kind") == "Lean.Parser.Term.setIdDecl":
+                    # If binding_name is provided, check if this setIdDecl matches
+                    if binding_name is not None:
+                        # Extract name from setIdDecl
+                        extracted_name = None
+                        binder_ident = __find_first(
+                            arg, lambda n: n.get("kind") in {"Lean.binderIdent", "Lean.Parser.Term.binderIdent"}
+                        )
+                        if binder_ident:
+                            val_node = __find_first(
+                                binder_ident, lambda n: isinstance(n.get("val"), str) and n.get("val") != ""
+                            )
+                            if val_node:
+                                extracted_name = val_node.get("val")
+                        # Skip this setIdDecl if name doesn't match
+                        if extracted_name != binding_name:
+                            continue
+                        matched_binding = True
+                    # Look for typeSpec inside setIdDecl
+                    type_spec = __find_first(arg, lambda n: n.get("kind") == "Lean.Parser.Term.typeSpec")
+                    if type_spec:
+                        # Extract type from typeSpec
+                        ts_args = type_spec.get("args", [])
+                        # Skip the ":" token and get the actual type
+                        type_tokens = [a for a in ts_args if not (isinstance(a, dict) and a.get("val") == ":")]
+                        if type_tokens:
+                            return {"kind": "__type_container", "args": type_tokens}
+                    # If binding_name was provided and we matched, but no type found, return None
+                    # (don't continue searching other bindings)
+                    if binding_name is not None and matched_binding:
+                        return None
+            # If binding_name was provided but no match found, log a warning and return None
+            if binding_name is not None and not matched_binding:
+                logging.debug(
+                    f"Could not find set binding '{binding_name}' in node when extracting type, returning None"
+                )
+                return None
+        # Fallback: try to find type in the node structure (only if no specific binding requested)
+        if binding_name is None:
+            cand = __find_first(node, lambda n: n.get("kind") in __TYPE_KIND_CANDIDATES)
+            return deepcopy(cand) if cand is not None else None
+        return None
     # suffices: extract type from suffices statement (similar to have)
     # suffices h : P from Q or suffices h : P by ...
     if k == "Lean.Parser.Tactic.tacticSuffices_":
@@ -1185,54 +1289,226 @@ def __extract_set_name(set_node: dict) -> Optional[str]:
     return None
 
 
-def __extract_let_value(let_node: dict) -> Optional[dict]:
+def __extract_let_value(let_node: dict, binding_name: Optional[str] = None) -> Optional[dict]:  # noqa: C901
     """
     Extract the value expression from a let binding node.
     Returns the AST of the value expression (everything after :=).
+
+    Parameters
+    ----------
+    let_node: dict
+        The let binding node (tacticLet_ or let node)
+    binding_name: Optional[str]
+        If provided, only extract value from the letIdDecl matching this name.
+        If None, extract from the first letIdDecl found.
+
+    Returns
+    -------
+    Optional[dict]
+        The value AST wrapped in __value_container, or None if not found.
     """
     # Look for letDecl which contains the value
     let_decl = __find_first(let_node, lambda n: n.get("kind") == "Lean.Parser.Term.letDecl")
     if let_decl and isinstance(let_decl, dict):
         ld_args = let_decl.get("args", [])
-        # Find ":=" and extract everything after it
-        assign_idx = None
-        for i, arg in enumerate(ld_args):
-            if isinstance(arg, dict) and arg.get("val") == ":=":
-                assign_idx = i
-                break
+        # Iterate through letDecl.args to find all letIdDecl nodes
+        # Structure: letDecl.args[i] = letIdDecl
+        # Inside letIdDecl: args[0]=name, args[1]=[], args[2]=type_or_empty, args[3]=":=", args[4]=value
+        matched_binding = False
+        for arg in ld_args:
+            if isinstance(arg, dict) and arg.get("kind") == "Lean.Parser.Term.letIdDecl":
+                let_id_decl_args = arg.get("args", [])
+                # If binding_name is provided, check if this letIdDecl matches
+                if binding_name is not None:
+                    # Extract name from letIdDecl.args[0]
+                    extracted_name = None
+                    if len(let_id_decl_args) > 0:
+                        name_node = let_id_decl_args[0]
+                        # name_node might be a dict with "val", a binderIdent node, or a string
+                        if isinstance(name_node, dict):
+                            if name_node.get("val"):
+                                extracted_name = name_node.get("val")
+                            else:
+                                # Look for binderIdent inside
+                                binder_ident = __find_first(
+                                    name_node,
+                                    lambda n: n.get("kind") in {"Lean.binderIdent", "Lean.Parser.Term.binderIdent"},
+                                )
+                                if binder_ident:
+                                    val_node = __find_first(
+                                        binder_ident, lambda n: isinstance(n.get("val"), str) and n.get("val") != ""
+                                    )
+                                    if val_node:
+                                        extracted_name = val_node.get("val")
+                        elif isinstance(name_node, str):
+                            # Direct string name (unlikely but handle it)
+                            extracted_name = name_node
+                    # Skip this letIdDecl if name doesn't match
+                    if extracted_name != binding_name:
+                        continue
+                    matched_binding = True
 
-        # Extract value tokens after ":="
-        if assign_idx is not None and assign_idx + 1 < len(ld_args):
-            value_tokens = ld_args[assign_idx + 1 :]
-            if value_tokens:
-                # Wrap in a container to preserve structure
-                return {"kind": "__value_container", "args": value_tokens}
+                # Find ":=" - check both inside letIdDecl.args (nested) and at letDecl level (flat)
+                assign_idx = None
+                # First try: look inside letIdDecl.args
+                for i, lid_arg in enumerate(let_id_decl_args):
+                    if isinstance(lid_arg, dict) and lid_arg.get("val") == ":=":
+                        assign_idx = i
+                        break
 
+                if assign_idx is not None and assign_idx + 1 < len(let_id_decl_args):
+                    # Found ":=" inside letIdDecl, extract value from there
+                    value_tokens = let_id_decl_args[assign_idx + 1 :]
+                    if value_tokens:
+                        return {"kind": "__value_container", "args": value_tokens}
+                else:
+                    # Second try: look for ":=" at letDecl level after this letIdDecl (flat structure)
+                    # Find the index of this letIdDecl in ld_args
+                    let_id_decl_idx = None
+                    for i, ld_arg in enumerate(ld_args):
+                        if ld_arg is arg:  # Same object reference
+                            let_id_decl_idx = i
+                            break
+
+                    if let_id_decl_idx is not None:
+                        # Search for ":=" after this letIdDecl
+                        for i in range(let_id_decl_idx + 1, len(ld_args)):
+                            ld_arg = ld_args[i]
+                            if isinstance(ld_arg, dict) and ld_arg.get("val") == ":=":
+                                # Found ":=", extract value tokens after it
+                                value_tokens = ld_args[i + 1 :]
+                                # Stop at next letIdDecl if present (for multiple bindings)
+                                filtered_tokens = []
+                                for token in value_tokens:
+                                    if isinstance(token, dict) and token.get("kind") == "Lean.Parser.Term.letIdDecl":
+                                        break
+                                    filtered_tokens.append(token)
+                                if filtered_tokens:
+                                    return {"kind": "__value_container", "args": filtered_tokens}
+                                break
+                            # If we hit another letIdDecl before finding ":=", something's wrong
+                            if isinstance(ld_arg, dict) and ld_arg.get("kind") == "Lean.Parser.Term.letIdDecl":
+                                break
+
+                # If binding_name was provided and we matched, but no ":=" found, return None
+                # (don't continue searching other bindings - this binding is malformed)
+                if binding_name is not None and matched_binding:
+                    return None
+                # If we found a letIdDecl but no ":=" and no specific binding requested,
+                # continue to next one (shouldn't happen in well-formed AST, but be defensive)
+
+    # If binding_name was provided but no match found, log a debug message
+    if binding_name is not None and not matched_binding:
+        logging.debug(f"Could not find let binding '{binding_name}' in node when extracting value, returning None")
     return None
 
 
-def __extract_set_value(set_node: dict) -> Optional[dict]:
+def __extract_set_value(set_node: dict, binding_name: Optional[str] = None) -> Optional[dict]:  # noqa: C901
     """
     Extract the value expression from a set statement node.
     Returns the AST of the value expression (everything after :=).
+
+    Parameters
+    ----------
+    set_node: dict
+        The set binding node (tacticSet_ node)
+    binding_name: Optional[str]
+        If provided, only extract value from the setIdDecl matching this name.
+        If None, extract from the first setIdDecl found.
+
+    Returns
+    -------
+    Optional[dict]
+        The value AST wrapped in __value_container, or None if not found.
     """
     # Look for setDecl which contains the value
     set_decl = __find_first(set_node, lambda n: n.get("kind") == "Lean.Parser.Term.setDecl")
     if set_decl and isinstance(set_decl, dict):
         sd_args = set_decl.get("args", [])
-        # Find ":=" and extract everything after it
+        # Structure for set is flatter than let:
+        # setDecl.args = [setIdDecl, ":=", value, ...]
+        # OR if multiple bindings: [setIdDecl1, ":=", value1, setIdDecl2, ":=", value2, ...]
+        # Find the matching setIdDecl if binding_name is provided
+        target_set_id_decl_idx = None
+        matched_binding = False
+        if binding_name is not None:
+            for i, arg in enumerate(sd_args):
+                if isinstance(arg, dict) and arg.get("kind") == "Lean.Parser.Term.setIdDecl":
+                    # Extract name from setIdDecl by looking for binderIdent inside
+                    extracted_name = None
+                    binder_ident = __find_first(
+                        arg, lambda n: n.get("kind") in {"Lean.binderIdent", "Lean.Parser.Term.binderIdent"}
+                    )
+                    if binder_ident:
+                        val_node = __find_first(
+                            binder_ident, lambda n: isinstance(n.get("val"), str) and n.get("val") != ""
+                        )
+                        if val_node:
+                            extracted_name = val_node.get("val")
+                    if extracted_name == binding_name:
+                        target_set_id_decl_idx = i
+                        matched_binding = True
+                        break
+
+        # If binding_name was provided but no match found, return None immediately
+        if binding_name is not None and not matched_binding:
+            logging.debug(f"Could not find set binding '{binding_name}' in node when extracting value, returning None")
+            return None
+
+        # Find ":=" token - either after target setIdDecl or first one if no target
         assign_idx = None
-        for i, arg in enumerate(sd_args):
+        if target_set_id_decl_idx is not None:
+            # Start searching from the index after the target setIdDecl
+            # The ":=" should be immediately after the setIdDecl
+            start_idx = target_set_id_decl_idx + 1
+        else:
+            # When no specific binding requested, find first setIdDecl, then search for ":=" after it
+            first_set_id_decl_idx = None
+            for i, arg in enumerate(sd_args):
+                if isinstance(arg, dict) and arg.get("kind") == "Lean.Parser.Term.setIdDecl":
+                    first_set_id_decl_idx = i
+                    break
+            start_idx = first_set_id_decl_idx + 1 if first_set_id_decl_idx is not None else 0
+        for i in range(start_idx, len(sd_args)):
+            arg = sd_args[i]
             if isinstance(arg, dict) and arg.get("val") == ":=":
                 assign_idx = i
+                break
+            # If we're looking for a specific binding and hit another setIdDecl, stop
+            if (
+                binding_name is not None
+                and target_set_id_decl_idx is not None
+                and i > target_set_id_decl_idx
+                and isinstance(arg, dict)
+                and arg.get("kind") == "Lean.Parser.Term.setIdDecl"
+            ):
+                # We've passed the target binding without finding ":=", something's wrong
+                break
+            # If no specific binding requested and we hit another setIdDecl, stop
+            # (we should only extract from the first binding)
+            if (
+                binding_name is None
+                and isinstance(arg, dict)
+                and arg.get("kind") == "Lean.Parser.Term.setIdDecl"
+                and i > start_idx
+            ):
+                # We've passed the first binding, stop here
                 break
 
         # Extract value tokens after ":="
         if assign_idx is not None and assign_idx + 1 < len(sd_args):
             value_tokens = sd_args[assign_idx + 1 :]
-            if value_tokens:
+            # Stop at next setIdDecl if present (for multiple bindings)
+            # Filter out any setIdDecl nodes that might appear after the value
+            filtered_tokens = []
+            for token in value_tokens:
+                if isinstance(token, dict) and token.get("kind") == "Lean.Parser.Term.setIdDecl":
+                    # We've hit the next binding, stop here
+                    break
+                filtered_tokens.append(token)
+            if filtered_tokens:
                 # Wrap in a container to preserve structure
-                return {"kind": "__value_container", "args": value_tokens}
+                return {"kind": "__value_container", "args": filtered_tokens}
 
     return None
 
@@ -1283,11 +1559,12 @@ def __handle_set_let_binding_as_equality(
         - was_handled: True if an equality hypothesis was created, False if value extraction failed
     """
     # Extract the value expression from the binding
+    # Pass binding_name to ensure we extract from the correct binding if multiple exist
     value_ast = None
     if binding_type == "let":
-        value_ast = __extract_let_value(binding_node)
+        value_ast = __extract_let_value(binding_node, binding_name=var_name)
     elif binding_type == "set":
-        value_ast = __extract_set_value(binding_node)
+        value_ast = __extract_set_value(binding_node, binding_name=var_name)
 
     if value_ast is not None:
         # Generate hypothesis name (e.g., "hl" for "l"), avoiding conflicts
@@ -1465,7 +1742,8 @@ def _get_named_subgoal_rewritten_ast(  # noqa: C901
                 binder = __make_binder_from_type_string(binding_name, goal_var_types[binding_name])
             else:
                 # Try to extract type from AST
-                binding_type_ast = __extract_type_ast(binding_node)
+                # Pass binding_name to ensure we extract from the correct binding if multiple exist
+                binding_type_ast = __extract_type_ast(binding_node, binding_name=binding_name)
                 if binding_type_ast is not None:
                     binder = __make_binder(binding_name, binding_type_ast)
                 else:
