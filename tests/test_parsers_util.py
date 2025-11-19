@@ -4,6 +4,7 @@
 from goedels_poetry.parsers.util import (
     __extract_let_value,
     __extract_set_value,
+    __extract_set_with_hypothesis_name,
     __extract_type_ast,
     _ast_to_code,
 )
@@ -4875,3 +4876,348 @@ def test_extract_type_ast_match_pattern_without_arrow() -> None:
     # So no names extracted, binding_name won't match
     result = __extract_type_ast(match_node, binding_name="n")
     assert result is None  # No names found due to malformed pattern
+
+
+# ============================================================================
+# Tests for __extract_set_with_hypothesis_name (set ... with h bug fix)
+# ============================================================================
+
+
+def test_extract_set_with_hypothesis_name_mathlib_set_tactic() -> None:
+    """Test extracting hypothesis name from Mathlib.Tactic.setTactic with 'with' clause."""
+    set_node = {
+        "kind": "Mathlib.Tactic.setTactic",
+        "args": [
+            {"val": "set"},
+            [],
+            {
+                "kind": "Mathlib.Tactic.setArgsRest",
+                "args": [
+                    {"val": "S"},
+                    [],
+                    {"val": ":="},
+                    {"val": "Finset.range 10000"},
+                    [
+                        {"val": "with"},
+                        [],
+                        {"val": "hS"},
+                    ],
+                ],
+            },
+        ],
+    }
+    result = __extract_set_with_hypothesis_name(set_node)
+    assert result == "hS"
+
+
+def test_extract_set_with_hypothesis_name_lean_parser_tactic_set() -> None:
+    """Test extracting hypothesis name from Lean.Parser.Tactic.tacticSet_ with 'with' clause."""
+    set_node = {
+        "kind": "Lean.Parser.Tactic.tacticSet_",
+        "args": [
+            {"val": "set"},
+            [],
+            {
+                "kind": "Lean.Parser.Tactic.setArgsRest",
+                "args": [
+                    {"val": "x"},
+                    [],
+                    {"val": ":="},
+                    {"val": "5"},
+                    [
+                        {"val": "with"},
+                        [],
+                        {"val": "hx"},
+                    ],
+                ],
+            },
+        ],
+    }
+    result = __extract_set_with_hypothesis_name(set_node)
+    assert result == "hx"
+
+
+def test_extract_set_with_hypothesis_name_no_with_clause() -> None:
+    """Test that None is returned when set statement has no 'with' clause."""
+    set_node = {
+        "kind": "Mathlib.Tactic.setTactic",
+        "args": [
+            {"val": "set"},
+            [],
+            {
+                "kind": "Mathlib.Tactic.setArgsRest",
+                "args": [
+                    {"val": "S"},
+                    [],
+                    {"val": ":="},
+                    {"val": "Finset.range 10000"},
+                ],
+            },
+        ],
+    }
+    result = __extract_set_with_hypothesis_name(set_node)
+    assert result is None
+
+
+def test_extract_set_with_hypothesis_name_hypothesis_name_as_dict() -> None:
+    """Test extracting hypothesis name when it's a dict node with 'val' field."""
+    set_node = {
+        "kind": "Mathlib.Tactic.setTactic",
+        "args": [
+            {"val": "set"},
+            [],
+            {
+                "kind": "Mathlib.Tactic.setArgsRest",
+                "args": [
+                    {"val": "S"},
+                    [],
+                    {"val": ":="},
+                    {"val": "value"},
+                    [
+                        {"val": "with"},
+                        [],
+                        {"val": "hS", "rawVal": "hS", "info": {"leading": "", "trailing": ""}},
+                    ],
+                ],
+            },
+        ],
+    }
+    result = __extract_set_with_hypothesis_name(set_node)
+    assert result == "hS"
+
+
+def test_extract_set_with_hypothesis_name_hypothesis_name_as_string() -> None:
+    """Test extracting hypothesis name when it's a plain string."""
+    set_node = {
+        "kind": "Mathlib.Tactic.setTactic",
+        "args": [
+            {"val": "set"},
+            [],
+            {
+                "kind": "Mathlib.Tactic.setArgsRest",
+                "args": [
+                    {"val": "S"},
+                    [],
+                    {"val": ":="},
+                    {"val": "value"},
+                    [
+                        {"val": "with"},
+                        [],
+                        "hS",  # Plain string instead of dict
+                    ],
+                ],
+            },
+        ],
+    }
+    result = __extract_set_with_hypothesis_name(set_node)
+    assert result == "hS"
+
+
+def test_extract_set_with_hypothesis_name_no_set_args_rest() -> None:
+    """Test that None is returned when setArgsRest node is missing."""
+    set_node = {
+        "kind": "Mathlib.Tactic.setTactic",
+        "args": [
+            {"val": "set"},
+            [],
+            # Missing setArgsRest
+        ],
+    }
+    result = __extract_set_with_hypothesis_name(set_node)
+    assert result is None
+
+
+def test_extract_set_with_hypothesis_name_with_clause_too_short() -> None:
+    """Test that None is returned when 'with' clause list is too short."""
+    set_node = {
+        "kind": "Mathlib.Tactic.setTactic",
+        "args": [
+            {"val": "set"},
+            [],
+            {
+                "kind": "Mathlib.Tactic.setArgsRest",
+                "args": [
+                    {"val": "S"},
+                    [],
+                    {"val": ":="},
+                    {"val": "value"},
+                    [
+                        {"val": "with"},
+                        [],  # Missing hypothesis name at index 2
+                    ],
+                ],
+            },
+        ],
+    }
+    result = __extract_set_with_hypothesis_name(set_node)
+    assert result is None
+
+
+def test_extract_set_with_hypothesis_name_with_clause_not_first() -> None:
+    """Test that hypothesis name is extracted even if 'with' is not the first element."""
+    set_node = {
+        "kind": "Mathlib.Tactic.setTactic",
+        "args": [
+            {"val": "set"},
+            [],
+            {
+                "kind": "Mathlib.Tactic.setArgsRest",
+                "args": [
+                    {"val": "S"},
+                    [],
+                    {"val": ":="},
+                    {"val": "value"},
+                    [
+                        {"val": "with"},
+                        [],
+                        {"val": "hS"},
+                    ],
+                ],
+            },
+        ],
+    }
+    result = __extract_set_with_hypothesis_name(set_node)
+    assert result == "hS"
+
+
+def test_extract_set_with_hypothesis_name_empty_hypothesis_name() -> None:
+    """Test that None is returned when hypothesis name is empty string."""
+    set_node = {
+        "kind": "Mathlib.Tactic.setTactic",
+        "args": [
+            {"val": "set"},
+            [],
+            {
+                "kind": "Mathlib.Tactic.setArgsRest",
+                "args": [
+                    {"val": "S"},
+                    [],
+                    {"val": ":="},
+                    {"val": "value"},
+                    [
+                        {"val": "with"},
+                        [],
+                        {"val": ""},  # Empty string
+                    ],
+                ],
+            },
+        ],
+    }
+    result = __extract_set_with_hypothesis_name(set_node)
+    assert result is None
+
+
+def test_extract_set_with_hypothesis_name_not_a_dict() -> None:
+    """Test that None is returned when input is not a dict."""
+    result = __extract_set_with_hypothesis_name("not a dict")
+    assert result is None
+
+
+def test_extract_set_with_hypothesis_name_multiple_with_clauses() -> None:
+    """Test that first 'with' clause is extracted when multiple exist."""
+    set_node = {
+        "kind": "Mathlib.Tactic.setTactic",
+        "args": [
+            {"val": "set"},
+            [],
+            {
+                "kind": "Mathlib.Tactic.setArgsRest",
+                "args": [
+                    {"val": "S"},
+                    [],
+                    {"val": ":="},
+                    {"val": "value"},
+                    [
+                        {"val": "with"},
+                        [],
+                        {"val": "hS"},
+                    ],
+                    [
+                        {"val": "with"},
+                        [],
+                        {"val": "hS2"},
+                    ],
+                ],
+            },
+        ],
+    }
+    result = __extract_set_with_hypothesis_name(set_node)
+    assert result == "hS"  # First one found
+
+
+def test_extract_set_with_hypothesis_name_different_set_args_rest_kinds() -> None:
+    """Test that different setArgsRest node kinds are handled."""
+    for kind in ["Mathlib.Tactic.setArgsRest", "Lean.Parser.Tactic.setArgsRest", "Lean.Parser.Term.setArgsRest"]:
+        set_node = {
+            "kind": "Mathlib.Tactic.setTactic",
+            "args": [
+                {"val": "set"},
+                [],
+                {
+                    "kind": kind,
+                    "args": [
+                        {"val": "S"},
+                        [],
+                        {"val": ":="},
+                        {"val": "value"},
+                        [
+                            {"val": "with"},
+                            [],
+                            {"val": "hS"},
+                        ],
+                    ],
+                },
+            ],
+        }
+        result = __extract_set_with_hypothesis_name(set_node)
+        assert result == "hS", f"Failed for kind: {kind}"
+
+
+def test_extract_set_with_hypothesis_name_with_clause_not_list() -> None:
+    """Test that non-list 'with' clauses are skipped."""
+    set_node = {
+        "kind": "Mathlib.Tactic.setTactic",
+        "args": [
+            {"val": "set"},
+            [],
+            {
+                "kind": "Mathlib.Tactic.setArgsRest",
+                "args": [
+                    {"val": "S"},
+                    [],
+                    {"val": ":="},
+                    {"val": "value"},
+                    {"val": "with"},  # Not a list
+                ],
+            },
+        ],
+    }
+    result = __extract_set_with_hypothesis_name(set_node)
+    assert result is None
+
+
+def test_extract_set_with_hypothesis_name_with_not_first_element() -> None:
+    """Test that 'with' clause is only recognized when 'with' is the first element."""
+    set_node = {
+        "kind": "Mathlib.Tactic.setTactic",
+        "args": [
+            {"val": "set"},
+            [],
+            {
+                "kind": "Mathlib.Tactic.setArgsRest",
+                "args": [
+                    {"val": "S"},
+                    [],
+                    {"val": ":="},
+                    {"val": "value"},
+                    [
+                        {"val": "something_else"},
+                        {"val": "with"},
+                        {"val": "hS"},
+                    ],
+                ],
+            },
+        ],
+    }
+    result = __extract_set_with_hypothesis_name(set_node)
+    assert result is None  # 'with' is not first, so not recognized

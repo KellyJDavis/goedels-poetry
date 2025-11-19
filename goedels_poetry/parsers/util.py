@@ -1285,7 +1285,8 @@ def __find_earlier_bindings(  # noqa: C901
 
             # Check if this is a set statement
             # set x := value or set x : Type := value
-            elif kind == "Lean.Parser.Tactic.tacticSet_":
+            # Also handles: set x := value with h
+            elif kind in {"Lean.Parser.Tactic.tacticSet_", "Mathlib.Tactic.setTactic"}:
                 try:
                     set_name = __extract_set_name(node)
                     if set_name:
@@ -1294,6 +1295,18 @@ def __find_earlier_bindings(  # noqa: C901
                             return
                         else:
                             earlier_bindings.append((set_name, "set", node))
+
+                    # Also extract hypothesis name from "with" clause if present
+                    # set x := value with h introduces both x and h
+                    with_hypothesis_name = __extract_set_with_hypothesis_name(node)
+                    if with_hypothesis_name:
+                        if with_hypothesis_name == target_name:
+                            target_found = True
+                            return
+                        else:
+                            # Add the hypothesis as a separate binding
+                            # Use "set_with_hypothesis" as the type to distinguish it
+                            earlier_bindings.append((with_hypothesis_name, "set_with_hypothesis", node))
                 except (KeyError, IndexError, TypeError, AttributeError):
                     # Silently handle expected errors from malformed AST structures
                     pass
@@ -1448,6 +1461,10 @@ def __extract_obtain_names(obtain_node: dict) -> list[str]:  # noqa: C901
     Extract variable names from an obtain statement.
     obtain ⟨x, y, hz⟩ := proof extracts [x, y, hz]
 
+    Note: This function extracts all binderIdent nodes from the pattern,
+    which correctly captures all destructured bindings. Names after ":="
+    are references, not bindings, but may be included for dependency tracking.
+
     Returns empty list if no names found, with debug logging for failures.
     """
     if not isinstance(obtain_node, dict):
@@ -1485,6 +1502,10 @@ def __extract_choose_names(choose_node: dict) -> list[str]:  # noqa: C901
     """
     Extract variable names from a choose statement.
     choose x hx using h extracts [x, hx]
+
+    Note: This function extracts all binderIdent nodes, which may include
+    names from the "using" clause. For dependency tracking purposes, this
+    is acceptable as it ensures all referenced names are included.
 
     Returns empty list if no names found, with debug logging for failures.
     """
@@ -1749,6 +1770,66 @@ def __extract_set_name(set_node: dict) -> Optional[str]:
                 val_node = __find_first(binder_ident, lambda n: isinstance(n.get("val"), str) and n.get("val") != "")
                 if val_node and val_node.get("val") not in {"set", ":=", ":"}:
                     return str(val_node.get("val"))
+
+    return None
+
+
+def __extract_set_with_hypothesis_name(set_node: dict) -> Optional[str]:
+    """
+    Extract the hypothesis name from a set statement with a 'with' clause.
+    set x := value with h extracts "h"
+
+    The AST structure for set ... with h is:
+    - setTactic.args second element = setArgsRest
+    - setArgsRest.args fifth element = list containing "with", empty list, and "h"
+    - The hypothesis name is at the third element of that list
+
+    Also handles Mathlib.Tactic.setTactic structure:
+    - setTactic.args second element = setArgsRest (Mathlib.Tactic.setArgsRest)
+    - setArgsRest.args fifth element = list containing "with", empty list, and "h"
+
+    Returns None if no 'with' clause is present or if the name cannot be extracted.
+    """
+    if not isinstance(set_node, dict):
+        logging.debug("__extract_set_with_hypothesis_name: set_node is not a dict")
+        return None
+
+    # Look for setArgsRest node (can be Mathlib.Tactic.setArgsRest or similar)
+    set_args_rest = __find_first(
+        set_node,
+        lambda n: n.get("kind")
+        in {
+            "Mathlib.Tactic.setArgsRest",
+            "Lean.Parser.Tactic.setArgsRest",
+            "Lean.Parser.Term.setArgsRest",
+        },
+    )
+
+    if not set_args_rest or not isinstance(set_args_rest, dict):
+        # No with clause present
+        return None
+
+    # Look for the "with" clause in setArgsRest.args
+    # The structure is: [variable_name, [], ":=", value, ["with", [], hypothesis_name]]
+    args = set_args_rest.get("args", [])
+
+    # Search for a list that starts with "with"
+    for arg in args:
+        if (
+            isinstance(arg, list)
+            and len(arg) >= 3
+            and isinstance(arg[0], dict)
+            and arg[0].get("val") == "with"
+            and len(arg) > 2
+        ):
+            # The hypothesis name should be at index 2
+            hypothesis_name_node = arg[2]
+            if isinstance(hypothesis_name_node, dict):
+                hypothesis_name = hypothesis_name_node.get("val")
+                if isinstance(hypothesis_name, str) and hypothesis_name:
+                    return hypothesis_name
+            elif isinstance(hypothesis_name_node, str):
+                return hypothesis_name_node if hypothesis_name_node else None
 
     return None
 
@@ -2214,6 +2295,29 @@ def _get_named_subgoal_rewritten_ast(  # noqa: C901
             else:
                 # Fallback: if we can't extract the value, log a warning and skip
                 logging.warning(f"Could not extract value for {binding_type} binding '{binding_name}', skipping")
+        elif binding_type == "set_with_hypothesis":
+            # Hypothesis from "set ... with h" - treat like a have statement
+            # The type is h : variable = value, which should be in goal context
+            if binding_name in goal_var_types:
+                # Prioritize goal context types as they're most accurate
+                binder = __make_binder_from_type_string(binding_name, goal_var_types[binding_name])
+            else:
+                # Try to extract type from AST (though set_with_hypothesis may not have explicit type in AST)
+                # The type should be something like "S = Finset.range 10000"
+                # We can try to construct it from the set statement, but goal context is more reliable
+                logging.warning(
+                    f"Could not find type for set_with_hypothesis '{binding_name}' in goal context, "
+                    "trying to infer from AST"
+                )
+                binding_type_ast = __extract_type_ast(binding_node, binding_name=binding_name)
+                if binding_type_ast is not None:
+                    binder = __make_binder(binding_name, binding_type_ast)
+                else:
+                    # Last resort: use Prop as placeholder
+                    logging.warning(f"Could not determine type for set_with_hypothesis '{binding_name}', using Prop")
+                    binder = __make_binder(binding_name, None)
+            binders.append(binder)
+            existing_names.add(binding_name)
         else:
             # For have, obtain, choose, generalize, match: use type annotations
             # Extract the type/conclusion of the binding
