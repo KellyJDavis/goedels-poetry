@@ -1780,13 +1780,13 @@ def __extract_set_with_hypothesis_name(set_node: dict) -> Optional[str]:
     set x := value with h extracts "h"
 
     The AST structure for set ... with h is:
-    - setTactic.args[2] = setArgsRest
-    - setArgsRest.args[4] = ["with", [], "h"] (list)
-    - The hypothesis name is at setArgsRest.args[4][2]
+    - setTactic.args second element = setArgsRest
+    - setArgsRest.args fifth element = list containing "with", empty list, and "h"
+    - The hypothesis name is at the third element of that list
 
     Also handles Mathlib.Tactic.setTactic structure:
-    - setTactic.args[2] = setArgsRest (Mathlib.Tactic.setArgsRest)
-    - setArgsRest.args[4] = ["with", [], "h"]
+    - setTactic.args second element = setArgsRest (Mathlib.Tactic.setArgsRest)
+    - setArgsRest.args fifth element = list containing "with", empty list, and "h"
 
     Returns None if no 'with' clause is present or if the name cannot be extracted.
     """
