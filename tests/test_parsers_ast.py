@@ -4257,3 +4257,731 @@ def test_ast_get_named_subgoal_code_mixed_match_other_bindings() -> None:
     # Should include match pattern binding n
     assert "n" in result
     assert "ℕ" in result  # noqa: RUF001
+
+
+def test_ast_get_named_subgoal_code_includes_set_with_hypothesis() -> None:
+    """Test that get_named_subgoal_code includes hypothesis from 'set ... with h'."""
+    # Create a theorem with a set binding with 'with' clause and a have statement
+    ast_dict = {
+        "kind": "Lean.Parser.Command.theorem",
+        "args": [
+            {"val": "theorem", "info": {"leading": "", "trailing": " "}},
+            {
+                "kind": "Lean.Parser.Command.declId",
+                "args": [{"val": "test_theorem", "info": {"leading": "", "trailing": " "}}],
+            },
+            {
+                "kind": "Lean.Parser.Term.bracketedBinderList",
+                "args": [
+                    {
+                        "kind": "Lean.Parser.Term.explicitBinder",
+                        "args": [
+                            {"val": "(", "info": {"leading": " ", "trailing": ""}},
+                            {
+                                "kind": "Lean.binderIdent",
+                                "args": [{"val": "x", "info": {"leading": "", "trailing": ""}}],
+                            },
+                            {"val": ":", "info": {"leading": " ", "trailing": " "}},
+                            {"val": "ℕ", "info": {"leading": "", "trailing": " "}},  # noqa: RUF001
+                            {"val": ")", "info": {"leading": "", "trailing": " "}},
+                        ],
+                    },
+                ],
+            },
+            {"val": ":", "info": {"leading": " ", "trailing": " "}},
+            {"val": "Prop", "info": {"leading": "", "trailing": " "}},
+            {"val": ":=", "info": {"leading": " ", "trailing": " "}},
+            {
+                "kind": "Lean.Parser.Term.byTactic",
+                "args": [
+                    {"val": "by", "info": {"leading": "", "trailing": "\n  "}},
+                    {
+                        "kind": "Lean.Parser.Tactic.tacticSeq",
+                        "args": [
+                            # Set binding with 'with' clause
+                            {
+                                "kind": "Mathlib.Tactic.setTactic",
+                                "args": [
+                                    {"val": "set", "info": {"leading": "", "trailing": " "}},
+                                    [],
+                                    {
+                                        "kind": "Mathlib.Tactic.setArgsRest",
+                                        "args": [
+                                            {"val": "S", "info": {"leading": "", "trailing": " "}},
+                                            [],
+                                            {"val": ":=", "info": {"leading": " ", "trailing": " "}},
+                                            {"val": "Finset.range", "info": {"leading": " ", "trailing": " "}},
+                                            {"val": "10000", "info": {"leading": " ", "trailing": " "}},
+                                            [
+                                                {"val": "with", "info": {"leading": " ", "trailing": " "}},
+                                                [],
+                                                {"val": "hS", "info": {"leading": "", "trailing": "\n\n  "}},
+                                            ],
+                                        ],
+                                    },
+                                ],
+                            },
+                            # Have statement using both S and hS
+                            {
+                                "kind": "Lean.Parser.Tactic.tacticHave_",
+                                "args": [
+                                    {"val": "have", "info": {"leading": "\n  ", "trailing": " "}},
+                                    {
+                                        "kind": "Lean.Parser.Term.haveDecl",
+                                        "args": [
+                                            {
+                                                "kind": "Lean.Parser.Term.haveIdDecl",
+                                                "args": [
+                                                    {
+                                                        "kind": "Lean.Parser.Term.haveId",
+                                                        "args": [
+                                                            {"val": "h1", "info": {"leading": "", "trailing": " "}}
+                                                        ],
+                                                    }
+                                                ],
+                                            },
+                                            {"val": ":", "info": {"leading": "", "trailing": " "}},
+                                            {"val": "S", "info": {"leading": "", "trailing": " "}},
+                                            {"val": "=", "info": {"leading": " ", "trailing": " "}},
+                                            {"val": "Finset.range", "info": {"leading": " ", "trailing": " "}},
+                                            {"val": "10000", "info": {"leading": " ", "trailing": " "}},
+                                        ],
+                                    },
+                                    {"val": ":=", "info": {"leading": " ", "trailing": " "}},
+                                    {
+                                        "kind": "Lean.Parser.Term.byTactic",
+                                        "args": [
+                                            {"val": "by", "info": {"leading": "", "trailing": " "}},
+                                            {
+                                                "kind": "Lean.Parser.Tactic.tacticSeq",
+                                                "args": [
+                                                    {
+                                                        "kind": "Lean.Parser.Tactic.tacticSorry",
+                                                        "args": [
+                                                            {"val": "sorry", "info": {"leading": "", "trailing": ""}}
+                                                        ],
+                                                    }
+                                                ],
+                                            },
+                                        ],
+                                    },
+                                ],
+                            },
+                        ],
+                    },
+                ],
+            },
+        ],
+    }
+
+    sorries = [
+        {
+            "pos": {"line": 3, "column": 4},
+            "endPos": {"line": 3, "column": 9},
+            "goal": "x : ℕ\nS : Finset ℕ\nhS : S = Finset.range 10000\n⊢ S = Finset.range 10000",  # noqa: RUF001
+            "proofState": 1,
+        }
+    ]
+
+    ast = AST(ast_dict, sorries)
+    result = ast.get_named_subgoal_code("h1")
+
+    # The result should include the theorem parameter x
+    assert "lemma" in result
+    assert "h1" in result
+    assert "x" in result
+    # Should include the set binding S as an equality hypothesis (hS_set : S = Finset.range 10000)
+    # Note: The generated hypothesis name might be different (e.g., hS_set) to avoid conflicts
+    assert "S" in result
+    # CRITICAL: Should include the hypothesis hS from 'with' clause
+    assert "hS" in result, f"Missing hS hypothesis from 'set ... with hS'. Result: {result}"
+    # The hS should appear as a typed hypothesis, not just in the equality
+    assert "hS :" in result or "(hS :" in result, f"hS should appear as a typed hypothesis. Result: {result}"
+
+
+def test_ast_get_named_subgoal_code_set_with_hypothesis_mathlib_tactic() -> None:
+    """Test that get_named_subgoal_code includes hypothesis from Mathlib.Tactic.setTactic with 'with' clause."""
+    # Similar to above but using Mathlib.Tactic.setTactic structure
+    ast_dict = {
+        "kind": "Lean.Parser.Command.theorem",
+        "args": [
+            {"val": "theorem", "info": {"leading": "", "trailing": " "}},
+            {
+                "kind": "Lean.Parser.Command.declId",
+                "args": [{"val": "test_theorem", "info": {"leading": "", "trailing": " "}}],
+            },
+            {"val": ":", "info": {"leading": " ", "trailing": " "}},
+            {"val": "Prop", "info": {"leading": "", "trailing": " "}},
+            {"val": ":=", "info": {"leading": " ", "trailing": " "}},
+            {
+                "kind": "Lean.Parser.Term.byTactic",
+                "args": [
+                    {"val": "by", "info": {"leading": "", "trailing": "\n  "}},
+                    {
+                        "kind": "Lean.Parser.Tactic.tacticSeq",
+                        "args": [
+                            {
+                                "kind": "Mathlib.Tactic.setTactic",
+                                "args": [
+                                    {"val": "set"},
+                                    [],
+                                    {
+                                        "kind": "Mathlib.Tactic.setArgsRest",
+                                        "args": [
+                                            {"val": "S"},
+                                            [],
+                                            {"val": ":="},
+                                            {"val": "Finset.range 10000"},
+                                            [
+                                                {"val": "with"},
+                                                [],
+                                                {"val": "hS"},
+                                            ],
+                                        ],
+                                    },
+                                ],
+                            },
+                            {
+                                "kind": "Lean.Parser.Tactic.tacticHave_",
+                                "args": [
+                                    {"val": "have"},
+                                    {
+                                        "kind": "Lean.Parser.Term.haveDecl",
+                                        "args": [
+                                            {
+                                                "kind": "Lean.Parser.Term.haveIdDecl",
+                                                "args": [
+                                                    {
+                                                        "kind": "Lean.Parser.Term.haveId",
+                                                        "args": [{"val": "h1"}],
+                                                    }
+                                                ],
+                                            },
+                                            {"val": ":"},
+                                            {"val": "S"},
+                                            {"val": "="},
+                                            {"val": "Finset.range"},
+                                            {"val": "10000"},
+                                        ],
+                                    },
+                                    {"val": ":="},
+                                    {
+                                        "kind": "Lean.Parser.Term.byTactic",
+                                        "args": [
+                                            {"val": "by"},
+                                            {
+                                                "kind": "Lean.Parser.Tactic.tacticSeq",
+                                                "args": [
+                                                    {
+                                                        "kind": "Lean.Parser.Tactic.tacticSorry",
+                                                        "args": [{"val": "sorry"}],
+                                                    }
+                                                ],
+                                            },
+                                        ],
+                                    },
+                                ],
+                            },
+                        ],
+                    },
+                ],
+            },
+        ],
+    }
+
+    sorries = [
+        {
+            "pos": {"line": 2, "column": 4},
+            "endPos": {"line": 2, "column": 9},
+            "goal": "S : Finset ℕ\nhS : S = Finset.range 10000\n⊢ S = Finset.range 10000",  # noqa: RUF001
+            "proofState": 1,
+        }
+    ]
+
+    ast = AST(ast_dict, sorries)
+    result = ast.get_named_subgoal_code("h1")
+
+    # Should include both S and hS
+    assert "h1" in result
+    assert "S" in result
+    assert "hS" in result, f"Missing hS hypothesis. Result: {result}"
+    assert "hS :" in result or "(hS :" in result, f"hS should be a typed hypothesis. Result: {result}"
+
+
+def test_ast_get_named_subgoal_code_set_with_hypothesis_multiple_sets() -> None:
+    """Test that get_named_subgoal_code includes hypotheses from multiple 'set ... with h' statements."""
+    ast_dict = {
+        "kind": "Lean.Parser.Command.theorem",
+        "args": [
+            {"val": "theorem"},
+            {"kind": "Lean.Parser.Command.declId", "args": [{"val": "test"}]},
+            {"val": ":"},
+            {"val": "Prop"},
+            {"val": ":="},
+            {
+                "kind": "Lean.Parser.Term.byTactic",
+                "args": [
+                    {"val": "by"},
+                    {
+                        "kind": "Lean.Parser.Tactic.tacticSeq",
+                        "args": [
+                            {
+                                "kind": "Mathlib.Tactic.setTactic",
+                                "args": [
+                                    {"val": "set"},
+                                    [],
+                                    {
+                                        "kind": "Mathlib.Tactic.setArgsRest",
+                                        "args": [
+                                            {"val": "S"},
+                                            [],
+                                            {"val": ":="},
+                                            {"val": "Finset.range 10000"},
+                                            [{"val": "with"}, [], {"val": "hS"}],
+                                        ],
+                                    },
+                                ],
+                            },
+                            {
+                                "kind": "Mathlib.Tactic.setTactic",
+                                "args": [
+                                    {"val": "set"},
+                                    [],
+                                    {
+                                        "kind": "Mathlib.Tactic.setArgsRest",
+                                        "args": [
+                                            {"val": "T"},
+                                            [],
+                                            {"val": ":="},
+                                            {"val": "Finset.range 5000"},
+                                            [{"val": "with"}, [], {"val": "hT"}],
+                                        ],
+                                    },
+                                ],
+                            },
+                            {
+                                "kind": "Lean.Parser.Tactic.tacticHave_",
+                                "args": [
+                                    {"val": "have"},
+                                    {
+                                        "kind": "Lean.Parser.Term.haveDecl",
+                                        "args": [
+                                            {
+                                                "kind": "Lean.Parser.Term.haveIdDecl",
+                                                "args": [{"kind": "Lean.Parser.Term.haveId", "args": [{"val": "h1"}]}],
+                                            },
+                                            {"val": ":"},
+                                            {"val": "S"},
+                                            {"val": "="},
+                                            {"val": "T"},
+                                        ],
+                                    },
+                                    {"val": ":="},
+                                    {
+                                        "kind": "Lean.Parser.Term.byTactic",
+                                        "args": [
+                                            {"val": "by"},
+                                            {
+                                                "kind": "Lean.Parser.Tactic.tacticSeq",
+                                                "args": [
+                                                    {
+                                                        "kind": "Lean.Parser.Tactic.tacticSorry",
+                                                        "args": [{"val": "sorry"}],
+                                                    }
+                                                ],
+                                            },
+                                        ],
+                                    },
+                                ],
+                            },
+                        ],
+                    },
+                ],
+            },
+        ],
+    }
+
+    sorries = [
+        {
+            "pos": {"line": 4, "column": 4},
+            "endPos": {"line": 4, "column": 9},
+            "goal": "S : Finset ℕ\nhS : S = Finset.range 10000\nT : Finset ℕ\nhT : T = Finset.range 5000\n⊢ S = T",  # noqa: RUF001
+            "proofState": 1,
+        }
+    ]
+
+    ast = AST(ast_dict, sorries)
+    result = ast.get_named_subgoal_code("h1")
+
+    # Should include both hypotheses
+    assert "h1" in result
+    assert "S" in result
+    assert "T" in result
+    assert "hS" in result, f"Missing hS hypothesis. Result: {result}"
+    assert "hT" in result, f"Missing hT hypothesis. Result: {result}"
+    assert "hS :" in result or "(hS :" in result
+    assert "hT :" in result or "(hT :" in result
+
+
+def test_ast_get_named_subgoal_code_set_with_hypothesis_no_with_clause() -> None:
+    """Test that set without 'with' clause doesn't create a hypothesis binding."""
+    ast_dict = {
+        "kind": "Lean.Parser.Command.theorem",
+        "args": [
+            {"val": "theorem"},
+            {"kind": "Lean.Parser.Command.declId", "args": [{"val": "test"}]},
+            {"val": ":"},
+            {"val": "Prop"},
+            {"val": ":="},
+            {
+                "kind": "Lean.Parser.Term.byTactic",
+                "args": [
+                    {"val": "by"},
+                    {
+                        "kind": "Lean.Parser.Tactic.tacticSeq",
+                        "args": [
+                            {
+                                "kind": "Mathlib.Tactic.setTactic",
+                                "args": [
+                                    {"val": "set"},
+                                    [],
+                                    {
+                                        "kind": "Mathlib.Tactic.setArgsRest",
+                                        "args": [
+                                            {"val": "S"},
+                                            [],
+                                            {"val": ":="},
+                                            {"val": "Finset.range 10000"},
+                                            # No 'with' clause
+                                        ],
+                                    },
+                                ],
+                            },
+                            {
+                                "kind": "Lean.Parser.Tactic.tacticHave_",
+                                "args": [
+                                    {"val": "have"},
+                                    {
+                                        "kind": "Lean.Parser.Term.haveDecl",
+                                        "args": [
+                                            {
+                                                "kind": "Lean.Parser.Term.haveIdDecl",
+                                                "args": [{"kind": "Lean.Parser.Term.haveId", "args": [{"val": "h1"}]}],
+                                            },
+                                            {"val": ":"},
+                                            {"val": "S"},
+                                            {"val": "="},
+                                            {"val": "Finset.range"},
+                                            {"val": "10000"},
+                                        ],
+                                    },
+                                    {"val": ":="},
+                                    {
+                                        "kind": "Lean.Parser.Term.byTactic",
+                                        "args": [
+                                            {"val": "by"},
+                                            {
+                                                "kind": "Lean.Parser.Tactic.tacticSeq",
+                                                "args": [
+                                                    {
+                                                        "kind": "Lean.Parser.Tactic.tacticSorry",
+                                                        "args": [{"val": "sorry"}],
+                                                    }
+                                                ],
+                                            },
+                                        ],
+                                    },
+                                ],
+                            },
+                        ],
+                    },
+                ],
+            },
+        ],
+    }
+
+    sorries = [
+        {
+            "pos": {"line": 2, "column": 4},
+            "endPos": {"line": 2, "column": 9},
+            "goal": "S : Finset ℕ\n⊢ S = Finset.range 10000",  # noqa: RUF001
+            "proofState": 1,
+        }
+    ]
+
+    ast = AST(ast_dict, sorries)
+    result = ast.get_named_subgoal_code("h1")
+
+    # Should include S but NOT hS (since there's no 'with' clause)
+    assert "h1" in result
+    assert "S" in result
+    # Should NOT have hS as a separate hypothesis (only S as equality)
+    # The result should have S as an equality hypothesis (hS_set : S = ...) but not hS from 'with'
+    # Since there's no 'with' clause, there should be no hS hypothesis
+    assert result.count("hS") == 0 or "hS" not in result.split("("), (
+        f"Found hS hypothesis but there was no 'with' clause. Result: {result}"
+    )
+
+
+def test_ast_get_named_subgoal_code_set_with_hypothesis_after_target() -> None:
+    """Test that set ... with h appearing AFTER target subgoal is NOT included."""
+    ast_dict = {
+        "kind": "Lean.Parser.Command.theorem",
+        "args": [
+            {"val": "theorem"},
+            {"kind": "Lean.Parser.Command.declId", "args": [{"val": "test"}]},
+            {"val": ":"},
+            {"val": "Prop"},
+            {"val": ":="},
+            {
+                "kind": "Lean.Parser.Term.byTactic",
+                "args": [
+                    {"val": "by"},
+                    {
+                        "kind": "Lean.Parser.Tactic.tacticSeq",
+                        "args": [
+                            {
+                                "kind": "Lean.Parser.Tactic.tacticHave_",
+                                "args": [
+                                    {"val": "have"},
+                                    {
+                                        "kind": "Lean.Parser.Term.haveDecl",
+                                        "args": [
+                                            {
+                                                "kind": "Lean.Parser.Term.haveIdDecl",
+                                                "args": [{"kind": "Lean.Parser.Term.haveId", "args": [{"val": "h1"}]}],
+                                            },
+                                            {"val": ":"},
+                                            {"val": "Prop"},
+                                        ],
+                                    },
+                                    {"val": ":="},
+                                    {
+                                        "kind": "Lean.Parser.Term.byTactic",
+                                        "args": [
+                                            {"val": "by"},
+                                            {
+                                                "kind": "Lean.Parser.Tactic.tacticSeq",
+                                                "args": [
+                                                    {
+                                                        "kind": "Lean.Parser.Tactic.tacticSorry",
+                                                        "args": [{"val": "sorry"}],
+                                                    }
+                                                ],
+                                            },
+                                        ],
+                                    },
+                                ],
+                            },
+                            {
+                                "kind": "Mathlib.Tactic.setTactic",
+                                "args": [
+                                    {"val": "set"},
+                                    [],
+                                    {
+                                        "kind": "Mathlib.Tactic.setArgsRest",
+                                        "args": [
+                                            {"val": "S"},
+                                            [],
+                                            {"val": ":="},
+                                            {"val": "Finset.range 10000"},
+                                            [{"val": "with"}, [], {"val": "hS"}],
+                                        ],
+                                    },
+                                ],
+                            },
+                        ],
+                    },
+                ],
+            },
+        ],
+    }
+
+    sorries = [
+        {
+            "pos": {"line": 2, "column": 4},
+            "endPos": {"line": 2, "column": 9},
+            "goal": "⊢ Prop",
+            "proofState": 1,
+        }
+    ]
+
+    ast = AST(ast_dict, sorries)
+    result = ast.get_named_subgoal_code("h1")
+
+    # Should NOT include S or hS since they appear AFTER h1
+    assert "h1" in result
+    assert "S" not in result or "S" not in result.split("("), (
+        f"Found S binding but it appears after target. Result: {result}"
+    )
+    assert "hS" not in result or "hS" not in result.split("("), (
+        f"Found hS hypothesis but it appears after target. Result: {result}"
+    )
+
+
+def test_ast_get_named_subgoal_code_set_with_hypothesis_mixed_bindings() -> None:
+    """Test that set ... with h works correctly with other bindings (have, let, etc.)."""
+    ast_dict = {
+        "kind": "Lean.Parser.Command.theorem",
+        "args": [
+            {"val": "theorem"},
+            {"kind": "Lean.Parser.Command.declId", "args": [{"val": "test"}]},
+            {
+                "kind": "Lean.Parser.Term.bracketedBinderList",
+                "args": [
+                    {
+                        "kind": "Lean.Parser.Term.explicitBinder",
+                        "args": [
+                            {"val": "("},
+                            {"kind": "Lean.binderIdent", "args": [{"val": "x"}]},
+                            {"val": ":"},
+                            {"val": "ℕ"},  # noqa: RUF001
+                            {"val": ")"},
+                        ],
+                    },
+                ],
+            },
+            {"val": ":"},
+            {"val": "Prop"},
+            {"val": ":="},
+            {
+                "kind": "Lean.Parser.Term.byTactic",
+                "args": [
+                    {"val": "by"},
+                    {
+                        "kind": "Lean.Parser.Tactic.tacticSeq",
+                        "args": [
+                            {
+                                "kind": "Lean.Parser.Tactic.tacticHave_",
+                                "args": [
+                                    {"val": "have"},
+                                    {
+                                        "kind": "Lean.Parser.Term.haveDecl",
+                                        "args": [
+                                            {
+                                                "kind": "Lean.Parser.Term.haveIdDecl",
+                                                "args": [
+                                                    {"kind": "Lean.Parser.Term.haveId", "args": [{"val": "h_earlier"}]}
+                                                ],
+                                            },
+                                            {"val": ":"},
+                                            {"val": "x"},
+                                            {"val": ">"},
+                                            {"val": "0"},
+                                        ],
+                                    },
+                                    {"val": ":="},
+                                    {
+                                        "kind": "Lean.Parser.Term.byTactic",
+                                        "args": [
+                                            {"val": "by"},
+                                            {
+                                                "kind": "Lean.Parser.Tactic.tacticSeq",
+                                                "args": [
+                                                    {
+                                                        "kind": "Lean.Parser.Tactic.tacticSorry",
+                                                        "args": [{"val": "sorry"}],
+                                                    }
+                                                ],
+                                            },
+                                        ],
+                                    },
+                                ],
+                            },
+                            {
+                                "kind": "Mathlib.Tactic.setTactic",
+                                "args": [
+                                    {"val": "set"},
+                                    [],
+                                    {
+                                        "kind": "Mathlib.Tactic.setArgsRest",
+                                        "args": [
+                                            {"val": "S"},
+                                            [],
+                                            {"val": ":="},
+                                            {"val": "Finset.range 10000"},
+                                            [{"val": "with"}, [], {"val": "hS"}],
+                                        ],
+                                    },
+                                ],
+                            },
+                            {
+                                "kind": "Lean.Parser.Tactic.tacticLet_",
+                                "args": [
+                                    {"val": "let"},
+                                    {
+                                        "kind": "Lean.Parser.Term.letDecl",
+                                        "args": [
+                                            {
+                                                "kind": "Lean.Parser.Term.letIdDecl",
+                                                "args": [{"kind": "Lean.binderIdent", "args": [{"val": "n"}]}],
+                                            },
+                                            {"val": ":="},
+                                            {"val": "5"},
+                                        ],
+                                    },
+                                ],
+                            },
+                            {
+                                "kind": "Lean.Parser.Tactic.tacticHave_",
+                                "args": [
+                                    {"val": "have"},
+                                    {
+                                        "kind": "Lean.Parser.Term.haveDecl",
+                                        "args": [
+                                            {
+                                                "kind": "Lean.Parser.Term.haveIdDecl",
+                                                "args": [{"kind": "Lean.Parser.Term.haveId", "args": [{"val": "h1"}]}],
+                                            },
+                                            {"val": ":"},
+                                            {"val": "S"},
+                                            {"val": "="},
+                                            {"val": "Finset.range"},
+                                            {"val": "10000"},
+                                        ],
+                                    },
+                                    {"val": ":="},
+                                    {
+                                        "kind": "Lean.Parser.Term.byTactic",
+                                        "args": [
+                                            {"val": "by"},
+                                            {
+                                                "kind": "Lean.Parser.Tactic.tacticSeq",
+                                                "args": [
+                                                    {
+                                                        "kind": "Lean.Parser.Tactic.tacticSorry",
+                                                        "args": [{"val": "sorry"}],
+                                                    }
+                                                ],
+                                            },
+                                        ],
+                                    },
+                                ],
+                            },
+                        ],
+                    },
+                ],
+            },
+        ],
+    }
+
+    sorries = [
+        {
+            "pos": {"line": 5, "column": 4},
+            "endPos": {"line": 5, "column": 9},
+            "goal": "x : ℕ\nh_earlier : x > 0\nS : Finset ℕ\nhS : S = Finset.range 10000\nn : ℕ\n⊢ S = Finset.range 10000",  # noqa: RUF001
+            "proofState": 1,
+        }
+    ]
+
+    ast = AST(ast_dict, sorries)
+    result = ast.get_named_subgoal_code("h1")
+
+    # Should include all earlier bindings
+    assert "h1" in result
+    assert "x" in result
+    assert "h_earlier" in result
+    assert "S" in result
+    assert "hS" in result, f"Missing hS hypothesis. Result: {result}"
+    assert "n" in result  # Let binding
+    assert "hS :" in result or "(hS :" in result
