@@ -138,6 +138,8 @@ def process_theorems_from_directory(
             output_file = theorem_file.with_suffix(".proof")
             if state_manager.reason == "Proof completed successfully.":
                 try:
+                    # Note: Final verification already performed in framework.finish()
+                    # No need to verify again here
                     complete_proof = state_manager.reconstruct_complete_proof()
                     output_file.write_text(complete_proof, encoding="utf-8")
                     console.print(f"[bold green]✓ Successfully proved and saved to {output_file.name}[/bold green]")
