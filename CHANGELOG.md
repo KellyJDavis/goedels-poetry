@@ -5,6 +5,24 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.0.5] - 2025-11-20
+
+### Changed
+- Standardized configuration parameter naming: renamed `max_self_corrections` to `max_self_correction_attempts` for consistency across prover and decomposer agents
+- Updated default Google model from `gemini-2.5-flash` to `gemini-2.5-pro` for improved performance
+- Enhanced configuration documentation with clearer parameter descriptions and examples
+- Improved documentation badges and links across all documentation files
+
+### Fixed
+- Fixed Kimina Lean Server repository URL in README to point to correct repository
+
+### Documentation
+- Updated README.md with improved configuration parameter documentation
+- Enhanced CONFIGURATION.md with detailed parameter descriptions for all agents
+- Improved CONTRIBUTING.md with clearer formatting and testing instructions
+- Updated PUBLISHING.md with version 0.0.5 examples
+- Enhanced docs/index.md with better badges, codecov integration, and improved description
+
 ## [0.0.4] - 2025-11-20
 
 ### Added
@@ -81,4 +99,5 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Typer for CLI
 - Rich for beautiful terminal output
 
+[0.0.5]: https://github.com/KellyJDavis/goedels-poetry/releases/tag/v0.0.5
 [0.0.1]: https://github.com/KellyJDavis/goedels-poetry/releases/tag/v0.0.1
