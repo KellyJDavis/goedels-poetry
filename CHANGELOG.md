@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.0.6] - 2025-11-21
+
+### Added
+- Final proof verification for complete assembled proofs: added `check_complete_proof()` function that verifies proofs assembled from multiple subgoals using the Kimina Lean server before they are printed or written to files
+- User-friendly progress indicators: added animated progress indicators using Rich's console.status() that display the current framework phase (e.g., "Formalizing theorem", "Proving theorems", "Validating proofs") during execution
+- Phase name mapping: added `_PHASE_NAMES` dictionary mapping all 14 framework phase methods to user-friendly descriptions
+
+### Changed
+- Disabled tqdm progress bars: set `TQDM_DISABLE=1` at CLI startup to suppress "Batches" messages during LangGraph batch processing operations, providing cleaner terminal output
+
 ## [0.0.5] - 2025-11-20
 
 ### Changed
@@ -99,5 +109,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Typer for CLI
 - Rich for beautiful terminal output
 
+[0.0.6]: https://github.com/KellyJDavis/goedels-poetry/releases/tag/v0.0.6
 [0.0.5]: https://github.com/KellyJDavis/goedels-poetry/releases/tag/v0.0.5
 [0.0.1]: https://github.com/KellyJDavis/goedels-poetry/releases/tag/v0.0.1
