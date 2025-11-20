@@ -1,5 +1,5 @@
 import traceback
-from typing import Optional, cast
+from typing import ClassVar, Optional, cast
 
 from langchain_core.language_models.chat_models import BaseChatModel
 from rich.console import Console
@@ -98,6 +98,24 @@ class GoedelsPoetryFramework:
     multi-agent system. The framework will be controlled by a supervisor agent.
     """
 
+    # Mapping from method names to user-friendly phase names
+    _PHASE_NAMES: ClassVar[dict[str, str]] = {
+        "formalize_informal_theorem": "Formalizing theorem",
+        "check_informal_theorem_syntax": "Checking formalization syntax",
+        "check_informal_theorem_semantics": "Checking formalization semantics",
+        "check_theorems_syntax": "Checking theorem syntax",
+        "prove_theorems": "Proving theorems",
+        "check_theorems_proofs": "Validating proofs",
+        "request_proofs_corrections": "Requesting proof corrections",
+        "parse_proofs": "Parsing proofs",
+        "sketch_proofs": "Sketching proofs",
+        "check_proof_sketches_syntax": "Checking proof sketch syntax",
+        "request_proof_sketches_corrections": "Requesting sketch corrections",
+        "request_proof_sketches_backtrack": "Backtracking proof sketches",
+        "parse_proof_sketches": "Parsing proof sketches",
+        "decompose_proof_sketches": "Decomposing proof sketches",
+    }
+
     def __init__(
         self,
         config: GoedelsPoetryConfig,
@@ -118,7 +136,11 @@ class GoedelsPoetryFramework:
         while not self._state_manager.is_finished:
             action = supervisor_agent.get_action()
             self._state_manager.add_action(action)
-            getattr(self, action)()
+
+            # Show progress indicator for the current phase
+            phase_name = self._PHASE_NAMES.get(action, action)
+            with self._console.status(f"[bold blue]{phase_name}..."):
+                getattr(self, action)()
 
         # Ensure finish() is called if it wasn't the last action
         # This handles cases where is_finished was set inside an action method
