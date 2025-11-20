@@ -55,7 +55,7 @@ Gödel's Poetry is an AI-powered theorem proving system that bridges the gap bet
 3. **Leverages state-of-the-art technology**:
    - Custom fine-tuned models (Goedel-Prover-V2, Goedel-Formalizer-V2)
    - Integration with frontier LLMs (GPT-5, Qwen3)
-   - The [Kimina Lean Server](https://github.com/project-numina/kimina-lean-server) for high-performance Lean 4 verification
+   - The [Kimina Lean Server](https://github.com/KellyJDavis/kimina-lean-server) for high-performance Lean 4 verification
    - LangGraph for orchestrating complex multi-agent workflows
 
 The system is designed for researchers, mathematicians, and AI practitioners interested in automated theorem proving, formal verification, and the intersection of natural and formal languages.
@@ -503,8 +503,9 @@ max_retries = 10
 [PROVER_AGENT_LLM]
 model = kdavis/Goedel-Prover-V2:32b
 num_ctx = 40960
-max_self_corrections = 3
+max_self_correction_attempts = 2
 max_depth = 20
+max_pass = 32
 
 [SEMANTICS_AGENT_LLM]
 model = qwen3:30b
@@ -518,12 +519,12 @@ provider = auto
 openai_model = gpt-5-2025-08-07
 openai_max_completion_tokens = 50000
 openai_max_remote_retries = 5
-openai_max_self_corrections = 6
+openai_max_self_correction_attempts = 6
 
 # Google-specific settings
-google_model = gemini-2.5-flash
+google_model = gemini-2.5-pro
 google_max_output_tokens = 50000
-google_max_self_corrections = 6
+google_max_self_correction_attempts = 6
 
 [KIMINA_LEAN_SERVER]
 url = http://0.0.0.0:8000
@@ -540,18 +541,23 @@ max_retries = 5
 **Prover Agent**:
 - `model`: The LLM used to generate proofs
 - `num_ctx`: Context window size (tokens)
-- `max_self_corrections`: Maximum proof generation self-correction attempts
+- `max_self_correction_attempts`: Maximum proof generation self-correction attempts
 - `max_depth`: Maximum recursion depth for proof decomposition
+- `max_pass`: Maximum number of proof attempts before triggering decomposition
 
 **Semantics Agent**:
 - `model`: The LLM used to validate semantic equivalence
 - `num_ctx`: Context window size (tokens)
 
 **Decomposer Agent**:
-- `model`: The LLM used for proof sketching and decomposition
-- `max_completion_tokens`: Maximum tokens in generated response
-- `max_remote_retries`: Retry attempts for API calls
-- `openai_max_self_corrections` / `google_max_self_corrections`: Max decomposition self-corrections
+- `provider`: Provider selection (`openai`, `google`, or `auto`)
+- `openai_model`: The OpenAI model used for proof sketching (when OpenAI is selected)
+- `openai_max_completion_tokens`: Maximum tokens in OpenAI-generated response
+- `openai_max_remote_retries`: Retry attempts for OpenAI API calls
+- `openai_max_self_correction_attempts`: Maximum decomposition self-correction attempts for OpenAI
+- `google_model`: The Google model used for proof sketching (when Google is selected)
+- `google_max_output_tokens`: Maximum tokens in Google-generated response
+- `google_max_self_correction_attempts`: Maximum decomposition self-correction attempts for Google
 
 **Kimina Lean Server**:
 - `url`: Server endpoint for Lean verification
@@ -582,6 +588,8 @@ goedels_poetry --formal-theorem "import Mathlib\n\nopen BigOperators\n\ntheorem 
 **Multiple overrides**:
 ```bash
 export PROVER_AGENT_LLM__MODEL="kdavis/Goedel-Prover-V2:70b"
+export PROVER_AGENT_LLM__MAX_SELF_CORRECTION_ATTEMPTS="3"
+export PROVER_AGENT_LLM__MAX_PASS="64"
 export DECOMPOSER_AGENT_LLM__OPENAI_MODEL="gpt-5-pro"
 export KIMINA_LEAN_SERVER__MAX_RETRIES="10"
 # Provide the full preamble plus theorem body when invoking formal problems
@@ -591,7 +599,7 @@ goedels_poetry --formal-theorem "import Mathlib\n\nopen BigOperators\n\ntheorem 
 **Using Google Generative AI**:
 ```bash
 export GOOGLE_API_KEY="your-google-api-key"
-export DECOMPOSER_AGENT_LLM__GOOGLE_MODEL="gemini-2.5-flash"
+export DECOMPOSER_AGENT_LLM__GOOGLE_MODEL="gemini-2.5-pro"
 export DECOMPOSER_AGENT_LLM__GOOGLE_MAX_OUTPUT_TOKENS="100000"
 goedels_poetry --formal-theorem "..."
 ```
