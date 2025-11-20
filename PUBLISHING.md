@@ -25,19 +25,19 @@ The repository is configured to automatically publish to PyPI when you push a ve
 
 ```bash
 # 1. Update the version in pyproject.toml
-# Edit pyproject.toml and change: version = "0.0.2"
+# Edit pyproject.toml and change: version = "0.0.5"
 
 # 2. Update CHANGELOG.md with the new version
 # Add a new section for the version
 
 # 3. Commit your changes
 git add pyproject.toml CHANGELOG.md
-git commit -m "Bump version to 0.0.2"
+git commit -m "Bump version to 0.0.5"
 
 # 4. Create and push the tag
-git tag v0.0.2
+git tag v0.0.5
 git push origin main
-git push origin v0.0.2
+git push origin v0.0.5
 ```
 
 The GitHub Action will automatically:
@@ -101,7 +101,7 @@ This project follows [Semantic Versioning](https://semver.org/):
 ## Troubleshooting
 
 ### "Version mismatch" error
-The tag version must match the version in `pyproject.toml`. If you tagged `v0.0.2` but `pyproject.toml` has `0.0.1`, the workflow will fail.
+The tag version must match the version in `pyproject.toml`. If you tagged `v0.0.5` but `pyproject.toml` has `0.0.4`, the workflow will fail.
 
 ### "File already exists" error
 You cannot re-upload the same version to PyPI. You must increment the version number.

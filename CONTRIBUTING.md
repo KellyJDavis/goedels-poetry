@@ -84,13 +84,13 @@ Now you can make your changes locally.
 
 6. Don't forget to add test cases for your added functionality to the `tests` directory.
 
-7. When you're done making changes, check that your changes pass the formatting tests.
+7. When you're done making changes, check that your changes pass the formatting tests:
 
 ```bash
 make check
 ```
 
-Now, validate that all unit tests are passing:
+8. Validate that all unit tests are passing:
 
 ```bash
 make test
