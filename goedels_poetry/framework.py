@@ -8,7 +8,7 @@ from goedels_poetry.agents.formal_theorem_syntax_agent import FormalTheoremSynta
 from goedels_poetry.agents.formalizer_agent import FormalizerAgentFactory
 from goedels_poetry.agents.informal_theorem_semantics_agent import InformalTheoremSemanticsAgentFactory
 from goedels_poetry.agents.informal_theorem_syntax_agent import InformalTheoremSyntaxAgentFactory
-from goedels_poetry.agents.proof_checker_agent import ProofCheckerAgentFactory
+from goedels_poetry.agents.proof_checker_agent import ProofCheckerAgentFactory, check_complete_proof
 from goedels_poetry.agents.proof_corrector_agent import ProofCorrectorAgentFactory
 from goedels_poetry.agents.proof_parser_agent import ProofParserAgentFactory
 from goedels_poetry.agents.proof_sketcher_agent import ProofSketcherAgentFactory
@@ -323,10 +323,38 @@ class GoedelsPoetryFramework:
         if self._state_manager.reason == "Proof completed successfully.":
             try:
                 complete_proof = self._state_manager.reconstruct_complete_proof()
-                self._console.print("Complete Lean4 Proof:")
+
+                # Perform final verification of the complete proof
+                self._console.print("\n[bold blue]Performing final proof verification...[/bold blue]")
+                is_valid, error_msg = check_complete_proof(
+                    complete_proof,
+                    server_url=self._config.kimina_lean_server_url,
+                    server_max_retries=self._config.kimina_lean_server_max_retries,
+                )
+
+                if is_valid:
+                    self._console.print("[bold green]✓ Final verification passed: Proof is valid[/bold green]")
+                else:
+                    self._console.print("[bold yellow]⚠ Final verification failed: Proof may be invalid[/bold yellow]")
+                    if error_msg:
+                        self._console.print(f"[yellow]Verification errors:[/yellow]\n{error_msg}")
+
+                self._console.print("\nComplete Lean4 Proof:")
                 self._console.print("-" * 80)
                 self._console.print(complete_proof, markup=False)
                 self._console.print("-" * 80)
             except (AttributeError, KeyError, TypeError, ValueError) as e:
                 self._console.print(f"Error reconstructing proof: {e}")
                 self._console.print(traceback.format_exc())
+            except Exception as e:
+                # If final verification fails, still print the proof but warn the user
+                self._console.print(f"[bold yellow]Warning:[/bold yellow] Final verification encountered an error: {e}")
+                # Try to still print the proof if it was successfully reconstructed
+                try:
+                    complete_proof = self._state_manager.reconstruct_complete_proof()
+                    self._console.print("\nComplete Lean4 Proof:")
+                    self._console.print("-" * 80)
+                    self._console.print(complete_proof, markup=False)
+                    self._console.print("-" * 80)
+                except Exception:
+                    self._console.print("Could not reconstruct proof for display.")

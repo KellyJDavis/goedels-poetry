@@ -140,3 +140,48 @@ def _check_proof(server_url: str, server_max_retries: int, state: FormalTheoremP
 
     # Return a FormalTheoremProofStates with state added to its outputs
     return {"outputs": [state]}  # type: ignore[typeddict-item]
+
+
+def check_complete_proof(complete_proof: str, server_url: str, server_max_retries: int) -> tuple[bool, str]:
+    """
+    Checks a complete proof (assembled from subgoals) to verify it proves the desired theorem.
+
+    This function is designed to be called after a proof has been successfully completed
+    and assembled from multiple subgoals, before it is printed or written to a file.
+
+    The complete_proof is already a valid Lean file with preamble and theorem with proof,
+    so we can pass it directly to the Kimina server for verification without any parsing.
+
+    Parameters
+    ----------
+    complete_proof: str
+        The complete proof string including preamble and theorem with proof.
+    server_url: str
+        The URL of the Kimina server.
+    server_max_retries: int
+        The maximum number of retries for the Kimina server.
+
+    Returns
+    -------
+    tuple[bool, str]
+        A tuple containing:
+        - bool: True if the proof is valid (complete and no errors), False otherwise
+        - str: Error message string if proof is invalid, empty string if valid
+    """
+    # Create a client to access the Kimina Server
+    kimina_client = KiminaClient(api_url=server_url, http_timeout=36000, n_retries=server_max_retries)
+
+    # The complete_proof is already a valid Lean file, so we can check it directly
+    check_response = kimina_client.check(complete_proof, timeout=36000)
+
+    # Parse check_response
+    parsed_response = parse_kimina_check_response(check_response)
+
+    # Log debug response
+    log_kimina_response("check", parsed_response)
+
+    # Extract the result
+    is_valid = parsed_response["complete"]
+    error_msg = get_error_str(complete_proof, parsed_response.get("errors", []), False) if not is_valid else ""
+
+    return is_valid, error_msg
