@@ -1,3 +1,7 @@
+import os
+
+os.environ["TQDM_DISABLE"] = "1"
+
 import traceback
 from pathlib import Path
 from typing import Optional
