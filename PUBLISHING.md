@@ -27,14 +27,17 @@ The repository is configured to automatically publish to PyPI when you push a ve
 # 1. Update the version in pyproject.toml
 # Edit pyproject.toml and change: version = "0.0.5"
 
-# 2. Update CHANGELOG.md with the new version
+# 2. Synchronize version in uv.lock with version in pyproject.toml
+uv lock
+
+# 3. Update CHANGELOG.md with the new version
 # Add a new section for the version
 
-# 3. Commit your changes
-git add pyproject.toml CHANGELOG.md
+# 4. Commit your changes
+git add pyproject.toml uv.lock CHANGELOG.md
 git commit -m "Bump version to 0.0.5"
 
-# 4. Create and push the tag
+# 5. Create and push the tag
 git tag v0.0.5
 git push origin main
 git push origin v0.0.5
