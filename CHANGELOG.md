@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.0.7] - 2025-11-22
+
+### Fixed
+- Hardened `prover_agent` Lean code block parsing by always taking the last block (even when the closing fence is missing) and covering multi-block responses with regression tests to prevent truncated proofs.
+
+### Documentation
+- Publishing workflow now explicitly runs `uv lock` to sync `uv.lock` with `pyproject.toml` and reminds maintainers to include both files when committing a release bump.
+
 ## [0.0.6] - 2025-11-21
 
 ### Added
