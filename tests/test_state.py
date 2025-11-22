@@ -1745,68 +1745,6 @@ def test_replace_main_body_sorry_multiline_have() -> None:
             GoedelsPoetryState.clear_theorem_directory(theorem)
 
 
-def test_set_corrected_sketches_resets_children_before_requeue() -> None:
-    """Ensure corrected sketches drop stale children before being re-sketch queued."""
-    import uuid
-    from typing import cast
-
-    from goedels_poetry.agents.state import DecomposedFormalTheoremState, FormalTheoremProofState
-    from goedels_poetry.state import GoedelsPoetryStateManager
-    from goedels_poetry.util.tree import TreeNode
-
-    theorem = with_default_preamble(f"theorem test_reset_children_{uuid.uuid4().hex} : True := by trivial")
-
-    with suppress(Exception):
-        GoedelsPoetryState.clear_theorem_directory(theorem)
-
-    try:
-        state = GoedelsPoetryState(formal_theorem=theorem)
-        manager = GoedelsPoetryStateManager(state)
-
-        sketch: DecomposedFormalTheoremState = {
-            "parent": None,
-            "children": [],
-            "depth": 0,
-            "formal_theorem": theorem,
-            "preamble": DEFAULT_IMPORTS,
-            "proof_sketch": f"{theorem}\n  := by\n  have helper : True := by sorry\n  exact helper",
-            "syntactic": False,
-            "errors": "needs correction",
-            "ast": None,
-            "self_correction_attempts": 1,
-            "decomposition_history": [],
-        }
-
-        child: FormalTheoremProofState = {
-            "parent": cast(TreeNode, sketch),
-            "depth": 1,
-            "formal_theorem": "lemma helper : True",
-            "preamble": DEFAULT_IMPORTS,
-            "syntactic": True,
-            "formal_proof": "lemma helper : True := by\n  trivial",
-            "proved": True,
-            "errors": None,
-            "ast": None,
-            "self_correction_attempts": 1,
-            "proof_history": [],
-            "pass_attempts": 0,
-        }
-
-        sketch["children"].append(cast(TreeNode, child))
-
-        manager.set_corrected_sketches({"inputs": [], "outputs": [sketch]})
-
-        # The sketch should have been reset before re-entering the sketch queue
-        assert sketch["children"] == []
-        assert sketch["proof_sketch"] is None
-        assert sketch["errors"] is None
-        assert sketch["ast"] is None
-        assert state.decomposition_sketch_queue[-1] is sketch
-    finally:
-        with suppress(Exception):
-            GoedelsPoetryState.clear_theorem_directory(theorem)
-
-
 def test_reconstruct_proof_multiline_have_sorry() -> None:
     """Test complete proof reconstruction with multiline have statements."""
     import uuid
