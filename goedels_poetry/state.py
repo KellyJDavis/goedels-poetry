@@ -1142,14 +1142,8 @@ class GoedelsPoetryStateManager:
         # Remove all elements from the queue of sketches to correct
         self._state.decomposition_correct_queue.clear()
 
-        # Reset each corrected sketch before re-sketching to avoid reusing stale children/sketch data
-        prepared_sketches: list[DecomposedFormalTheoremState] = []
-        for sketch in corrected_sketches["outputs"]:
-            self._prepare_node_for_resketching(sketch)
-            prepared_sketches.append(sketch)
-
         # Place all sketches marked for correction into the queue to be sketched
-        self._state.decomposition_sketch_queue += prepared_sketches
+        self._state.decomposition_sketch_queue += corrected_sketches["outputs"]
 
     @maybe_save(n=1)
     def set_backtracked_sketches(self, backtracked_sketches: DecomposedFormalTheoremStates) -> None:
