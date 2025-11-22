@@ -119,3 +119,21 @@ theorem test : True :=  by
 ```"""
     result2 = _parse_prover_response(response2, expected_preamble)
     assert result2 == "  trivial"
+
+
+def test_parse_prover_response_unclosed_final_code_block() -> None:
+    """Test fallback when the final code block is missing closing ticks."""
+    response = """Plan:
+```lean4
+theorem plan : True := by
+  sorry
+```
+
+Final:
+```lean4
+theorem final : True := by
+  trivial
+"""
+    expected_preamble = DEFAULT_IMPORTS
+    result = _parse_prover_response(response, expected_preamble)
+    assert result == "  trivial"

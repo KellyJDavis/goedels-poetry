@@ -138,7 +138,7 @@ def _prover(llm: BaseChatModel, state: FormalTheoremProofState) -> FormalTheorem
 
 def _extract_code_block_fallback(response: str) -> str:
     """
-    Fallback method to extract code block by finding the last ``` in the response.
+    Fallback method to extract the last code block, even if it's missing closing ticks.
 
     Parameters
     ----------
@@ -156,18 +156,19 @@ def _extract_code_block_fallback(response: str) -> str:
         If no code block is found in the response.
     """
     pattern_start = r"```lean4?\s*\n"
-    match_start = re.search(pattern_start, response, re.DOTALL)
-    if not match_start:
+    matches = list(re.finditer(pattern_start, response, re.DOTALL))
+    if not matches:
         raise LLMParsingError("Failed to extract code block from LLM response", response)  # noqa: TRY003
 
-    code_start = match_start.end()
-    last_backtick = response.rfind("\n```")
-    if last_backtick == -1:
-        last_backtick = response.rfind("```")
-    if last_backtick == -1 or last_backtick < code_start:
-        raise LLMParsingError("Failed to find closing ``` in LLM response", response)  # noqa: TRY003
+    code_start = matches[-1].end()
+    closing_index = response.rfind("\n```")
+    if closing_index == -1 or closing_index < code_start:
+        closing_index = response.rfind("```")
 
-    return response[code_start:last_backtick].strip()
+    if closing_index == -1 or closing_index < code_start:
+        return response[code_start:].strip()
+
+    return response[code_start:closing_index].strip()
 
 
 def _extract_code_block(response: str) -> str:
