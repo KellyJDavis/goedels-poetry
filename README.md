@@ -109,45 +109,58 @@ uv run goedels_poetry --help
 
 The Kimina Lean Server is **required** for Gödel's Poetry to verify Lean 4 proofs. It provides high-performance parallel proof checking.
 
-#### Setup Steps:
+#### Option 1: Install from PyPI (Recommended)
 
-1. **Clone the Kimina Lean Server** (separate repository):
+The easiest way to install and run the Kimina Lean Server is via PyPI:
+
+1. **Install the server package**:
    ```bash
-   git clone https://github.com/KellyJDavis/kimina-lean-server.git
-   cd kimina-lean-server
+   pip install kimina-ast-server
    ```
 
-2. **Run the setup script** (installs Lean 4, mathlib4, and dependencies):
+2. **Set up the Lean workspace** (installs Lean 4, mathlib4, and dependencies):
+
+   Run the setup command to automatically install and configure everything:
+
    ```bash
-   bash setup.sh
+   # Setup in current directory
+   kimina-ast-server setup
+
+   # Or setup in a specific directory
+   kimina-ast-server setup --workspace ~/lean-workspace
+
+   # Setup and save configuration to .env file
+   kimina-ast-server setup --workspace ~/lean-workspace --save-config
    ```
-   This will:
+
+   This will automatically:
    - Install Elan (the Lean version manager)
    - Install Lean 4 (default version v4.15.0)
    - Clone and build the Lean REPL
    - Clone and build the AST export tool
    - Clone and build mathlib4 (Lean's math library)
 
-   ⚠️ **Note**: This process can take 15-30 minutes depending on your system.
+   ⚠️ **Note**: This process can take 15-30 minutes depending on your system, primarily due to building mathlib4.
 
-3. **Install server dependencies**:
+3. **Start the server**:
    ```bash
-   pip install -r requirements.txt
-   pip install .
-   prisma generate
-   ```
+   # If you ran setup in current directory
+   kimina-ast-server
 
-4. **Start the server**:
-   ```bash
-   python -m server
+   # Or if workspace is elsewhere, set the environment variable first
+   export LEAN_SERVER_WORKSPACE=~/lean-workspace
+   kimina-ast-server
+
+   # You can also use the explicit run command
+   kimina-ast-server run
    ```
 
    The server will start on `http://0.0.0.0:8000` by default.
 
-5. **Verify the server is running** (in a new terminal):
+4. **Verify the server is running** (in a new terminal):
    ```bash
    curl --request POST \
-     --url http://localhost:8000/verify \
+     --url http://localhost:8000/api/check \
      --header 'Content-Type: application/json' \
      --data '{
        "codes": [{"custom_id": "test", "proof": "#check Nat"}],
@@ -155,16 +168,15 @@ The Kimina Lean Server is **required** for Gödel's Poetry to verify Lean 4 proo
      }' | jq
    ```
 
+   You can also visit `http://localhost:8000/docs` for interactive API documentation.
+
+#### Install from Source
+
+If you prefer to install from source, please refer to the [Kimina Lean Server repository](https://github.com/KellyJDavis/kimina-lean-server) for detailed installation instructions.
+
 #### Alternative: Docker (Production)
 
-For production deployments, you can use Docker:
-
-```bash
-cd kimina-lean-server
-docker compose up
-```
-
-See the [Kimina Server README](https://github.com/KellyJDavis/kimina-lean-server/blob/main/README.md) for more deployment options.
+For production deployments, you can use Docker. See the [Kimina Server README](https://github.com/KellyJDavis/kimina-lean-server/blob/main/README.md) for Docker deployment options.
 
 ### Setting Up Your API Keys
 
@@ -416,29 +428,33 @@ Integration tests verify the Kimina Lean Server integration. **These tests requi
 
 **First-time setup:**
 
+You can set up the Kimina server using the PyPI package (recommended):
+
 ```bash
 # Install integration test dependencies
 uv sync
 
-# Clone the Kimina Lean Server (if not already cloned)
-cd .. && git clone https://github.com/KellyJDavis/kimina-lean-server.git
-cd kimina-lean-server
+# Install Kimina server from PyPI
+pip install kimina-ast-server
 
-# Install Lean and build dependencies (takes 15-30 minutes)
-bash setup.sh
+# Set up Lean workspace (installs Lean 4, mathlib4, and dependencies - takes 15-30 minutes)
+kimina-ast-server setup
 
-# Install server dependencies
-pip install -r requirements.txt
-pip install .
-prisma generate
+# Or setup in a specific directory
+kimina-ast-server setup --workspace ~/lean-workspace
 ```
+
+If you prefer to install from source, please refer to the [Kimina Lean Server repository](https://github.com/KellyJDavis/kimina-lean-server) for detailed installation instructions.
 
 **Run integration tests:**
 
 ```bash
 # Terminal 1: Start the Kimina server
-cd ../kimina-lean-server
-python -m server
+kimina-ast-server
+
+# Or if workspace is in a different location
+export LEAN_SERVER_WORKSPACE=~/lean-workspace
+kimina-ast-server
 
 # Terminal 2: Run the tests
 cd ../goedels-poetry
