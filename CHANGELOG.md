@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.0.9] - 2025-11-23
+
+### Documentation
+- Updated Kimina Lean Server installation instructions to use PyPI package (`kimina-ast-server`) as the recommended primary method
+- Replaced detailed source installation steps with explicit PyPI commands (`kimina-ast-server setup`, `kimina-ast-server run`)
+- Updated server startup command from `python -m server` to `kimina-ast-server`
+- Updated API endpoint references from `/verify` to `/api/check` to match the PyPI package API
+- Simplified integration tests setup section to use PyPI installation method
+- Streamlined documentation to provide a clear "golden path" for installation without requiring users to reference multiple external documentation sources
+
 ## [0.0.8] - 2025-11-23
 
 ### Fixed
@@ -122,6 +132,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Typer for CLI
 - Rich for beautiful terminal output
 
+[0.0.9]: https://github.com/KellyJDavis/goedels-poetry/releases/tag/v0.0.9
 [0.0.8]: https://github.com/KellyJDavis/goedels-poetry/releases/tag/v0.0.8
 [0.0.6]: https://github.com/KellyJDavis/goedels-poetry/releases/tag/v0.0.6
 [0.0.5]: https://github.com/KellyJDavis/goedels-poetry/releases/tag/v0.0.5
