@@ -1523,17 +1523,16 @@ class GoedelsPoetryStateManager:
         str
             The name of the have/lemma
         """
-        # Pattern: (lemma|have|theorem) followed by whitespace, then a name (identifier),
-        # then followed by whitespace, colon, or opening paren
-        # Lean4 identifiers can contain alphanumeric characters, underscores, and apostrophes
-        # (e.g., helper', myLemma'', h₁')
-        # We use [\w']+ to match these, and make the ending delimiter optional with (?:...)?
-        # to handle edge cases where the name is at the end of a line
-        pattern = r"\b(lemma|have|theorem)\s+([\w']+)(?:\s*[:(])?"
+        # Lean identifiers allow a wide range of unicode characters (e.g., h₁ or names
+        # that use Greek letters), so we capture the entire token that appears immediately
+        # after the keyword and stop before any whitespace, ':' or '('. This mirrors how
+        # the parent sketch spells the have/lemma names, which is what we need for
+        # pattern replacement.
+        pattern = r"\b(?:lemma|have|theorem)\s+([^\s:(]+)"
         match = re.search(pattern, formal_theorem)
 
         if match:
-            return match.group(2)  # Return the captured name (second group)
+            return match.group(1)
 
         return ""
 

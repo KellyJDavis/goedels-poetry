@@ -877,6 +877,91 @@ def test_reconstruct_complete_proof_with_multiple_haves() -> None:
             GoedelsPoetryState.clear_theorem_directory(theorem)
 
 
+def test_reconstruct_complete_proof_handles_unicode_have_names() -> None:
+    """Ensure have statements with unicode subscripts are inlined correctly."""
+    import uuid
+    from typing import cast
+
+    from goedels_poetry.agents.state import DecomposedFormalTheoremState, FormalTheoremProofState
+    from goedels_poetry.agents.util.common import DEFAULT_IMPORTS
+    from goedels_poetry.state import GoedelsPoetryStateManager
+    from goedels_poetry.util.tree import TreeNode
+
+    theorem_sig = f"theorem test_unicode_have_{uuid.uuid4()} : P"
+    theorem = with_default_preamble(theorem_sig)
+
+    with suppress(Exception):
+        GoedelsPoetryState.clear_theorem_directory(theorem)
+
+    try:
+        state = GoedelsPoetryState(formal_theorem=theorem)
+
+        sketch = f"""{theorem_sig} := by
+  have h₁ : P := by sorry
+  have h₂ : P := by sorry
+  exact h₂"""
+
+        decomposed = DecomposedFormalTheoremState(
+            parent=None,
+            children=[],
+            depth=0,
+            formal_theorem=theorem,
+            preamble=DEFAULT_IMPORTS,
+            proof_sketch=sketch,
+            syntactic=True,
+            errors=None,
+            ast=None,
+            self_correction_attempts=1,
+            proof_history=[],
+        )
+
+        child1 = FormalTheoremProofState(
+            parent=cast(TreeNode, decomposed),
+            depth=1,
+            formal_theorem="lemma h₁ : P := by sorry",
+            preamble=DEFAULT_IMPORTS,
+            syntactic=True,
+            formal_proof="lemma h₁ : P := by\n  trivial",
+            proved=True,
+            errors=None,
+            ast=None,
+            self_correction_attempts=1,
+            proof_history=[],
+            pass_attempts=0,
+        )
+
+        child2 = FormalTheoremProofState(
+            parent=cast(TreeNode, decomposed),
+            depth=1,
+            formal_theorem="lemma h₂ : P := by sorry",
+            preamble=DEFAULT_IMPORTS,
+            syntactic=True,
+            formal_proof="lemma h₂ : P := by\n  exact h₁",
+            proved=True,
+            errors=None,
+            ast=None,
+            self_correction_attempts=1,
+            proof_history=[],
+            pass_attempts=0,
+        )
+
+        decomposed["children"].extend([cast(TreeNode, child1), cast(TreeNode, child2)])
+        state.formal_theorem_proof = cast(TreeNode, decomposed)
+        manager = GoedelsPoetryStateManager(state)
+
+        result = manager.reconstruct_complete_proof()
+
+        assert "have h₁ : P := by" in result
+        assert "have h₂ : P := by" in result
+        assert "trivial" in result
+        assert "exact h₁" in result
+        assert "have h₁ : P := by sorry" not in result
+        assert "have h₂ : P := by sorry" not in result
+    finally:
+        with suppress(Exception):
+            GoedelsPoetryState.clear_theorem_directory(theorem)
+
+
 def test_reconstruct_complete_proof_with_main_body() -> None:
     """Test reconstruct_complete_proof with main body proof replacement."""
     import uuid
