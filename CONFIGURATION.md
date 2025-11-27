@@ -25,6 +25,10 @@ max_pass = 32
 model = qwen3:30b
 num_ctx = 262144
 
+[SEARCH_QUERY_AGENT_LLM]
+model = qwen3:30b
+num_ctx = 262144
+
 [DECOMPOSER_AGENT_LLM]
 # Provider selection (openai, google, auto)
 provider = auto
