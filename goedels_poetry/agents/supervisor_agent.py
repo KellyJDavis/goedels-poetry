@@ -65,6 +65,8 @@ class SupervisorAgent:
             return "request_proofs_corrections"
         if self._state_manager.get_proofs_to_parse()["inputs"]:
             return "parse_proofs"
+        if self._state_manager.get_theorems_for_search_query_generation()["inputs"]:
+            return "generate_search_queries"
         if self._state_manager.get_theorems_to_sketch()["inputs"]:
             return "sketch_proofs"
         if self._state_manager.get_sketches_to_validate()["inputs"]:

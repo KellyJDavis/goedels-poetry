@@ -13,6 +13,7 @@ from goedels_poetry.agents.proof_corrector_agent import ProofCorrectorAgentFacto
 from goedels_poetry.agents.proof_parser_agent import ProofParserAgentFactory
 from goedels_poetry.agents.proof_sketcher_agent import ProofSketcherAgentFactory
 from goedels_poetry.agents.prover_agent import ProverAgentFactory
+from goedels_poetry.agents.search_query_agent import SearchQueryAgentFactory
 from goedels_poetry.agents.sketch_backtrack_agent import SketchBacktrackAgentFactory
 from goedels_poetry.agents.sketch_checker_agent import SketchCheckerAgentFactory
 from goedels_poetry.agents.sketch_corrector_agent import SketchCorrectorAgentFactory
@@ -27,6 +28,7 @@ from goedels_poetry.config.llm import (
     PROVER_AGENT_LLM,
     PROVER_AGENT_MAX_SELF_CORRECTION_ATTEMPTS,
     get_formalizer_agent_llm,
+    get_search_query_agent_llm,
     get_semantics_agent_llm,
 )
 from goedels_poetry.state import GoedelsPoetryStateManager
@@ -114,6 +116,7 @@ class GoedelsPoetryFramework:
         "request_proof_sketches_backtrack": "Backtracking proof sketches",
         "parse_proof_sketches": "Parsing proof sketches",
         "decompose_proof_sketches": "Decomposing proof sketches",
+        "generate_search_queries": "Generating search queries",
     }
 
     def __init__(
@@ -251,6 +254,20 @@ class GoedelsPoetryFramework:
         formal_theorem_states = self._state_manager.get_proofs_to_parse()
         formal_theorem_states = cast(FormalTheoremProofStates, proof_parser_agent.invoke(formal_theorem_states))
         self._state_manager.set_parsed_proofs(formal_theorem_states)
+
+    def generate_search_queries(self) -> None:
+        """
+        Generates search queries for theorems pending decomposition.
+        """
+        # Create search query agent with lazy-loaded LLM
+        search_query_agent = SearchQueryAgentFactory.create_agent(llm=get_search_query_agent_llm())
+
+        # Get states needing query generation
+        states = self._state_manager.get_theorems_for_search_query_generation()
+        states = cast(DecomposedFormalTheoremStates, search_query_agent.invoke(states))
+
+        # Store states with generated queries
+        self._state_manager.set_theorems_with_search_queries_generated(states)
 
     def sketch_proofs(self) -> None:
         """
