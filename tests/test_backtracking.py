@@ -138,7 +138,7 @@ def test_set_backtracked_sketches_clears_queue(temp_state: GoedelsPoetryState) -
 
 
 def test_set_backtracked_sketches_adds_to_validate_queue(temp_state: GoedelsPoetryState) -> None:
-    """Test set_backtracked_sketches adds items to the validate queue."""
+    """Test set_backtracked_sketches adds items to the search queue (to regenerate queries)."""
     manager = GoedelsPoetryStateManager(temp_state)
 
     # Create backtracked sketches
@@ -154,6 +154,7 @@ def test_set_backtracked_sketches_adds_to_validate_queue(temp_state: GoedelsPoet
         ast=None,
         self_correction_attempts=1,
         decomposition_history=[],
+        search_queries=None,
     )
 
     from goedels_poetry.agents.state import DecomposedFormalTheoremStates
@@ -162,9 +163,9 @@ def test_set_backtracked_sketches_adds_to_validate_queue(temp_state: GoedelsPoet
 
     manager.set_backtracked_sketches(backtracked)
 
-    # Validate queue should have the item
-    assert len(temp_state.decomposition_validate_queue) == 1
-    assert temp_state.decomposition_validate_queue[0] == decomposed_state
+    # Search queue should have the item (to regenerate queries before sketching)
+    assert len(temp_state.decomposition_search_queue) == 1
+    assert temp_state.decomposition_search_queue[0] == decomposed_state
 
 
 def test_set_backtracked_sketches_with_multiple_items(temp_state: GoedelsPoetryState) -> None:
@@ -186,6 +187,7 @@ def test_set_backtracked_sketches_with_multiple_items(temp_state: GoedelsPoetryS
             ast=None,
             self_correction_attempts=i + 1,
             decomposition_history=[],
+            search_queries=None,
         )
         states.append(state)
 
@@ -195,9 +197,9 @@ def test_set_backtracked_sketches_with_multiple_items(temp_state: GoedelsPoetryS
 
     manager.set_backtracked_sketches(backtracked)
 
-    # All items should be in validate queue
-    assert len(temp_state.decomposition_validate_queue) == 3
-    assert temp_state.decomposition_validate_queue == states
+    # All items should be in search queue (to regenerate queries before sketching)
+    assert len(temp_state.decomposition_search_queue) == 3
+    assert temp_state.decomposition_search_queue == states
 
 
 def test_backtracking_integration_with_validated_sketches(temp_state: GoedelsPoetryState) -> None:

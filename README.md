@@ -48,6 +48,7 @@ Gödel's Poetry is an AI-powered theorem proving system that bridges the gap bet
    - **Formalization**: Converts informal statements into formal Lean 4 theorems
    - **Semantic Checking**: Validates that formalizations preserve the original meaning
    - **Proof Generation**: Creates proofs using specialized LLMs trained on Lean 4
+   - **Search Query Generation**: Generates queries for retrieving relevant theorems from knowledge bases (prepares for RAG integration)
    - **Proof Sketching**: Decomposes difficult theorems into manageable subgoals
    - **Verification**: Validates all proofs using the Lean 4 proof assistant
    - **Recursive Refinement**: Iteratively improves proofs until they are complete and verified
@@ -305,6 +306,7 @@ When debug mode is enabled, all responses from:
 - **FORMALIZER_AGENT_LLM** - Formalization responses
 - **PROVER_AGENT_LLM** - Proof generation responses
 - **SEMANTICS_AGENT_LLM** - Semantic checking responses
+- **SEARCH_QUERY_AGENT_LLM** - Search query generation responses
 - **DECOMPOSER_AGENT_LLM** - Proof sketching/decomposition responses
 - **KIMINA_SERVER** - Lean 4 verification and AST parsing responses
 

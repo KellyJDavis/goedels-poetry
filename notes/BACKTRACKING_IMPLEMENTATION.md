@@ -56,7 +56,7 @@ Main backtracking logic:
 Returns `DecomposedFormalTheoremStates` containing nodes that need backtrack re-sketching.
 
 ##### `set_backtracked_sketches(backtracked_sketches)`
-Moves backtracked sketches from the backtrack queue to the validation queue.
+Moves backtracked sketches from the backtrack queue to the search query generation queue. This allows search queries to be regenerated based on the failure context before re-sketching.
 
 #### 4. Modified `set_validated_sketches()`
 

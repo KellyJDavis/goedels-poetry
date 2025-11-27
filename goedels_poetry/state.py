@@ -124,6 +124,7 @@ class GoedelsPoetryState:
         self.proof_ast_queue: list[FormalTheoremProofState] = []
 
         # Initialize DecomposedFormalTheoremState lists
+        self.decomposition_search_queue: list[DecomposedFormalTheoremState] = []
         self.decomposition_sketch_queue: list[DecomposedFormalTheoremState] = []
         self.decomposition_validate_queue: list[DecomposedFormalTheoremState] = []
         self.decomposition_correct_queue: list[DecomposedFormalTheoremState] = []
@@ -698,7 +699,7 @@ class GoedelsPoetryStateManager:
             The lisr of FormalTheoremProofState containing proofs too difficult to be decomposed.
         """
         for proof_too_difficult in proofs_too_difficult:
-            # Create a new DecomposedFormalTheoremState and add it to the sketch queue
+            # Create a new DecomposedFormalTheoremState and add it to the search queue
             formal_theorem_to_decompose = DecomposedFormalTheoremState(
                 parent=proof_too_difficult["parent"],
                 children=[],
@@ -711,8 +712,9 @@ class GoedelsPoetryStateManager:
                 ast=None,
                 self_correction_attempts=0,
                 decomposition_history=[],
+                search_queries=None,
             )
-            self._state.decomposition_sketch_queue.append(formal_theorem_to_decompose)
+            self._state.decomposition_search_queue.append(formal_theorem_to_decompose)
 
             # Remove proof_too_difficult from the proof tree
             if proof_too_difficult["parent"] is not None:
@@ -797,6 +799,33 @@ class GoedelsPoetryStateManager:
         # TODO: Figure out how to deal with parent AST's. Doe we add this AST to ther parent here?
         #       If we do, the grandparent won't have this AST. So do we do so recursively? If we do
         #       when we find a decomposition or proof didn't work, we'll need to to lots of cleanup
+
+    def get_theorems_for_search_query_generation(self) -> DecomposedFormalTheoremStates:
+        """
+        Gets DecomposedFormalTheoremStates containing states that need search query generation.
+
+        Returns
+        -------
+        DecomposedFormalTheoremStates
+            States with search_queries=None that need query generation.
+        """
+        return DecomposedFormalTheoremStates(inputs=self._state.decomposition_search_queue, outputs=[])
+
+    @maybe_save(n=1)
+    def set_theorems_with_search_queries_generated(self, states_with_queries: DecomposedFormalTheoremStates) -> None:
+        """
+        Sets states with generated search queries and moves them to sketch queue.
+
+        Parameters
+        ----------
+        states_with_queries: DecomposedFormalTheoremStates
+            States with search_queries populated.
+        """
+        # Clear the search queue
+        self._state.decomposition_search_queue.clear()
+
+        # Move states with queries to sketch queue
+        self._state.decomposition_sketch_queue += states_with_queries["outputs"]
 
     def get_theorems_to_sketch(self) -> DecomposedFormalTheoremStates:
         """
@@ -1025,6 +1054,8 @@ class GoedelsPoetryStateManager:
             self._state.decomposition_correct_queue.remove(decomp_node)
         if decomp_node in self._state.decomposition_backtrack_queue:
             self._state.decomposition_backtrack_queue.remove(decomp_node)
+        if decomp_node in self._state.decomposition_search_queue:
+            self._state.decomposition_search_queue.remove(decomp_node)
         if decomp_node in self._state.decomposition_ast_queue:
             self._state.decomposition_ast_queue.remove(decomp_node)
         if decomp_node in self._state.decomposition_decompose_queue:
@@ -1065,6 +1096,8 @@ class GoedelsPoetryStateManager:
         node["syntactic"] = False
         node["errors"] = None
         node["ast"] = None
+        # Clear search queries to force regeneration on backtrack
+        node["search_queries"] = None
 
     def _handle_failed_sketch(self, failed_sketch: DecomposedFormalTheoremState) -> None:
         """
@@ -1160,8 +1193,9 @@ class GoedelsPoetryStateManager:
         # Remove all elements from the queue of sketches to backtrack
         self._state.decomposition_backtrack_queue.clear()
 
-        # Place all backtracked sketches into the queue to be validated
-        self._state.decomposition_validate_queue += backtracked_sketches["outputs"]
+        # Place all backtracked sketches into the search queue to regenerate queries
+        # (search_queries was cleared in _prepare_node_for_resketching)
+        self._state.decomposition_search_queue += backtracked_sketches["outputs"]
 
     def get_sketches_to_parse(self) -> DecomposedFormalTheoremStates:
         """

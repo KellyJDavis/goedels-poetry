@@ -38,6 +38,8 @@
 
 ::: goedels_poetry.agents.prover_agent
 
+::: goedels_poetry.agents.search_query_agent
+
 ::: goedels_poetry.agents.sketch_checker_agent
 
 ::: goedels_poetry.agents.sketch_corrector_agent

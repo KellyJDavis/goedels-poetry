@@ -123,6 +123,9 @@ class DecomposedFormalTheoremState(TypedDict):
         The number of self-correction attempts to decompose formal_theorem (was decomposition_attempts)
     decomposition_history: Required[Annotated[list[AnyMessage],add]]
         The history of messages sent and received from the LLMs
+    search_queries: Required[list[str] | None]
+        List of search queries generated for retrieving relevant theorems from a vector database.
+        None indicates queries have not been generated yet.
     """
 
     # InternalTreeNode specific properties
@@ -139,6 +142,7 @@ class DecomposedFormalTheoremState(TypedDict):
     ast: Required[AST | None]
     self_correction_attempts: Required[int]
     decomposition_history: Required[Annotated[list[AnyMessage], add]]
+    search_queries: Required[list[str] | None]
 
 
 class DecomposedFormalTheoremStates(TypedDict):

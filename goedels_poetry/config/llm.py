@@ -182,6 +182,7 @@ def _create_decomposer_llm_safe(**kwargs):  # type: ignore[no-untyped-def]
 
 _FORMALIZER_AGENT_LLM = None  # Cache for lazy-loaded formalizer LLM
 _SEMANTICS_AGENT_LLM = None  # Cache for lazy-loaded semantics LLM
+_SEARCH_QUERY_AGENT_LLM = None  # Cache for lazy-loaded search query LLM
 
 
 def get_formalizer_agent_llm():  # type: ignore[no-untyped-def]
@@ -238,6 +239,33 @@ def get_semantics_agent_llm():  # type: ignore[no-untyped-def]
             num_ctx=parsed_config.getint(section="SEMANTICS_AGENT_LLM", option="num_ctx", fallback=262144),
         )
     return _SEMANTICS_AGENT_LLM
+
+
+def get_search_query_agent_llm():  # type: ignore[no-untyped-def]
+    """
+    Lazy-load and return the SEARCH_QUERY_AGENT_LLM.
+
+    Only downloads and creates the LLM on first access, which speeds up
+    startup when processing theorems that don't need search query generation.
+
+    Returns
+    -------
+    ChatOllama
+        The search query agent LLM instance
+    """
+    global _SEARCH_QUERY_AGENT_LLM
+    if _SEARCH_QUERY_AGENT_LLM is None:
+        model = parsed_config.get(section="SEARCH_QUERY_AGENT_LLM", option="model", fallback="qwen3:30b")
+        # Download the model if needed
+        _download_llms([model])
+        # Create the LLM instance
+        _SEARCH_QUERY_AGENT_LLM = _create_llm_safe(
+            model=model,
+            validate_model_on_init=True,
+            num_predict=50000,
+            num_ctx=parsed_config.getint(section="SEARCH_QUERY_AGENT_LLM", option="num_ctx", fallback=262144),
+        )
+    return _SEARCH_QUERY_AGENT_LLM
 
 
 # ============================================================================
