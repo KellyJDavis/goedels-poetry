@@ -47,7 +47,22 @@ google_max_self_correction_attempts = 6
 [KIMINA_LEAN_SERVER]
 url = http://0.0.0.0:8000
 max_retries = 5
+
+[LEAN_EXPLORE_SERVER]
+url = http://localhost:8001/api/v1
+package_filters = Mathlib,Batteries,Std,Init,Lean
 ```
+
+## Configuration Parameters Explained
+
+### Lean Explore Server
+
+The Lean Explore Server provides vector database search capabilities for retrieving relevant theorems and lemmas:
+
+- **`url`**: The base URL of the Lean Explore server API endpoint (default: `http://localhost:8001/api/v1`)
+- **`package_filters`**: Comma-separated list of package names to filter search results. Only theorems from these packages will be returned. Default: `Mathlib,Batteries,Std,Init,Lean`
+
+The vector database agent queries this server after search queries are generated and before proof sketching, allowing the proof sketcher to use relevant theorems found in the database.
 
 ## Decomposer Agent Provider Selection
 
@@ -105,11 +120,23 @@ Override the Kimina server URL:
 export KIMINA_LEAN_SERVER__URL="http://localhost:9000"
 ```
 
+Override the Lean Explore server URL:
+```bash
+export LEAN_EXPLORE_SERVER__URL="http://localhost:8002/api/v1"
+```
+
+Override package filters for vector database searches:
+```bash
+export LEAN_EXPLORE_SERVER__PACKAGE_FILTERS="Mathlib,Batteries"
+```
+
 Override multiple values:
 ```bash
 export PROVER_AGENT_LLM__MODEL="custom-model"
 export PROVER_AGENT_LLM__NUM_CTX="8192"
 export KIMINA_LEAN_SERVER__URL="http://custom-server:8888"
+export LEAN_EXPLORE_SERVER__URL="http://custom-vector-db:8001/api/v1"
+export LEAN_EXPLORE_SERVER__PACKAGE_FILTERS="Mathlib"
 ```
 
 ### How It Works

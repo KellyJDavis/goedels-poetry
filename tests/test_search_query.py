@@ -82,7 +82,7 @@ def test_get_theorems_for_search_query_generation_with_items(temp_state: Goedels
 
 
 def test_set_theorems_with_search_queries_generated(temp_state: GoedelsPoetryState) -> None:
-    """Test set_theorems_with_search_queries_generated moves states to sketch queue."""
+    """Test set_theorems_with_search_queries_generated moves states to query queue."""
     manager = GoedelsPoetryStateManager(temp_state)
 
     # Create states with queries
@@ -101,6 +101,7 @@ def test_set_theorems_with_search_queries_generated(temp_state: GoedelsPoetrySta
             self_correction_attempts=0,
             decomposition_history=[],
             search_queries=[f"query{i}", f"query{i}_alt"],
+            search_results=None,
         )
         states.append(state)
 
@@ -116,9 +117,10 @@ def test_set_theorems_with_search_queries_generated(temp_state: GoedelsPoetrySta
     # Search queue should be cleared
     assert len(temp_state.decomposition_search_queue) == 0
 
-    # All states should be in sketch queue
-    assert len(temp_state.decomposition_sketch_queue) == 3
-    assert all(state in temp_state.decomposition_sketch_queue for state in states)
+    # All states should be in query queue (not sketch queue)
+    assert len(temp_state.decomposition_query_queue) == 3
+    assert all(state in temp_state.decomposition_query_queue for state in states)
+    assert len(temp_state.decomposition_sketch_queue) == 0
 
 
 def test_queue_proofs_for_decomposition_adds_to_search_queue(temp_state: GoedelsPoetryState) -> None:
@@ -449,10 +451,11 @@ def test_search_query_generation_integration(temp_state: GoedelsPoetryState) -> 
     states_with_queries = DecomposedFormalTheoremStates(inputs=[], outputs=[state])
     manager.set_theorems_with_search_queries_generated(states_with_queries)
 
-    # State should now be in sketch queue with queries
-    assert len(temp_state.decomposition_sketch_queue) == 1
-    assert temp_state.decomposition_sketch_queue[0]["search_queries"] == [
+    # State should now be in query queue with queries (not sketch queue)
+    assert len(temp_state.decomposition_query_queue) == 1
+    assert temp_state.decomposition_query_queue[0]["search_queries"] == [
         "divisibility",
         "gcd",
         "Euclidean algorithm",
     ]
+    assert len(temp_state.decomposition_sketch_queue) == 0

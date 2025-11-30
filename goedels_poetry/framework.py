@@ -21,7 +21,9 @@ from goedels_poetry.agents.sketch_decomposition_agent import SketchDecomposition
 from goedels_poetry.agents.sketch_parser_agent import SketchParserAgentFactory
 from goedels_poetry.agents.state import DecomposedFormalTheoremStates, FormalTheoremProofStates, InformalTheoremState
 from goedels_poetry.agents.supervisor_agent import SupervisorAgentFactory
+from goedels_poetry.agents.vector_db_agent import VectorDBAgentFactory
 from goedels_poetry.config.kimina_server import KIMINA_LEAN_SERVER
+from goedels_poetry.config.lean_explore_server import LEAN_EXPLORE_SERVER
 from goedels_poetry.config.llm import (
     DECOMPOSER_AGENT_LLM,
     FORMALIZER_AGENT_MAX_RETRIES,
@@ -117,6 +119,7 @@ class GoedelsPoetryFramework:
         "parse_proof_sketches": "Parsing proof sketches",
         "decompose_proof_sketches": "Decomposing proof sketches",
         "generate_search_queries": "Generating search queries",
+        "query_vectordb": "Querying vector database for relevant theorems",
     }
 
     def __init__(
@@ -268,6 +271,22 @@ class GoedelsPoetryFramework:
 
         # Store states with generated queries
         self._state_manager.set_theorems_with_search_queries_generated(states)
+
+    def query_vectordb(self) -> None:
+        """
+        Queries the vector database for relevant theorems using generated search queries.
+        """
+        # Create vector DB agent
+        vector_db_agent = VectorDBAgentFactory.create_agent(
+            server_url=LEAN_EXPLORE_SERVER["url"], package_filters=LEAN_EXPLORE_SERVER["package_filters"]
+        )
+
+        # Get states with search queries that need vector DB lookup
+        states = self._state_manager.get_theorems_with_search_queries_for_vectordb()
+        states = cast(DecomposedFormalTheoremStates, vector_db_agent.invoke(states))
+
+        # Store states with vector DB results
+        self._state_manager.set_theorems_with_vectordb_results(states)
 
     def sketch_proofs(self) -> None:
         """

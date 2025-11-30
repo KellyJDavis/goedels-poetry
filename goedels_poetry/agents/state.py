@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from operator import add
-from typing import Annotated
+from typing import Annotated, Any
 
 from langchain_core.messages import AnyMessage
 from typing_extensions import Required, TypedDict
@@ -95,6 +95,38 @@ class FormalTheoremProofStates(TypedDict):
     outputs: Required[Annotated[list[FormalTheoremProofState], add]]  # TODO: Correct annotation?
 
 
+class APISearchResponseTypedDict(TypedDict):
+    """
+    TypedDict representation of APISearchResponse from lean_explore.shared.models.api.
+
+    This TypedDict matches the structure of APISearchResponse to enable type checking
+    while maintaining compatibility with the lean_explore API.
+
+    Attributes
+    ----------
+    query: Required[str]
+        The search query that was executed
+    packages_applied: Required[list[str]]
+        List of package filters that were applied to the search
+    results: Required[list[dict[str, Any]]]
+        List of search results, where each result is a dictionary containing
+        theorem information (name, type, code, etc.)
+    count: Required[int]
+        Number of results returned
+    total_candidates_considered: Required[int]
+        Total number of candidates that were considered during the search
+    processing_time_ms: Required[int]
+        Time taken to process the search query in milliseconds
+    """
+
+    query: Required[str]
+    packages_applied: Required[list[str]]
+    results: Required[list[dict[str, Any]]]
+    count: Required[int]
+    total_candidates_considered: Required[int]
+    processing_time_ms: Required[int]
+
+
 class DecomposedFormalTheoremState(TypedDict):
     """
     State for decomposition of a formal theorem
@@ -126,6 +158,10 @@ class DecomposedFormalTheoremState(TypedDict):
     search_queries: Required[list[str] | None]
         List of search queries generated for retrieving relevant theorems from a vector database.
         None indicates queries have not been generated yet.
+    search_results: Required[list[APISearchResponseTypedDict] | None]
+        List of search results from the vector database, where search_results[i] corresponds to
+        the results from search_queries[i]. None indicates results have not been retrieved yet,
+        and an empty list indicates no queries were provided.
     """
 
     # InternalTreeNode specific properties
@@ -143,6 +179,7 @@ class DecomposedFormalTheoremState(TypedDict):
     self_correction_attempts: Required[int]
     decomposition_history: Required[Annotated[list[AnyMessage], add]]
     search_queries: Required[list[str] | None]
+    search_results: Required[list[APISearchResponseTypedDict] | None]
 
 
 class DecomposedFormalTheoremStates(TypedDict):

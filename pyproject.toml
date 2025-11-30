@@ -6,7 +6,7 @@ authors = [{ name = "Kelly J Davis", email = "kdavis@alum.mit.edu" }]
 readme = "README.md"
 license = "Apache-2.0"
 keywords = ['python']
-requires-python = ">=3.9,<4.0"
+requires-python = ">=3.10,<4.0"
 classifiers = [
     "Development Status :: 4 - Beta",
     "License :: OSI Approved :: Apache Software License",
@@ -28,6 +28,7 @@ dependencies = [
     "langchain-ollama>=0.3.10",
     "langchain-openai>=0.3.34",
     "langgraph>=0.6.8",
+    "lean-xplore>=0.4.3",
     "ollama>=0.6.0",
     "rich>=14.1.0",
     "tqdm>=4.67.1",
