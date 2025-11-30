@@ -11,6 +11,7 @@ from langgraph.types import Send
 from goedels_poetry.agents.state import DecomposedFormalTheoremState, DecomposedFormalTheoremStates
 from goedels_poetry.agents.util.common import (
     LLMParsingError,
+    _format_theorem_hints_section,
     combine_preamble_and_body,
     load_prompt,
     strip_known_preamble,
@@ -112,7 +113,13 @@ def _proof_sketcher(llm: BaseChatModel, state: DecomposedFormalTheoremState) -> 
         # If it is, load the prompt used when not correcting a previous proof sketch
         # Combine the stored preamble with the formal theorem for the prompt
         formal_theorem_with_imports = combine_preamble_and_body(state["preamble"], state["formal_theorem"])
-        prompt = load_prompt("decomposer-initial", formal_theorem=formal_theorem_with_imports)
+        # Format theorem hints section from search results
+        theorem_hints_section = _format_theorem_hints_section(state["search_results"])
+        prompt = load_prompt(
+            "decomposer-initial",
+            formal_theorem=formal_theorem_with_imports,
+            theorem_hints_section=theorem_hints_section,
+        )
 
         # Put the prompt in the final message
         state["decomposition_history"] += [HumanMessage(content=prompt)]
