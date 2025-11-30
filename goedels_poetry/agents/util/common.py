@@ -6,6 +6,8 @@ from typing import Any
 
 from jinja2 import Environment, FileSystemLoader, select_autoescape
 
+from goedels_poetry.agents.state import APISearchResponseTypedDict
+
 
 class LLMParsingError(Exception):
     """
@@ -538,3 +540,158 @@ def combine_theorem_with_proof(theorem_statement: str, proof_body: str) -> str:
 
     # Last resort: append
     return f"{theorem_statement}\n{proof_body}"
+
+
+def _is_valid_theorem_result(result: dict[str, Any]) -> bool:
+    """
+    Check if a result dictionary has the required fields for a theorem.
+
+    Parameters
+    ----------
+    result: dict[str, Any]
+        A result dictionary from the search results.
+
+    Returns
+    -------
+    bool
+        True if the result has all required fields, False otherwise.
+    """
+    if not isinstance(result, dict):
+        return False
+
+    primary_declaration = result.get("primary_declaration")
+    if not isinstance(primary_declaration, dict):
+        return False
+
+    lean_name = primary_declaration.get("lean_name")
+    return bool(lean_name)
+
+
+def _filter_valid_theorems(results: list[dict[str, Any]], max_count: int) -> list[dict[str, Any]]:
+    """
+    Filter results to only include valid theorems and limit to max_count.
+
+    Parameters
+    ----------
+    results: list[dict[str, Any]]
+        List of result dictionaries from search results.
+    max_count: int
+        Maximum number of valid results to return.
+
+    Returns
+    -------
+    list[dict[str, Any]]
+        List of valid theorem results, limited to max_count.
+    """
+    valid_results = []
+    for result in results:
+        if _is_valid_theorem_result(result):
+            valid_results.append(result)
+            if len(valid_results) >= max_count:
+                break
+    return valid_results
+
+
+def _format_single_theorem(idx: int, result: dict[str, Any]) -> str:
+    """
+    Format a single theorem result into a string.
+
+    Parameters
+    ----------
+    idx: int
+        The index number of the theorem (1-based).
+    result: dict[str, Any]
+        A valid theorem result dictionary.
+
+    Returns
+    -------
+    str
+        Formatted string for the theorem.
+    """
+    primary_declaration = result.get("primary_declaration", {})
+    lean_name = primary_declaration.get("lean_name", "")
+    informal_description = result.get("informal_description", "")
+    statement_text = result.get("statement_text", "")
+
+    return (
+        f"{idx}. {lean_name}\n\n"
+        f"Name of the Theorem: {lean_name}\n\n"
+        f"Informal Description of the Theorem: {informal_description}\n\n"
+        f"Formal Statement of the Theorem: {statement_text}\n\n"
+    )
+
+
+def _format_query_section(query: str, valid_results: list[dict[str, Any]]) -> str:
+    """
+    Format a query section with its theorems.
+
+    Parameters
+    ----------
+    query: str
+        The search query string.
+    valid_results: list[dict[str, Any]]
+        List of valid theorem results for this query.
+
+    Returns
+    -------
+    str
+        Formatted string for the query section with all its theorems.
+    """
+    query_header = (
+        f"When querying a store of proven theorems that may be of use to the task at hand "
+        f'with the query "{query}" we found the following theorems ordered from those we think '
+        f"to be of most utility to those we think will be of less utility\n\n"
+    )
+
+    theorem_sections = [_format_single_theorem(idx, result) for idx, result in enumerate(valid_results, start=1)]
+
+    return query_header + "".join(theorem_sections)
+
+
+def _format_theorem_hints_section(search_results: list[APISearchResponseTypedDict] | None) -> str:
+    """
+    Format search results into a theorem hints section for prompts.
+
+    Parameters
+    ----------
+    search_results: list[APISearchResponseTypedDict] | None
+        List of search results from the vector database. None indicates results have not been retrieved yet.
+
+    Returns
+    -------
+    str
+        A formatted string containing theorem hints, or a message indicating no helpful theorems were found.
+    """
+    # Handle None or empty search_results
+    if search_results is None or not search_results:
+        return "No helpful theorems were found in the search results."
+
+    sections: list[str] = []
+    max_theorems_per_query = 5
+
+    # Process each search result (each corresponds to a query)
+    for search_result in search_results:
+        query = search_result.get("query", "")
+        results = search_result.get("results", [])
+
+        # Skip queries with no results
+        if not results:
+            continue
+
+        # Filter and limit results to those with required fields
+        valid_results = _filter_valid_theorems(results, max_theorems_per_query)
+
+        # Skip if no valid results after filtering
+        if not valid_results:
+            continue
+
+        # Format the section for this query
+        query_section = _format_query_section(query, valid_results)
+        sections.append(query_section)
+
+    # If no sections were created, return message
+    if not sections:
+        return "No helpful theorems were found in the search results."
+
+    # Join all sections with double newline for clear separation between queries
+    return "\n\n".join(sections).strip()

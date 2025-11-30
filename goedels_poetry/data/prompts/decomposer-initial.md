@@ -10,6 +10,16 @@ You are a Lean 4 formal theorem prover assistant. Your task is to take a Lean th
 8. Do not introduce auxiliary lemmas or any other statements not subordinate to the main Lean 4 theorem.
 9. In particular do not introduce an unexpected identifier or unexpected command such as "Complex" before the main Lean 4 theorem statement.
 
+{{ theorem_hints_section }}
+
+When decomposing the proof, you may find it helpful to use existing proven theorems from the list above. For example:
+- You might use an existing theorem like `Nat.add_comm` to simplify expressions involving addition
+- You might apply a theorem about inequalities to establish relationships between terms
+- You might use a theorem about properties of functions to transform the goal into a more manageable form
+- You might combine multiple existing theorems to build up to the desired conclusion
+
+Consider how these existing theorems might be incorporated into your proof sketch, either directly in the decomposition or as intermediate steps that help establish the subgoals.
+
 Example input theorem:
 
 ```lean4
