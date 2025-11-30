@@ -11,6 +11,7 @@ from goedels_poetry.agents.state import (
     DecomposedFormalTheoremState,
     DecomposedFormalTheoremStates,
 )
+from goedels_poetry.agents.util.debug import log_vectordb_response
 
 
 class VectorDBAgentFactory:
@@ -179,6 +180,9 @@ def _query_vectordb(
             "processing_time_ms": processing_time_ms,
         }
         search_results.append(search_result)
+
+    # Log debug response
+    log_vectordb_response("search", search_results)
 
     # Update the state with the search results
     state["search_results"] = search_results

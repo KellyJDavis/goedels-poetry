@@ -80,6 +80,30 @@ def log_kimina_response(operation: str, response: dict[str, Any]) -> None:
     _debug_console.print(Panel(syntax, title=title, border_style="magenta"))
 
 
+def log_vectordb_response(operation: str, response: list[Any]) -> None:
+    """
+    Log a vector database response if debug mode is enabled.
+
+    Parameters
+    ----------
+    operation : str
+        The operation performed (e.g., "search")
+    response : list[dict]
+        The search results from the vector database
+    """
+    if not _DEBUG_ENABLED:
+        return
+
+    title = f"[bold green]VECTOR_DB[/bold green] - {operation}"
+
+    # Format the response nicely
+    import json
+
+    formatted_response = json.dumps(response, indent=2, default=str)
+    syntax = Syntax(formatted_response, "json", theme="monokai", line_numbers=False)
+    _debug_console.print(Panel(syntax, title=title, border_style="green"))
+
+
 def log_debug_message(message: str, style: str = "yellow") -> None:
     """
     Log a general debug message if debug mode is enabled.
