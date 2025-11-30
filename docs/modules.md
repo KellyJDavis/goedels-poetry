@@ -18,6 +18,8 @@
 
 ::: goedels_poetry.config.kimina_server
 
+::: goedels_poetry.config.lean_explore_server
+
 ::: goedels_poetry.config.llm
 
 ::: goedels_poetry.agents.formal_theorem_syntax_agent
@@ -39,6 +41,8 @@
 ::: goedels_poetry.agents.prover_agent
 
 ::: goedels_poetry.agents.search_query_agent
+
+::: goedels_poetry.agents.vector_db_agent
 
 ::: goedels_poetry.agents.sketch_checker_agent
 

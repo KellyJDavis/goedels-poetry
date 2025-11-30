@@ -125,6 +125,7 @@ class GoedelsPoetryState:
 
         # Initialize DecomposedFormalTheoremState lists
         self.decomposition_search_queue: list[DecomposedFormalTheoremState] = []
+        self.decomposition_query_queue: list[DecomposedFormalTheoremState] = []
         self.decomposition_sketch_queue: list[DecomposedFormalTheoremState] = []
         self.decomposition_validate_queue: list[DecomposedFormalTheoremState] = []
         self.decomposition_correct_queue: list[DecomposedFormalTheoremState] = []
@@ -713,6 +714,7 @@ class GoedelsPoetryStateManager:
                 self_correction_attempts=0,
                 decomposition_history=[],
                 search_queries=None,
+                search_results=None,
             )
             self._state.decomposition_search_queue.append(formal_theorem_to_decompose)
 
@@ -814,7 +816,7 @@ class GoedelsPoetryStateManager:
     @maybe_save(n=1)
     def set_theorems_with_search_queries_generated(self, states_with_queries: DecomposedFormalTheoremStates) -> None:
         """
-        Sets states with generated search queries and moves them to sketch queue.
+        Sets states with generated search queries and moves them to query queue.
 
         Parameters
         ----------
@@ -824,8 +826,35 @@ class GoedelsPoetryStateManager:
         # Clear the search queue
         self._state.decomposition_search_queue.clear()
 
-        # Move states with queries to sketch queue
-        self._state.decomposition_sketch_queue += states_with_queries["outputs"]
+        # Move states with queries to query queue (for vector DB lookup)
+        self._state.decomposition_query_queue += states_with_queries["outputs"]
+
+    def get_theorems_with_search_queries_for_vectordb(self) -> DecomposedFormalTheoremStates:
+        """
+        Gets DecomposedFormalTheoremStates containing states that need vector database queries.
+
+        Returns
+        -------
+        DecomposedFormalTheoremStates
+            States with search_queries populated that need vector DB lookup.
+        """
+        return DecomposedFormalTheoremStates(inputs=self._state.decomposition_query_queue, outputs=[])
+
+    @maybe_save(n=1)
+    def set_theorems_with_vectordb_results(self, states_with_results: DecomposedFormalTheoremStates) -> None:
+        """
+        Sets states with vector database search results and moves them to sketch queue.
+
+        Parameters
+        ----------
+        states_with_results: DecomposedFormalTheoremStates
+            States with search_results populated.
+        """
+        # Clear the query queue
+        self._state.decomposition_query_queue.clear()
+
+        # Move states with results to sketch queue
+        self._state.decomposition_sketch_queue += states_with_results["outputs"]
 
     def get_theorems_to_sketch(self) -> DecomposedFormalTheoremStates:
         """
@@ -1056,6 +1085,8 @@ class GoedelsPoetryStateManager:
             self._state.decomposition_backtrack_queue.remove(decomp_node)
         if decomp_node in self._state.decomposition_search_queue:
             self._state.decomposition_search_queue.remove(decomp_node)
+        if decomp_node in self._state.decomposition_query_queue:
+            self._state.decomposition_query_queue.remove(decomp_node)
         if decomp_node in self._state.decomposition_ast_queue:
             self._state.decomposition_ast_queue.remove(decomp_node)
         if decomp_node in self._state.decomposition_decompose_queue:
@@ -1096,8 +1127,9 @@ class GoedelsPoetryStateManager:
         node["syntactic"] = False
         node["errors"] = None
         node["ast"] = None
-        # Clear search queries to force regeneration on backtrack
+        # Clear search queries and results to force regeneration on backtrack
         node["search_queries"] = None
+        node["search_results"] = None
 
     def _handle_failed_sketch(self, failed_sketch: DecomposedFormalTheoremState) -> None:
         """
@@ -1126,10 +1158,13 @@ class GoedelsPoetryStateManager:
         # 2. Remove all descendants from all queues
         self._remove_nodes_from_all_queues(descendants)
 
-        # 3. Prepare the backtrack target for re-sketching
+        # 3. Remove the backtrack target itself from all queues (it might be in query_queue, sketch_queue, etc.)
+        self._remove_decomposition_node_from_queues(backtrack_target)
+
+        # 4. Prepare the backtrack target for re-sketching
         self._prepare_node_for_resketching(backtrack_target)
 
-        # 4. Queue the backtrack target for re-sketching
+        # 5. Queue the backtrack target for re-sketching
         self._state.decomposition_backtrack_queue.append(backtrack_target)
 
     def get_sketches_to_correct(self) -> DecomposedFormalTheoremStates:
@@ -1298,6 +1333,9 @@ class GoedelsPoetryStateManager:
 
                         # Remove all descendants from all queues
                         self._remove_nodes_from_all_queues(descendants)
+
+                        # Remove the backtrack target itself from all queues (it might be in query_queue, sketch_queue, etc.)
+                        self._remove_decomposition_node_from_queues(backtrack_target)
 
                         # Prepare the backtrack target for re-sketching
                         self._prepare_node_for_resketching(backtrack_target)

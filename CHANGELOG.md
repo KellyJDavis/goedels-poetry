@@ -8,7 +8,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
-- Search query generation phase before theorem decomposition: introduces a new phase that generates search queries for vector database retrieval before theorems are decomposed, preparing the system for future RAG integration
+- Vector database querying phase: introduces a new phase that queries the Lean Explore vector database to retrieve relevant theorems and lemmas after search query generation and before proof sketching
+- VectorDBAgent with factory pattern matching existing agent patterns, using asyncio.run() to wrap async client.search() calls
+- APISearchResponseTypedDict TypedDict for type-safe handling of vector database search results
+- search_results field in DecomposedFormalTheoremState to store vector database query results
+- decomposition_query_queue in GoedelsPoetryState to manage states awaiting vector database queries
+- LEAN_EXPLORE_SERVER configuration section in config.ini with url and package_filters options
+- get_theorems_with_search_queries_for_vectordb() and set_theorems_with_vectordb_results() methods in GoedelsPoetryStateManager
+- Comprehensive test coverage (15 new tests) for vector database querying functionality
+- Search query generation phase before theorem decomposition: introduces a new phase that generates search queries for vector database retrieval before theorems are decomposed
 - SearchQueryAgent with factory pattern matching existing agent patterns
 - Two new prompt templates (search-query-initial.md and search-query-backtrack.md) using `<search>` tags for structured parsing
 - Template-based backtrack detection that replaces brittle keyword matching with exact prompt template matching
@@ -16,8 +24,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Comprehensive test coverage (19 new tests) for search query generation functionality
 
 ### Changed
+- Queue flow updated: decomposition_search_queue → decomposition_query_queue → decomposition_sketch_queue (initial flow)
 - Backtracked states now route through search query generation queue to allow intelligent query regeneration based on failure context
-- Queue flow updated: decomposition_search_queue → decomposition_sketch_queue (initial) and decomposition_backtrack_queue → decomposition_search_queue → decomposition_sketch_queue (backtrack)
+- Backtracking now properly removes nodes from decomposition_query_queue when backtracking occurs
 
 ## [0.0.9] - 2025-11-23
 

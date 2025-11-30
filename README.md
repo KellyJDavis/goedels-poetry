@@ -48,7 +48,8 @@ Gödel's Poetry is an AI-powered theorem proving system that bridges the gap bet
    - **Formalization**: Converts informal statements into formal Lean 4 theorems
    - **Semantic Checking**: Validates that formalizations preserve the original meaning
    - **Proof Generation**: Creates proofs using specialized LLMs trained on Lean 4
-   - **Search Query Generation**: Generates queries for retrieving relevant theorems from knowledge bases (prepares for RAG integration)
+   - **Search Query Generation**: Generates queries for retrieving relevant theorems from knowledge bases
+   - **Vector Database Querying**: Queries a Lean Explore vector database to retrieve relevant theorems and lemmas
    - **Proof Sketching**: Decomposes difficult theorems into manageable subgoals
    - **Verification**: Validates all proofs using the Lean 4 proof assistant
    - **Recursive Refinement**: Iteratively improves proofs until they are complete and verified
@@ -69,9 +70,10 @@ The system is designed for researchers, mathematicians, and AI practitioners int
 
 Before installing Gödel's Poetry, ensure you have:
 
-- **Python 3.9 or higher** (tested on Python 3.9-3.13)
+- **Python 3.10 or higher** (tested on Python 3.10-3.13)
 - **pip** (comes with Python)
 - **Lean 4** for the Kimina server (installation covered below)
+- **Lean Explore server** for vector database queries (installation covered below)
 
 For development:
 - **[uv](https://docs.astral.sh/uv/)** - Fast Python package installer (optional, but recommended for development)
@@ -178,6 +180,51 @@ If you prefer to install from source, please refer to the [Kimina Lean Server re
 #### Alternative: Docker (Production)
 
 For production deployments, you can use Docker. See the [Kimina Server README](https://github.com/KellyJDavis/kimina-lean-server/blob/main/README.md) for Docker deployment options.
+
+### Running the Lean Explore Server
+
+The Lean Explore Server is **required** for Gödel's Poetry to query the vector database for relevant theorems and lemmas. It provides semantic search capabilities across Lean 4 declarations.
+
+#### Option 1: Install from PyPI (Recommended)
+
+The easiest way to install and run the Lean Explore Server is via PyPI:
+
+1. **Install the server package**:
+   ```bash
+   pip install lean-xplore
+   ```
+
+2. **Download local data**:
+   ```bash
+   leanexplore data fetch
+   ```
+
+   This downloads the database, embeddings, and search index needed for local searches. This step is required for the local backend.
+
+   ⚠️ **Note**: The local backend must be used (not the remote API) because the remote API uses a Mathlib version incompatible with that required by Gödel's Poetry.
+
+3. **Start the HTTP server**:
+   ```bash
+   leanexplore http serve --backend local
+   ```
+
+   The server will start on `http://localhost:8001/api/v1` by default.
+
+4. **Verify the server is running** (in a new terminal):
+   ```bash
+   curl --request POST \
+     --url http://localhost:8001/api/v1/search \
+     --header 'Content-Type: application/json' \
+     --data '{"query": "natural numbers", "package_filters": ["Mathlib"]}' | jq
+   ```
+
+   You can also visit `http://localhost:8001/docs` for interactive API documentation (if available).
+
+#### Install from Source
+
+If you prefer to install from source, please refer to the [Lean Explore repository](https://github.com/KellyJDavis/lean-explore) for detailed installation instructions.
+
+For more information, see the [Lean Explore documentation](https://kellyjdavis.github.io/lean-explore/).
 
 ### Setting Up Your API Keys
 
@@ -309,6 +356,7 @@ When debug mode is enabled, all responses from:
 - **SEARCH_QUERY_AGENT_LLM** - Search query generation responses
 - **DECOMPOSER_AGENT_LLM** - Proof sketching/decomposition responses
 - **KIMINA_SERVER** - Lean 4 verification and AST parsing responses
+- **LEAN_EXPLORE_SERVER** - Vector database search responses
 
 will be printed to the console with rich formatting for easy debugging and inspection.
 
@@ -375,11 +423,13 @@ Gödel's Poetry uses a sophisticated multi-agent architecture coordinated by a s
 
 When direct proving fails, the system activates **proof sketching**:
 
-1. **Proof Sketcher Agent** - Creates a high-level proof outline
-2. **Sketch Checker Agent** - Validates the sketch syntax
-3. **Decomposition Agent** - Extracts sub-theorems from the sketch
-4. **Recursive Proving** - Each sub-theorem is proved independently
-5. **Proof Reconstruction** - Combines verified sub-proofs into the final proof
+1. **Search Query Agent** - Generates search queries for retrieving relevant theorems
+2. **Vector DB Agent** - Queries the Lean Explore vector database to find relevant theorems and lemmas
+3. **Proof Sketcher Agent** - Creates a high-level proof outline using retrieved theorems
+4. **Sketch Checker Agent** - Validates the sketch syntax
+5. **Decomposition Agent** - Extracts sub-theorems from the sketch
+6. **Recursive Proving** - Each sub-theorem is proved independently
+7. **Proof Reconstruction** - Combines verified sub-proofs into the final proof
 
 ### Key Features:
 
@@ -547,6 +597,10 @@ google_max_self_correction_attempts = 6
 [KIMINA_LEAN_SERVER]
 url = http://0.0.0.0:8000
 max_retries = 5
+
+[LEAN_EXPLORE_SERVER]
+url = http://localhost:8001/api/v1
+package_filters = Mathlib,Batteries,Std,Init,Lean
 ```
 
 #### Configuration Parameters Explained
@@ -581,6 +635,10 @@ max_retries = 5
 - `url`: Server endpoint for Lean verification
 - `max_retries`: Maximum retry attempts for server requests
 
+**Lean Explore Server**:
+- `url`: Server endpoint for the Lean Explore vector database
+- `package_filters`: Comma-separated list of package names to filter search results (e.g., "Mathlib,Batteries,Std,Init,Lean")
+
 #### Overriding Configuration with Environment Variables
 
 The **recommended** way to customize configuration is using environment variables. This approach doesn't require modifying files and works great for different environments (development, testing, production):
@@ -595,6 +653,12 @@ export PROVER_AGENT_LLM__MODEL="custom-model:latest"
 
 # Change the Kimina server URL
 export KIMINA_LEAN_SERVER__URL="http://localhost:9000"
+
+# Change the Lean Explore server URL
+export LEAN_EXPLORE_SERVER__URL="http://localhost:8002/api/v1"
+
+# Change package filters for vector database searches
+export LEAN_EXPLORE_SERVER__PACKAGE_FILTERS="Mathlib,Batteries"
 
 # Use a smaller context window for faster testing
 export PROVER_AGENT_LLM__NUM_CTX="8192"
@@ -671,6 +735,8 @@ goedels-poetry/
 │   │   ├── formalizer_agent.py
 │   │   ├── prover_agent.py
 │   │   ├── proof_checker_agent.py
+│   │   ├── search_query_agent.py
+│   │   ├── vector_db_agent.py
 │   │   ├── sketch_*.py       # Proof sketching agents
 │   │   └── ...
 │   ├── config/               # Configuration management
