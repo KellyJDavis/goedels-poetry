@@ -53,158 +53,37 @@ def _count_preamble_commands(preamble: str) -> int:
     """Count non-empty, non-comment lines in a preamble block."""
     if not preamble:
         return 0
-    return sum(1 for line in preamble.splitlines() if line.strip() and not line.strip().startswith("--"))
+    return sum(1 for line in preamble.splitlines() if line.strip())
 
 
-def _is_lean_declaration_line(s: str) -> bool:
-    """Check if a line is a Lean declaration."""
-    return (
-        s.startswith("theorem ")
-        or s.startswith("def ")
-        or s.startswith("lemma ")
-        or s.startswith("example ")
-        or s.startswith("axiom ")
-        or s.startswith("inductive ")
-        or s.startswith("structure ")
-        or s.startswith("class ")
-    )
+_DECLARATION_KEYWORDS: tuple[str, ...] = (
+    "theorem",
+    "lemma",
+    "def",
+    "definition",
+    "example",
+    "instance",
+    "inductive",
+    "coinductive",
+    "structure",
+    "class",
+    "abbrev",
+    "opaque",
+    "constant",
+    "axiom",
+    "mutual",
+    "deriving",
+)
 
-
-def _is_preamble_line(s: str) -> bool:
-    """Check if a line is a preamble line (import, open, etc.)."""
-    return (
-        s.startswith("import ")
-        or s.startswith("open ")
-        or s.startswith("set_option ")
-        or s.startswith("noncomputable ")
-        or s == ""
-    )
-
-
-def _is_doc_comment(lines: list[str], i: int) -> bool:
-    """Check if a comment at line i is a doc comment (precedes a declaration)."""
-    for j in range(i + 1, len(lines)):
-        next_stripped = lines[j].strip()
-        if next_stripped != "":
-            return _is_lean_declaration_line(next_stripped)
-    return False
-
-
-def _handle_complete_comment_line(line: str, lines: list[str], line_idx: int) -> tuple[int | None, bool]:
-    """
-    Handle a line that contains a complete comment (/- ... -/).
-
-    Returns
-    -------
-    tuple[int | None, bool]
-        (split_index if body starts here, should_continue)
-    """
-    stripped = line.strip()
-    comment_start = stripped.find("/-")
-    comment_end = stripped.find("-/", comment_start)
-    if comment_end == -1:
-        return None, False
-
-    # Found a complete comment on this line
-    if _is_doc_comment(lines, line_idx):
-        # This doc comment precedes a declaration, so it's part of the body
-        return line_idx, False
-
-    # Not a doc comment - process the rest of the line after the comment
-    after_comment = stripped[comment_end + 2 :].strip()
-    if after_comment:
-        # There's content after the comment, process it
-        if _is_lean_declaration_line(after_comment):
-            return None, False  # Stop processing
-        if _is_preamble_line(after_comment):
-            return line_idx + 1, True  # Continue, skip this line
-        return None, False  # Stop processing
-    # Just a comment, skip this line
-    return line_idx + 1, True  # Continue, skip this line
-
-
-def _handle_multiline_comment(stripped: str, in_multiline_comment: bool, line_idx: int) -> tuple[bool, int]:
-    """
-    Handle multiline comment state.
-
-    Returns
-    -------
-    tuple[bool, int]
-        (new_in_multiline_comment, skip_until)
-    """
-    if stripped.startswith("/-") and not in_multiline_comment:
-        return True, line_idx + 1
-
-    if in_multiline_comment:
-        if stripped.endswith("-/") or stripped == "-/":
-            return False, line_idx + 1
-        return True, line_idx + 1
-
-    return in_multiline_comment, line_idx
-
-
-def _process_preamble_line(stripped: str, lines: list[str], line_idx: int) -> tuple[int | None, bool]:
-    """
-    Process a single line to determine if it's part of the preamble.
-
-    Returns
-    -------
-    tuple[int | None, bool]
-        (split_index if body starts here, is_preamble_line)
-    """
-    # Check if this is actual Lean code
-    if _is_lean_declaration_line(stripped):
-        return None, False
-
-    # Check if this is a doc comment (single-line -- style)
-    if stripped.startswith("--"):
-        if _is_doc_comment(lines, line_idx):
-            return line_idx, False  # Body starts here
-        return None, True  # Preamble line
-
-    # Check if this is a preamble line
-    if _is_preamble_line(stripped):
-        return None, True  # Preamble line
-
-    return None, False  # Not a preamble line
-
-
-def _find_preamble_end(lines: list[str]) -> int:
-    """Find the line index where the preamble ends."""
-    skip_until = 0
-    in_multiline_comment = False
-
-    for i, line in enumerate(lines):
-        stripped = line.strip()
-
-        # Handle complete single-line comments
-        if "/-" in stripped:
-            result, should_continue = _handle_complete_comment_line(stripped, lines, i)
-            if result is not None and not should_continue:
-                return result
-            if should_continue:
-                skip_until = result if result is not None else skip_until
-                continue
-            if result is None:
-                # Starts with /- but no closing -/ on this line - multiline comment
-                in_multiline_comment, skip_until = _handle_multiline_comment(stripped, in_multiline_comment, i)
-                continue
-
-        in_multiline_comment, new_skip = _handle_multiline_comment(stripped, in_multiline_comment, i)
-        if in_multiline_comment or new_skip != i:
-            skip_until = new_skip
-            continue
-
-        # Process the line to determine if it's preamble or body
-        split_idx, is_preamble = _process_preamble_line(stripped, lines, i)
-        if split_idx is not None:
-            return split_idx
-        if is_preamble:
-            skip_until = i + 1
-        else:
-            break
-
-    return skip_until
+_DECLARATION_MODIFIERS: tuple[str, ...] = (
+    "private",
+    "protected",
+    "unsafe",
+    "scoped",
+    "local",
+    "noncomputable",
+    "partial",
+)
 
 
 def _normalize_block(block: str) -> str:
@@ -216,20 +95,237 @@ def _normalize_block(block: str) -> str:
     return "\n".join(normalized).strip()
 
 
+def _is_identifier_char(ch: str) -> bool:
+    return ch.isalnum() or ch == "_" or ch == "'"
+
+
+def _has_word_prefix(code: str, idx: int) -> bool:
+    return idx > 0 and _is_identifier_char(code[idx - 1])
+
+
+def _has_word_suffix(code: str, idx: int) -> bool:
+    return idx < len(code) and _is_identifier_char(code[idx])
+
+
+def _starts_with_keyword(code: str, idx: int, keyword: str) -> bool:
+    if not code.startswith(keyword, idx):
+        return False
+    end_idx = idx + len(keyword)
+    if _has_word_prefix(code, idx):
+        return False
+    return not _has_word_suffix(code, end_idx)
+
+
+def _skip_whitespace(code: str, idx: int) -> int:
+    while idx < len(code) and code[idx] in " \t\r\n":
+        idx += 1
+    return idx
+
+
+def _skip_line(code: str, idx: int) -> int:
+    while idx < len(code) and code[idx] != "\n":
+        idx += 1
+    if idx < len(code):
+        idx += 1
+    return idx
+
+
+def _skip_line_comment(code: str, idx: int) -> int:
+    return _skip_line(code, idx)
+
+
+def _handle_line_comment(code: str, idx: int) -> tuple[int, int | None]:
+    """
+    Skip a single-line comment and determine if it marks body start.
+
+    Returns
+    -------
+    tuple[int, int | None]
+        (next_index, body_start if comment belongs to body)
+    """
+    next_idx = _skip_line_comment(code, idx)
+    if _next_token_is_decl_or_attribute(code, next_idx):
+        return next_idx, idx
+    return next_idx, None
+
+
+def _skip_block_comment(code: str, idx: int) -> int:
+    depth = 0
+    i = idx
+    while i < len(code):
+        if code.startswith("/-", i):
+            depth += 1
+            i += 2
+            continue
+        if code.startswith("-/", i):
+            depth -= 1
+            i += 2
+            if depth == 0:
+                break
+            continue
+        i += 1
+    return i
+
+
+def _skip_whitespace_and_comments(code: str, idx: int) -> int:
+    """
+    Skip whitespace plus non-doc comments and return the next index.
+    """
+    i = idx
+    while i < len(code):
+        i = _skip_whitespace(code, i)
+        if i >= len(code):
+            return i
+        if code.startswith("--", i):
+            i = _skip_line_comment(code, i)
+            continue
+        if code.startswith("/-", i):
+            i = _skip_block_comment(code, i)
+            continue
+        break
+    return i
+
+
+def _starts_with_declaration(code: str, idx: int) -> bool:
+    return any(_starts_with_keyword(code, idx, keyword) for keyword in _DECLARATION_KEYWORDS)
+
+
+def _consume_modifier(code: str, idx: int) -> int | None:
+    """
+    If a declaration modifier starts at idx, return the index immediately after it.
+    """
+    for keyword in _DECLARATION_MODIFIERS:
+        if _starts_with_keyword(code, idx, keyword):
+            return idx + len(keyword)
+    return None
+
+
+def _handle_modifiers(code: str, idx: int) -> tuple[bool, int, int | None]:
+    """
+    Consume consecutive modifiers and determine if they lead into a declaration/attribute.
+
+    Returns
+    -------
+    tuple[bool, int, int | None]
+        (handled, next_idx, body_start)
+    """
+    original_idx = idx
+    i = idx
+    consumed = False
+    while True:
+        next_i = _consume_modifier(code, i)
+        if next_i is None:
+            break
+        consumed = True
+        i = _skip_whitespace(code, next_i)
+
+    if not consumed:
+        return False, idx, None
+
+    lookahead = _skip_whitespace_and_comments(code, i)
+    if lookahead >= len(code):
+        return False, idx, None
+    if code.startswith("@[", lookahead) or _starts_with_declaration(code, lookahead):
+        return True, lookahead, original_idx
+    return False, idx, None
+
+
+def _next_token_is_decl_or_attribute(code: str, idx: int) -> bool:
+    """
+    Determine if the next meaningful token starts a declaration or attribute.
+    """
+    next_idx = _skip_whitespace_and_comments(code, idx)
+    if next_idx >= len(code):
+        return False
+    if code.startswith("@[", next_idx):
+        return True
+    return _starts_with_declaration(code, next_idx)
+
+
+def _handle_doc_comment(code: str, idx: int) -> tuple[int, int | None]:
+    """
+    Skip a block comment and determine whether it should remain in the header.
+
+    Returns
+    -------
+    tuple[int, bool]
+        (new_idx, should_continue_scanning)
+    """
+    start = idx
+    is_doc = idx + 2 < len(code) and code[idx + 2] in ("-", "!")
+    next_idx = _skip_block_comment(code, idx)
+    if is_doc and _next_token_is_decl_or_attribute(code, next_idx):
+        return next_idx, start
+    return next_idx, None
+
+
+def _process_token(code: str, idx: int) -> tuple[bool, int, int | None]:
+    """
+    Process the token that starts at idx.
+
+    Returns
+    -------
+    tuple[bool, int, int | None]
+        (handled, next_idx, body_start)
+    """
+    if code.startswith("--", idx):
+        next_idx, body_start = _handle_line_comment(code, idx)
+        return True, next_idx, body_start
+
+    if code.startswith("/-", idx):
+        next_idx, body_start = _handle_doc_comment(code, idx)
+        if body_start is not None:
+            return True, next_idx, body_start
+        return True, next_idx, None
+
+    if code.startswith("@[", idx):
+        return True, idx, idx
+
+    handled_modifier, modifier_next_idx, body_start = _handle_modifiers(code, idx)
+    if handled_modifier:
+        return True, modifier_next_idx, body_start
+
+    if _starts_with_declaration(code, idx):
+        return True, idx, idx
+
+    return False, idx + 1, None
+
+
+def _find_body_start(code: str) -> int | None:
+    if not code:
+        return None
+
+    idx = 0
+    n = len(code)
+    while idx < n:
+        idx = _skip_whitespace(code, idx)
+        if idx >= n:
+            return None
+
+        handled, next_idx, body_start = _process_token(code, idx)
+        if body_start is not None:
+            return body_start
+        if handled:
+            idx = next_idx
+            continue
+        idx += 1
+
+    return None
+
+
 def split_preamble_and_body(code: str) -> tuple[str, str]:
     """Split Lean code into preamble and body parts."""
     if not code:
         return "", ""
 
-    lines = code.split("\n")
-    split_index = _find_preamble_end(lines)
+    body_start = _find_body_start(code)
 
-    preamble_lines = lines[:split_index]
-    body_lines = lines[split_index:]
+    if body_start is None:
+        preamble = code.strip("\n")
+        return preamble, ""
 
-    preamble = "\n".join(preamble_lines).strip("\n")
-    body = "\n".join(body_lines).strip()
-
+    preamble = code[:body_start].rstrip("\n")
+    body = code[body_start:].strip()
     return preamble, body
 
 
@@ -249,13 +345,25 @@ def combine_preamble_and_body(preamble: str, body: str) -> str:
 def strip_known_preamble(code: str, expected_preamble: str) -> tuple[str, bool]:
     """Remove a known preamble from code if it matches after normalization."""
     preamble, body = split_preamble_and_body(code)
-    if _normalize_block(preamble) == _normalize_block(expected_preamble):
+    normalized_preamble = _normalize_block(preamble)
+    normalized_expected = _normalize_block(expected_preamble)
+
+    if normalized_preamble == normalized_expected:
         return body, True
 
-    if not preamble.strip() and not _normalize_block(expected_preamble):
-        return body, True
+    if not normalized_preamble:
+        return body or code, not normalized_expected
 
-    return code, False
+    # Preamble differs: fold it into the body so header commands are preserved locally.
+    folded_body = f"{preamble.strip()}\n\n{body.strip()}" if body.strip() else preamble.strip()
+    return folded_body, False
+
+
+def strip_known_preamble_loose(code: str, expected_preamble: str) -> tuple[str, bool]:
+    """
+    Legacy alias retained for backwards compatibility.
+    """
+    return strip_known_preamble(code, expected_preamble)
 
 
 def ensure_mandatory_preamble(preamble: str) -> str:

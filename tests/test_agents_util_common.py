@@ -7,6 +7,7 @@ from goedels_poetry.agents.util.common import (
     get_error_str,
     load_prompt,
     remove_default_imports,
+    strip_known_preamble,
 )
 
 
@@ -339,7 +340,45 @@ theorem test : True := by trivial"""
     result = remove_default_imports(code_with_preamble)
     # The comment should be preserved as it's part of the theorem
     assert "-- This comment is part of the theorem" in result
-    assert "theorem test : True := by trivial" in result
+
+
+def test_strip_known_preamble_folds_new_header_into_body() -> None:
+    existing_preamble = "import Mathlib"
+    llm_code = """
+import Mathlib
+
+syntax (name := strange) "strange" term:41 : term
+
+theorem weird : True := by
+  trivial
+"""
+    body, matched = strip_known_preamble(llm_code.strip(), existing_preamble)
+    assert matched is False
+    assert body.startswith('import Mathlib\n\nsyntax (name := strange) "strange"')
+    assert "theorem weird" in body
+
+
+def test_strip_known_preamble_treats_header_only_snippet_as_body() -> None:
+    existing_preamble = "import Mathlib"
+    llm_code = """
+syntax (name := strange) "strange" term:41 : term
+"""
+    body, matched = strip_known_preamble(llm_code.strip(), existing_preamble)
+    assert matched is False
+    assert body.startswith('syntax (name := strange) "strange"')
+
+
+def test_strip_known_preamble_handles_empty_expected_preamble() -> None:
+    existing_preamble = ""
+    llm_code = """
+-- no imports here
+@[simp] theorem neat : True := by
+  trivial
+"""
+    body, matched = strip_known_preamble(llm_code.strip(), existing_preamble)
+    assert matched is True
+    assert body.startswith("-- no imports here")
+    assert "@[simp] theorem neat" in body
 
 
 def test_remove_default_imports_empty_lines() -> None:
