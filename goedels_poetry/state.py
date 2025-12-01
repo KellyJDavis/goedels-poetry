@@ -659,7 +659,7 @@ class GoedelsPoetryStateManager:
         proofs_to_correct = []
 
         for up in unsuccessful_proofs:
-            if up["self_correction_attempts"] >= PROVER_AGENT_MAX_SELF_CORRECTION_ATTEMPTS:
+            if up["self_correction_attempts"] > PROVER_AGENT_MAX_SELF_CORRECTION_ATTEMPTS:
                 up["pass_attempts"] += 1
                 if up["pass_attempts"] < PROVER_AGENT_MAX_PASS:
                     # Restart self-correction loop: reset state, requeue for correction
@@ -936,12 +936,12 @@ class GoedelsPoetryStateManager:
         sketches_too_difficult = [
             ivs
             for ivs in invalid_sketches
-            if (ivs["self_correction_attempts"] >= DECOMPOSER_AGENT_MAX_SELF_CORRECTION_ATTEMPTS)
+            if (ivs["self_correction_attempts"] > DECOMPOSER_AGENT_MAX_SELF_CORRECTION_ATTEMPTS)
         ]
         sketches_to_correct = [
             ivs
             for ivs in invalid_sketches
-            if (ivs["self_correction_attempts"] < DECOMPOSER_AGENT_MAX_SELF_CORRECTION_ATTEMPTS)
+            if (ivs["self_correction_attempts"] <= DECOMPOSER_AGENT_MAX_SELF_CORRECTION_ATTEMPTS)
         ]
 
         # Addd sketches to correct to the correction queue
