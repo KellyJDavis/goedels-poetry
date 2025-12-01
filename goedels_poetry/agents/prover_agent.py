@@ -15,7 +15,7 @@ from goedels_poetry.agents.util.common import (
     load_prompt,
     strip_known_preamble,
 )
-from goedels_poetry.agents.util.debug import log_llm_response
+from goedels_poetry.agents.util.debug import log_llm_prompt, log_llm_response
 
 
 class ProverAgentFactory:
@@ -113,6 +113,9 @@ def _prover(llm: BaseChatModel, state: FormalTheoremProofState) -> FormalTheorem
         # Combine the stored preamble with the formal theorem for the prompt
         formal_statement_with_imports = combine_preamble_and_body(state["preamble"], state["formal_theorem"])
         prompt = load_prompt("goedel-prover-v2-initial", formal_statement=formal_statement_with_imports)
+
+        # Log debug prompt
+        log_llm_prompt("PROVER_AGENT", prompt, "goedel-prover-v2-initial")
 
         # Put the prompt in the final message
         state["proof_history"] += [HumanMessage(content=prompt)]

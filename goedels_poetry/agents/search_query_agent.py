@@ -9,7 +9,7 @@ from langgraph.types import Send
 
 from goedels_poetry.agents.state import DecomposedFormalTheoremState, DecomposedFormalTheoremStates
 from goedels_poetry.agents.util.common import LLMParsingError, combine_preamble_and_body, load_prompt
-from goedels_poetry.agents.util.debug import log_llm_response
+from goedels_poetry.agents.util.debug import log_llm_prompt, log_llm_response
 
 
 class SearchQueryAgentFactory:
@@ -145,8 +145,12 @@ def _search_query_generator(llm: BaseChatModel, state: DecomposedFormalTheoremSt
     if is_backtracking:
         # Use backtrack prompt - the full history is already in decomposition_history
         prompt = load_prompt("search-query-backtrack", formal_theorem=formal_theorem_with_imports)
+        # Log debug prompt
+        log_llm_prompt("SEARCH_QUERY_AGENT", prompt, "search-query-backtrack")
     else:
         prompt = load_prompt("search-query-initial", formal_theorem=formal_theorem_with_imports)
+        # Log debug prompt
+        log_llm_prompt("SEARCH_QUERY_AGENT", prompt, "search-query-initial")
 
     # Add the prompt to decomposition_history
     state["decomposition_history"] += [HumanMessage(content=prompt)]

@@ -5,6 +5,7 @@ from langgraph.types import Send
 
 from goedels_poetry.agents.state import DecomposedFormalTheoremState, DecomposedFormalTheoremStates
 from goedels_poetry.agents.util.common import _format_theorem_hints_section, load_prompt
+from goedels_poetry.agents.util.debug import log_llm_prompt
 
 
 class SketchBacktrackAgentFactory:
@@ -92,6 +93,9 @@ def _backtrack(state: DecomposedFormalTheoremState) -> DecomposedFormalTheoremSt
         prev_round_num=str(state["self_correction_attempts"]),
         theorem_hints_section=theorem_hints_section,
     )
+
+    # Log debug prompt
+    log_llm_prompt("SKETCH_BACKTRACK_AGENT", prompt, "decomposer-backtrack")
 
     # Add backtrack request to the state's decomposition_history
     state["decomposition_history"] += [HumanMessage(content=prompt)]

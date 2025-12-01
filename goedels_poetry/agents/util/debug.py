@@ -1,4 +1,4 @@
-"""Debug utilities for logging LLM and Kimina server responses."""
+"""Debug utilities for logging LLM prompts, responses, and Kimina server responses."""
 
 from __future__ import annotations
 
@@ -26,6 +26,39 @@ def is_debug_enabled() -> bool:
         True if debug mode is enabled, False otherwise.
     """
     return _DEBUG_ENABLED
+
+
+def log_llm_prompt(agent_name: str, prompt: str, prompt_name: str | None = None) -> None:
+    """
+    Log an LLM prompt if debug mode is enabled.
+
+    Parameters
+    ----------
+    agent_name : str
+        The name of the agent (e.g., "FORMALIZER_AGENT", "PROVER_AGENT")
+    prompt : str
+        The prompt content to be sent to the LLM
+    prompt_name : str, optional
+        The name of the prompt template (e.g., "goedel-formalizer-v2"), by default None
+    """
+    if not _DEBUG_ENABLED:
+        return
+
+    title_parts = [f"[bold yellow]{agent_name}[/bold yellow]"]
+    if prompt_name:
+        title_parts.append(f"prompt: {prompt_name}")
+    else:
+        title_parts.append("prompt")
+    title = " - ".join(title_parts)
+
+    # Try to detect if prompt contains Lean code
+    if "```lean" in prompt or "theorem" in prompt or "lemma" in prompt:
+        # Display as Lean syntax
+        syntax = Syntax(prompt, "lean", theme="monokai", line_numbers=False)
+        _debug_console.print(Panel(syntax, title=title, border_style="yellow"))
+    else:
+        # Display as regular text
+        _debug_console.print(Panel(prompt, title=title, border_style="yellow"))
 
 
 def log_llm_response(agent_name: str, response: str, response_type: str = "response") -> None:

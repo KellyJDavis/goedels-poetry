@@ -16,7 +16,7 @@ from goedels_poetry.agents.util.common import (
     load_prompt,
     strip_known_preamble,
 )
-from goedels_poetry.agents.util.debug import log_llm_response
+from goedels_poetry.agents.util.debug import log_llm_prompt, log_llm_response
 
 
 class ProofSketcherAgentFactory:
@@ -120,6 +120,9 @@ def _proof_sketcher(llm: BaseChatModel, state: DecomposedFormalTheoremState) -> 
             formal_theorem=formal_theorem_with_imports,
             theorem_hints_section=theorem_hints_section,
         )
+
+        # Log debug prompt
+        log_llm_prompt("PROOF_SKETCHER_AGENT", prompt, "decomposer-initial")
 
         # Put the prompt in the final message
         state["decomposition_history"] += [HumanMessage(content=prompt)]
