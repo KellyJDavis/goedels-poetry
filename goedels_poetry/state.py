@@ -659,6 +659,9 @@ class GoedelsPoetryStateManager:
         proofs_to_correct = []
 
         for up in unsuccessful_proofs:
+            # Note: We use >= because self_correction_attempts was incremented above (line 653)
+            # before this check. When attempts == max, we've exhausted the allowed attempts
+            # (e.g., with max=2: 0->1 allows correction 1, 1->2 allows correction 2, 2->3 exhausts).
             if up["self_correction_attempts"] >= PROVER_AGENT_MAX_SELF_CORRECTION_ATTEMPTS:
                 up["pass_attempts"] += 1
                 if up["pass_attempts"] < PROVER_AGENT_MAX_PASS:
@@ -933,6 +936,9 @@ class GoedelsPoetryStateManager:
         invalid_sketches = [vs for vs in validated_sketches_outputs if (not vs["syntactic"])]
 
         # Partition invalid sketches into those too difficult to decompose and those to correct
+        # Note: We use >= because self_correction_attempts was incremented above (line 930)
+        # before this check. When attempts == max, we've exhausted the allowed attempts
+        # (e.g., with max=6: after 6 correction attempts, counter reaches 6 and we stop).
         sketches_too_difficult = [
             ivs
             for ivs in invalid_sketches
