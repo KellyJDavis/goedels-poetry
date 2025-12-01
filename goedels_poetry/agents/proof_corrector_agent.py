@@ -5,6 +5,7 @@ from langgraph.types import Send
 
 from goedels_poetry.agents.state import FormalTheoremProofState, FormalTheoremProofStates
 from goedels_poetry.agents.util.common import load_prompt
+from goedels_poetry.agents.util.debug import log_llm_prompt
 
 
 class ProofCorrectorAgentFactory:
@@ -90,6 +91,9 @@ def _corrector(state: FormalTheoremProofState) -> FormalTheoremProofStates:
         prev_round_num=str(state["self_correction_attempts"] - 1),
         error_message_for_prev_round=str(state["errors"]),
     )
+
+    # Log debug prompt
+    log_llm_prompt("PROOF_CORRECTOR_AGENT", prompt, "goedel-prover-v2-subsequent")
 
     # Add correction request to the state's proof_history
     state["proof_history"] += [HumanMessage(content=prompt)]
