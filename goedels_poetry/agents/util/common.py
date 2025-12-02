@@ -722,10 +722,11 @@ def _format_single_theorem(idx: int, result: dict[str, Any]) -> str:
     statement_text = result.get("statement_text", "")
 
     return (
-        f"{idx}. {lean_name}\n\n"
-        f"Name of the Theorem: {lean_name}\n\n"
-        f"Informal Description of the Theorem: {informal_description}\n\n"
-        f"Formal Statement of the Theorem: {statement_text}\n\n"
+        f"{idx}. {lean_name}\n"
+        f"Name of the Theorem: {lean_name}\n"
+        f"Informal Description of the Theorem: {informal_description}\n"
+        f"Formal Statement of the Theorem:\n"
+        f"```lean4\n{statement_text}\n```\n\n"
     )
 
 
