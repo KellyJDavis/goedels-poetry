@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.0.10] - 2025-12-02
+
 ### Added
 - Vector database querying phase: introduces a new phase that queries the Lean Explore vector database to retrieve relevant theorems and lemmas after search query generation and before proof sketching
 - VectorDBAgent with factory pattern matching existing agent patterns, using asyncio.run() to wrap async client.search() calls
@@ -22,11 +24,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Template-based backtrack detection that replaces brittle keyword matching with exact prompt template matching
 - SEARCH_QUERY_AGENT_LLM configuration section in config.ini
 - Comprehensive test coverage (19 new tests) for search query generation functionality
+- Theorem hints feature: proof sketcher and backtrack agents now display relevant theorems and lemmas from vector database results to guide proof decomposition
+- Prompt logging for LLM agents: added debug logging via `log_llm_prompt()` and `log_llm_response()` functions that output formatted prompts and responses when `GOEDELS_POETRY_DEBUG` environment variable is enabled
+- Debug logging for vector database responses when `GOEDELS_POETRY_DEBUG` is enabled
+- Expanded proof composition test suite with nested decomposition scenarios
 
 ### Changed
 - Queue flow updated: decomposition_search_queue → decomposition_query_queue → decomposition_sketch_queue (initial flow)
 - Backtracked states now route through search query generation queue to allow intelligent query regeneration based on failure context
 - Backtracking now properly removes nodes from decomposition_query_queue when backtracking occurs
+- LLM prompt handling: headers are now folded into bodies during preamble splitting, improving consistency and extending splitter test coverage
+
+### Fixed
+- Fixed off-by-one errors in self-correction attempt limits that could cause agents to attempt one more correction than configured
 
 ## [0.0.9] - 2025-11-23
 
@@ -155,6 +165,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Typer for CLI
 - Rich for beautiful terminal output
 
+[0.0.10]: https://github.com/KellyJDavis/goedels-poetry/releases/tag/v0.0.10
 [0.0.9]: https://github.com/KellyJDavis/goedels-poetry/releases/tag/v0.0.9
 [0.0.8]: https://github.com/KellyJDavis/goedels-poetry/releases/tag/v0.0.8
 [0.0.6]: https://github.com/KellyJDavis/goedels-poetry/releases/tag/v0.0.6
