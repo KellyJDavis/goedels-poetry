@@ -25,13 +25,10 @@ dependencies = [
     "kimina-ast-client>=0.2.2",
     "langchain-core>=0.3.77",
     "langchain-google-genai>=2.1.12",
-    "langchain-ollama>=0.3.10",
     "langchain-openai>=0.3.34",
     "langgraph>=0.6.8",
     "lean-xplore>=0.4.3",
-    "ollama>=0.6.0",
     "rich>=14.1.0",
-    "tqdm>=4.67.1",
     "typer>=0.19.2",
     "typing-extensions>=4.15.0",
 ]
@@ -53,7 +50,6 @@ dev = [
     "mypy>=0.991",
     "pytest-cov>=4.0.0",
     "ruff>=0.11.5",
-    "types-tqdm>=4.67.0.20250809",
     "mkdocs>=1.4.2",
     "mkdocs-material>=8.5.10",
     "mkdocstrings[python]>=0.26.1",
@@ -157,6 +153,7 @@ source = ["goedels_poetry"]
 root = ["goedels_poetry"]
 exclude = [
     "\\.venv/.*",
+    "\\.goedels_poetry/.*",
     "test-venv/.*",
     "dist/.*",
     "site/.*",

@@ -408,9 +408,24 @@ def test_is_backtracking_no_backtrack() -> None:
 
 def test_search_query_agent_factory() -> None:
     """Test that SearchQueryAgentFactory creates an agent."""
-    from langchain_ollama import ChatOllama
+    from langchain_core.language_models.chat_models import BaseChatModel
+    from langchain_core.messages import AIMessage, BaseMessage
+    from langchain_core.outputs import ChatResult
 
-    llm = ChatOllama(model="test-model", validate_model_on_init=False)
+    class DummyChatModel(BaseChatModel):
+        """Minimal chat model for testing."""
+
+        def _generate(self, messages: list[BaseMessage], **kwargs) -> ChatResult:  # type: ignore[override]
+            return ChatResult(generations=[[AIMessage(content="ok", response_metadata={})]])
+
+        @property
+        def _llm_type(self) -> str:
+            return "dummy"
+
+        def get_num_tokens_from_messages(self, messages: list[BaseMessage]) -> int:  # pragma: no cover
+            return 0
+
+    llm = DummyChatModel()
     agent = SearchQueryAgentFactory.create_agent(llm)
 
     assert agent is not None

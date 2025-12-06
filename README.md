@@ -564,20 +564,31 @@ Configuration is stored in `goedels_poetry/data/config.ini`:
 
 ```ini
 [FORMALIZER_AGENT_LLM]
-model = kdavis/goedel-formalizer-v2:32b
-num_ctx = 40960
-max_retries = 10
+model = Goedel-LM/Goedel-Formalizer-V2-32B
+url = http://localhost:8002/v1
+max_retries = 5
+timeout_seconds = 10800
 
 [PROVER_AGENT_LLM]
-model = kdavis/Goedel-Prover-V2:32b
-num_ctx = 40960
+model = Goedel-LM/Goedel-Prover-V2-32B
+url = http://localhost:8003/v1
+max_retries = 5
+timeout_seconds = 10800
 max_self_correction_attempts = 2
 max_depth = 20
 max_pass = 32
 
 [SEMANTICS_AGENT_LLM]
-model = qwen3:30b
-num_ctx = 262144
+model = Qwen/Qwen3-30B-A3B-Instruct-2507
+url = http://localhost:8004/v1
+max_retries = 5
+timeout_seconds = 10800
+
+[SEARCH_QUERY_AGENT_LLM]
+model = Qwen/Qwen3-30B-A3B-Instruct-2507
+url = http://localhost:8004/v1
+max_retries = 5
+timeout_seconds = 10800
 
 [DECOMPOSER_AGENT_LLM]
 # Provider selection (openai, google, auto)
@@ -601,25 +612,28 @@ max_retries = 5
 [LEAN_EXPLORE_SERVER]
 url = http://localhost:8001/api/v1
 package_filters = Mathlib,Batteries,Std,Init,Lean
+
 ```
 
 #### Configuration Parameters Explained
 
 **Formalizer Agent**:
-- `model`: The LLM used to convert informal theorems to Lean 4
-- `num_ctx`: Context window size (tokens)
+- `model`: Hugging Face model served by vLLM
 - `max_retries`: Maximum attempts to formalize a theorem
+- `timeout_seconds`: Request timeout
 
 **Prover Agent**:
-- `model`: The LLM used to generate proofs
-- `num_ctx`: Context window size (tokens)
+- `model`: Hugging Face model served by vLLM
+- `max_retries`: Maximum attempts for a request
+- `timeout_seconds`: Request timeout
 - `max_self_correction_attempts`: Maximum proof generation self-correction attempts
 - `max_depth`: Maximum recursion depth for proof decomposition
 - `max_pass`: Maximum number of proof attempts before triggering decomposition
 
-**Semantics Agent**:
-- `model`: The LLM used to validate semantic equivalence
-- `num_ctx`: Context window size (tokens)
+**Semantics/Search Agents**:
+- `model`: Hugging Face model served by vLLM
+- `max_retries`: Maximum attempts for a request
+- `timeout_seconds`: Request timeout
 
 **Decomposer Agent**:
 - `provider`: Provider selection (`openai`, `google`, or `auto`)
@@ -660,8 +674,9 @@ export LEAN_EXPLORE_SERVER__URL="http://localhost:8002/api/v1"
 # Change package filters for vector database searches
 export LEAN_EXPLORE_SERVER__PACKAGE_FILTERS="Mathlib,Batteries"
 
-# Use a smaller context window for faster testing
-export PROVER_AGENT_LLM__NUM_CTX="8192"
+# Adjust prover retries/timeouts for testing
+export PROVER_AGENT_LLM__MAX_RETRIES="2"
+export PROVER_AGENT_LLM__TIMEOUT_SECONDS="120"
 
 # Run with custom configuration
 goedels_poetry --formal-theorem "import Mathlib\n\nopen BigOperators\n\ntheorem theorem_54_43 : 1 + 1 = 2 := by sorry"
@@ -669,7 +684,7 @@ goedels_poetry --formal-theorem "import Mathlib\n\nopen BigOperators\n\ntheorem 
 
 **Multiple overrides**:
 ```bash
-export PROVER_AGENT_LLM__MODEL="kdavis/Goedel-Prover-V2:70b"
+export PROVER_AGENT_LLM__MODEL="Goedel-LM/Goedel-Prover-V2-32B"
 export PROVER_AGENT_LLM__MAX_SELF_CORRECTION_ATTEMPTS="3"
 export PROVER_AGENT_LLM__MAX_PASS="64"
 export DECOMPOSER_AGENT_LLM__OPENAI_MODEL="gpt-5-pro"

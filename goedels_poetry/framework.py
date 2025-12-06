@@ -27,9 +27,9 @@ from goedels_poetry.config.lean_explore_server import LEAN_EXPLORE_SERVER
 from goedels_poetry.config.llm import (
     DECOMPOSER_AGENT_LLM,
     FORMALIZER_AGENT_MAX_RETRIES,
-    PROVER_AGENT_LLM,
     PROVER_AGENT_MAX_SELF_CORRECTION_ATTEMPTS,
     get_formalizer_agent_llm,
+    get_prover_agent_llm,
     get_search_query_agent_llm,
     get_semantics_agent_llm,
 )
@@ -65,7 +65,7 @@ class GoedelsPoetryConfig:
         self,
         formalizer_agent_llm: Optional[BaseChatModel] = None,
         formalizer_agent_max_retries: int = FORMALIZER_AGENT_MAX_RETRIES,
-        prover_agent_llm: BaseChatModel = PROVER_AGENT_LLM,
+        prover_agent_llm: Optional[BaseChatModel] = None,
         prover_agent_max_retries: int = PROVER_AGENT_MAX_SELF_CORRECTION_ATTEMPTS,
         semantics_agent_llm: Optional[BaseChatModel] = None,
         decomposer_agent_llm: BaseChatModel = DECOMPOSER_AGENT_LLM,
@@ -74,7 +74,7 @@ class GoedelsPoetryConfig:
     ):
         self._formalizer_agent_llm = formalizer_agent_llm
         self.formalizer_agent_max_retries = formalizer_agent_max_retries
-        self.prover_agent_llm = prover_agent_llm
+        self._prover_agent_llm = prover_agent_llm
         self.prover_agent_max_retries = prover_agent_max_retries
         self._semantics_agent_llm = semantics_agent_llm
         self.decomposer_agent_llm = decomposer_agent_llm
@@ -94,6 +94,13 @@ class GoedelsPoetryConfig:
         if self._semantics_agent_llm is None:
             self._semantics_agent_llm = get_semantics_agent_llm()
         return self._semantics_agent_llm
+
+    @property
+    def prover_agent_llm(self) -> BaseChatModel:
+        """Lazy-load the prover LLM on first access."""
+        if self._prover_agent_llm is None:
+            self._prover_agent_llm = get_prover_agent_llm()
+        return self._prover_agent_llm
 
 
 class GoedelsPoetryFramework:
