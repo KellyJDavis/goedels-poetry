@@ -6,11 +6,11 @@ Implemented lazy loading for `FORMALIZER_AGENT_LLM` and `SEMANTICS_AGENT_LLM` to
 
 ## Problem
 
-Previously, both the formalizer and semantics LLMs were eagerly loaded at module import time in `goedels_poetry/config/llm.py`. This meant:
+Previously, both the formalizer and semantics LLM clients were created at module import time in `goedels_poetry/config/llm.py`. This meant:
 
-1. **Every** invocation of the CLI would download/initialize these large Ollama models (~32B and ~30B parameters)
+1. **Every** invocation of the CLI would open connections to remote LLM servers, even when not needed
 2. **Formal theorem processing** would wait unnecessarily since these models are only used for informal theorems
-3. Startup time included ~21 seconds of unnecessary model initialization
+3. Startup paid the cost of constructing/validating clients that might never be used
 
 ## Solution
 
@@ -18,7 +18,7 @@ Previously, both the formalizer and semantics LLMs were eagerly loaded at module
 
 #### 1. `goedels_poetry/config/llm.py`
 - Created lazy-loading functions: `get_formalizer_agent_llm()` and `get_semantics_agent_llm()`
-- These functions only download/create LLMs on first access
+- These functions only create LLM clients on first access (no work at import)
 - Results are cached in module-level variables for reuse
 - Removed eager initialization of these LLMs at import time
 
@@ -26,7 +26,7 @@ Previously, both the formalizer and semantics LLMs were eagerly loaded at module
 - Updated `GoedelsPoetryConfig` to accept optional LLM parameters (default `None`)
 - Added `@property` decorators for `formalizer_agent_llm` and `semantics_agent_llm`
 - Properties call the lazy-loading functions on first access
-- Prover and decomposer LLMs remain eagerly loaded (needed for all workflows)
+- Prover and decomposer LLMs remain eagerly available; formalizer/semantics are lazy
 
 #### 3. `goedels_poetry/state.py`
 - Added comment clarifying why these LLMs are not imported

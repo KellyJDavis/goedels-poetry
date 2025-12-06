@@ -82,7 +82,7 @@ class ConfigParserWrapper:
         section : str
             The configuration section (e.g., "PROVER_AGENT_LLM")
         option : str
-            The configuration option (e.g., "num_ctx")
+            The configuration option (e.g., "max_retries")
         fallback : int, optional
             Default value if not found in env or config file
 

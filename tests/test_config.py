@@ -9,7 +9,7 @@ def test_config_get_from_ini():
 
     # These values should come from config.ini
     model = config.get(section="PROVER_AGENT_LLM", option="model")
-    assert model == "kdavis/Goedel-Prover-V2:32b"
+    assert model == "Goedel-LM/Goedel-Prover-V2-32B"
 
     url = config.get(section="KIMINA_LEAN_SERVER", option="url")
     assert url == "http://0.0.0.0:8000"
@@ -20,8 +20,8 @@ def test_config_getint_from_ini():
     config = ConfigParserWrapper()
 
     # These values should come from config.ini
-    num_ctx = config.getint(section="PROVER_AGENT_LLM", option="num_ctx")
-    assert num_ctx == 40960
+    max_retries = config.getint(section="PROVER_AGENT_LLM", option="max_retries")
+    assert max_retries == 5
 
     max_retries = config.getint(section="KIMINA_LEAN_SERVER", option="max_retries")
     assert max_retries == 5
@@ -44,11 +44,11 @@ def test_config_env_override_int(monkeypatch):
     config = ConfigParserWrapper()
 
     # Set environment variable
-    monkeypatch.setenv("PROVER_AGENT_LLM__NUM_CTX", "8192")
+    monkeypatch.setenv("PROVER_AGENT_LLM__MAX_RETRIES", "7")
 
     # Value should come from environment variable
-    num_ctx = config.getint(section="PROVER_AGENT_LLM", option="num_ctx")
-    assert num_ctx == 8192
+    max_retries = config.getint(section="PROVER_AGENT_LLM", option="max_retries")
+    assert max_retries == 7
 
 
 def test_config_env_override_uppercase_required(monkeypatch):
@@ -93,10 +93,10 @@ def test_config_multiple_env_overrides(monkeypatch):
 
     # Set multiple environment variables
     monkeypatch.setenv("PROVER_AGENT_LLM__MODEL", "override-model")
-    monkeypatch.setenv("PROVER_AGENT_LLM__NUM_CTX", "16384")
+    monkeypatch.setenv("PROVER_AGENT_LLM__MAX_RETRIES", "9")
     monkeypatch.setenv("KIMINA_LEAN_SERVER__URL", "http://custom:8888")
 
     # All should be overridden
     assert config.get(section="PROVER_AGENT_LLM", option="model") == "override-model"
-    assert config.getint(section="PROVER_AGENT_LLM", option="num_ctx") == 16384
+    assert config.getint(section="PROVER_AGENT_LLM", option="max_retries") == 9
     assert config.get(section="KIMINA_LEAN_SERVER", option="url") == "http://custom:8888"

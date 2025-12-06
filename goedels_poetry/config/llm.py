@@ -1,93 +1,43 @@
+import os
 import warnings
 
 from langchain_google_genai import ChatGoogleGenerativeAI
-from langchain_ollama import ChatOllama
 from langchain_openai import ChatOpenAI
-from ollama import ResponseError, chat, pull
-from rich.console import Console
-from tqdm import tqdm
 
 from goedels_poetry.config.config import parsed_config
 
-# Create Console for outputs
-console = Console()
+
+class VLLMClientError(Exception):
+    """Raised when vLLM client initialization fails."""
+
+    def __init__(self, section: str, cause: Exception) -> None:
+        super().__init__(f"Failed to initialize vLLM client for section [{section}]")
+        self.section = section
+        self.__cause__ = cause
 
 
-def _download_llm(llm: str) -> None:
-    """
-    Method which ensures the specified LLM is downloaded. This code if based off of that provided
-    # by Ollama https://github.com/ollama/ollama-python/blob/main/examples/pull.py
-
-    Parameters
-    ----------
-    llm: str
-        The LLM to ensure download of
-    """
-    # Inform user of progress
-    console.print(f"Starting download of {llm}")
-
-    # Track progress for each layer
-    bars: dict = {}
-    current_digest: str = ""
-    for progress in pull(llm, stream=True):
-        digest = progress.get("digest", "")
-        if digest != current_digest and current_digest in bars:
-            bars[current_digest].close()
-
-        if not digest:
-            console.print(progress.get("status"))
-            continue
-
-        if digest not in bars and (total := progress.get("total")):
-            bars[digest] = tqdm(total=total, desc=f"pulling {digest[7:19]}", unit="B", unit_scale=True)
-
-        if completed := progress.get("completed"):
-            bars[digest].update(completed - bars[digest].n)
-
-        current_digest = digest
+def _get_vllm_api_key() -> str | None:
+    """Return VLLM_API_KEY if set and non-empty."""
+    key = os.getenv("VLLM_API_KEY", "").strip()
+    return key or None
 
 
-def _download_llms(llms: list[str]) -> None:
-    """
-    Method which ensures the specified LLMs are downloaded.
-
-    Parameters
-    ----------
-    llms: list[str]
-        The LLMs to download
-    """
-    # Download the LLMs one at a time
-    for llm in llms:
-        try:
-            # Check to see if it's already downloaded
-            chat(llm)
-        except ResponseError as e:
-            # If it isn't downloaded, download it
-            if e.status_code == 404:
-                console.print(f"Starting download of {llm}")
-                _download_llm(llm)
-        except ConnectionError:
-            # Ollama is not running (e.g., in CI/test environments)
-            # Warn the user but allow import to succeed for testing
-            warnings.warn(
-                "Could not connect to Ollama. LLM functionality will not work until "
-                "Ollama is running. Download and start Ollama from https://ollama.com/download",
-                UserWarning,
-                stacklevel=2,
-            )
-            break  # Only warn once, not for each LLM
-
-
-# Create LLMS (with error handling for environments without Ollama)
-def _create_llm_safe(**kwargs):  # type: ignore[no-untyped-def]
-    """Create a ChatOllama instance, catching connection errors in test/CI environments."""
+def _create_vllm_client(*, model: str, base_url: str, max_tokens: int, section: str) -> ChatOpenAI:
+    """Create a ChatOpenAI client pointing to a vLLM server."""
+    api_key = _get_vllm_api_key()
+    kwargs: dict = {
+        "model": model,
+        "base_url": base_url,
+        "max_tokens": max_tokens,
+        "max_retries": parsed_config.getint(section=section, option="max_retries", fallback=5),
+        "timeout": parsed_config.getint(section=section, option="timeout_seconds", fallback=10800),
+    }
+    if api_key:
+        kwargs["api_key"] = api_key
     try:
-        return ChatOllama(**kwargs)
-    except ConnectionError:
-        # In test/CI environments without Ollama, create with validation disabled
-        # Note: A warning was already issued by _download_llms() above
-        kwargs["validate_model_on_init"] = False
-        return ChatOllama(**kwargs)
+        return ChatOpenAI(**kwargs)
+    except Exception as exc:
+        raise VLLMClientError(section, exc) from exc
 
 
 def _create_decomposer_llm_safe(**kwargs):  # type: ignore[no-untyped-def]
@@ -177,121 +127,77 @@ def _create_decomposer_llm_safe(**kwargs):  # type: ignore[no-untyped-def]
 # Lazy-loaded LLMs (for informal theorem processing only)
 # ============================================================================
 # These LLMs are only needed when processing informal theorems. By lazy-loading
-# them, we avoid downloading/initializing large Ollama models during startup
-# when processing formal theorems.
+# them, we avoid constructing remote clients during startup when processing
+# formal theorems.
 
 _FORMALIZER_AGENT_LLM = None  # Cache for lazy-loaded formalizer LLM
 _SEMANTICS_AGENT_LLM = None  # Cache for lazy-loaded semantics LLM
 _SEARCH_QUERY_AGENT_LLM = None  # Cache for lazy-loaded search query LLM
+_PROVER_AGENT_LLM = None  # Cache for lazy-loaded prover LLM
+
+
+def _get_server_url(section: str, *, fallback: str) -> str:
+    """Read a server url from config/env with fallback."""
+    return parsed_config.get(section=section, option="url", fallback=fallback)
 
 
 def get_formalizer_agent_llm():  # type: ignore[no-untyped-def]
-    """
-    Lazy-load and return the FORMALIZER_AGENT_LLM.
-
-    Only downloads and creates the LLM on first access, which speeds up
-    startup when processing formal theorems that don't need formalization.
-
-    Returns
-    -------
-    ChatOllama
-        The formalizer agent LLM instance
-    """
+    """Lazy-load and return the FORMALIZER_AGENT_LLM (vLLM via ChatOpenAI)."""
     global _FORMALIZER_AGENT_LLM
     if _FORMALIZER_AGENT_LLM is None:
         model = parsed_config.get(
-            section="FORMALIZER_AGENT_LLM", option="model", fallback="kdavis/goedel-formalizer-v2:32b"
+            section="FORMALIZER_AGENT_LLM", option="model", fallback="Goedel-LM/Goedel-Formalizer-V2-32B"
         )
-        # Download the model if needed
-        _download_llms([model])
-        # Create the LLM instance
-        _FORMALIZER_AGENT_LLM = _create_llm_safe(
-            model=model,
-            validate_model_on_init=True,
-            num_predict=50000,
-            num_ctx=parsed_config.getint(section="FORMALIZER_AGENT_LLM", option="num_ctx", fallback=40960),
+        base_url = _get_server_url(section="FORMALIZER_AGENT_LLM", fallback="http://localhost:8002/v1")
+        _FORMALIZER_AGENT_LLM = _create_vllm_client(
+            model=model, base_url=base_url, max_tokens=50000, section="FORMALIZER_AGENT_LLM"
         )
     return _FORMALIZER_AGENT_LLM
 
 
 def get_semantics_agent_llm():  # type: ignore[no-untyped-def]
-    """
-    Lazy-load and return the SEMANTICS_AGENT_LLM.
-
-    Only downloads and creates the LLM on first access, which speeds up
-    startup when processing formal theorems that don't need semantic checking.
-
-    Returns
-    -------
-    ChatOllama
-        The semantics agent LLM instance
-    """
+    """Lazy-load and return the SEMANTICS_AGENT_LLM (vLLM via ChatOpenAI)."""
     global _SEMANTICS_AGENT_LLM
     if _SEMANTICS_AGENT_LLM is None:
-        model = parsed_config.get(section="SEMANTICS_AGENT_LLM", option="model", fallback="qwen3:30b")
-        # Download the model if needed
-        _download_llms([model])
-        # Create the LLM instance
-        _SEMANTICS_AGENT_LLM = _create_llm_safe(
-            model=model,
-            validate_model_on_init=True,
-            num_predict=50000,
-            num_ctx=parsed_config.getint(section="SEMANTICS_AGENT_LLM", option="num_ctx", fallback=262144),
+        model = parsed_config.get(
+            section="SEMANTICS_AGENT_LLM", option="model", fallback="Qwen/Qwen3-30B-A3B-Instruct-2507"
+        )
+        base_url = _get_server_url(section="SEMANTICS_AGENT_LLM", fallback="http://localhost:8004/v1")
+        _SEMANTICS_AGENT_LLM = _create_vllm_client(
+            model=model, base_url=base_url, max_tokens=50000, section="SEMANTICS_AGENT_LLM"
         )
     return _SEMANTICS_AGENT_LLM
 
 
 def get_search_query_agent_llm():  # type: ignore[no-untyped-def]
-    """
-    Lazy-load and return the SEARCH_QUERY_AGENT_LLM.
-
-    Only downloads and creates the LLM on first access, which speeds up
-    startup when processing theorems that don't need search query generation.
-
-    Returns
-    -------
-    ChatOllama
-        The search query agent LLM instance
-    """
+    """Lazy-load and return the SEARCH_QUERY_AGENT_LLM (vLLM via ChatOpenAI)."""
     global _SEARCH_QUERY_AGENT_LLM
     if _SEARCH_QUERY_AGENT_LLM is None:
-        model = parsed_config.get(section="SEARCH_QUERY_AGENT_LLM", option="model", fallback="qwen3:30b")
-        # Download the model if needed
-        _download_llms([model])
-        # Create the LLM instance
-        _SEARCH_QUERY_AGENT_LLM = _create_llm_safe(
-            model=model,
-            validate_model_on_init=True,
-            num_predict=50000,
-            num_ctx=parsed_config.getint(section="SEARCH_QUERY_AGENT_LLM", option="num_ctx", fallback=262144),
+        model = parsed_config.get(
+            section="SEARCH_QUERY_AGENT_LLM", option="model", fallback="Qwen/Qwen3-30B-A3B-Instruct-2507"
+        )
+        base_url = _get_server_url(section="SEARCH_QUERY_AGENT_LLM", fallback="http://localhost:8004/v1")
+        _SEARCH_QUERY_AGENT_LLM = _create_vllm_client(
+            model=model, base_url=base_url, max_tokens=50000, section="SEARCH_QUERY_AGENT_LLM"
         )
     return _SEARCH_QUERY_AGENT_LLM
 
 
-# ============================================================================
-# Eagerly-loaded LLMs (needed for all theorem processing)
-# ============================================================================
-# These LLMs are used for both formal and informal theorems, so we load them
-# immediately at module import time.
-
-# Download prover model if needed
-_PROVER_MODEL = parsed_config.get(section="PROVER_AGENT_LLM", option="model", fallback="kdavis/Goedel-Prover-V2:32b")
-_download_llms([_PROVER_MODEL])
-
-# Create prover LLM
-PROVER_AGENT_LLM = _create_llm_safe(
-    model=_PROVER_MODEL,
-    validate_model_on_init=True,
-    num_predict=50000,
-    num_ctx=parsed_config.getint(section="PROVER_AGENT_LLM", option="num_ctx", fallback=40960),
-)
+def get_prover_agent_llm():  # type: ignore[no-untyped-def]
+    """Lazy-load and return the PROVER_AGENT_LLM (vLLM via ChatOpenAI)."""
+    global _PROVER_AGENT_LLM
+    if _PROVER_AGENT_LLM is None:
+        model = parsed_config.get(section="PROVER_AGENT_LLM", option="model", fallback="Goedel-LM/Goedel-Prover-V2-32B")
+        base_url = _get_server_url(section="PROVER_AGENT_LLM", fallback="http://localhost:8003/v1")
+        _PROVER_AGENT_LLM = _create_vllm_client(
+            model=model, base_url=base_url, max_tokens=50000, section="PROVER_AGENT_LLM"
+        )
+    return _PROVER_AGENT_LLM
 
 
 # Create decomposer LLM with automatic provider selection
 def _create_decomposer_llm():  # type: ignore[no-untyped-def]
     """Create decomposer LLM with automatic provider selection and appropriate configuration."""
-    import os
-
     openai_key = os.getenv("OPENAI_API_KEY")
     google_key = os.getenv("GOOGLE_API_KEY")
 
@@ -345,4 +251,4 @@ PROVER_AGENT_MAX_PASS = parsed_config.getint(section="PROVER_AGENT_LLM", option=
 DECOMPOSER_AGENT_MAX_SELF_CORRECTION_ATTEMPTS = parsed_config.getint(
     section="DECOMPOSER_AGENT_LLM", option="openai_max_self_correction_attempts", fallback=6
 )
-FORMALIZER_AGENT_MAX_RETRIES = parsed_config.getint(section="FORMALIZER_AGENT_LLM", option="max_retries", fallback=10)
+FORMALIZER_AGENT_MAX_RETRIES = parsed_config.getint(section="FORMALIZER_AGENT_LLM", option="max_retries", fallback=5)

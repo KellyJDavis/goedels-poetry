@@ -10,24 +10,31 @@ The default configuration is stored in `goedels_poetry/data/config.ini`:
 
 ```ini
 [FORMALIZER_AGENT_LLM]
-model = kdavis/goedel-formalizer-v2:32b
-num_ctx = 40960
-max_retries = 10
+model = Goedel-LM/Goedel-Formalizer-V2-32B
+url = http://localhost:8002/v1
+max_retries = 5
+timeout_seconds = 10800
 
 [PROVER_AGENT_LLM]
-model = kdavis/Goedel-Prover-V2:32b
-num_ctx = 40960
+model = Goedel-LM/Goedel-Prover-V2-32B
+url = http://localhost:8003/v1
+max_retries = 5
+timeout_seconds = 10800
 max_self_correction_attempts = 2
 max_depth = 20
 max_pass = 32
 
 [SEMANTICS_AGENT_LLM]
-model = qwen3:30b
-num_ctx = 262144
+model = Qwen/Qwen3-30B-A3B-Instruct-2507
+url = http://localhost:8004/v1
+max_retries = 5
+timeout_seconds = 10800
 
 [SEARCH_QUERY_AGENT_LLM]
-model = qwen3:30b
-num_ctx = 262144
+model = Qwen/Qwen3-30B-A3B-Instruct-2507
+url = http://localhost:8004/v1
+max_retries = 5
+timeout_seconds = 10800
 
 [DECOMPOSER_AGENT_LLM]
 # Provider selection (openai, google, auto)
@@ -115,6 +122,12 @@ Override the prover model:
 export PROVER_AGENT_LLM__MODEL="custom-model:latest"
 ```
 
+Override the prover retries/timeouts:
+```bash
+export PROVER_AGENT_LLM__MAX_RETRIES="2"
+export PROVER_AGENT_LLM__TIMEOUT_SECONDS="120"
+```
+
 Override the Kimina server URL:
 ```bash
 export KIMINA_LEAN_SERVER__URL="http://localhost:9000"
@@ -133,7 +146,7 @@ export LEAN_EXPLORE_SERVER__PACKAGE_FILTERS="Mathlib,Batteries"
 Override multiple values:
 ```bash
 export PROVER_AGENT_LLM__MODEL="custom-model"
-export PROVER_AGENT_LLM__NUM_CTX="8192"
+export PROVER_AGENT_LLM__MAX_RETRIES="9"
 export KIMINA_LEAN_SERVER__URL="http://custom-server:8888"
 export LEAN_EXPLORE_SERVER__URL="http://custom-vector-db:8001/api/v1"
 export LEAN_EXPLORE_SERVER__PACKAGE_FILTERS="Mathlib"
@@ -152,7 +165,7 @@ export LEAN_EXPLORE_SERVER__PACKAGE_FILTERS="Mathlib"
 ```bash
 # Use a smaller model for faster testing
 export PROVER_AGENT_LLM__MODEL="llama2:7b"
-export PROVER_AGENT_LLM__NUM_CTX="4096"
+export PROVER_AGENT_LLM__MAX_RETRIES="2"
 ```
 
 **CI/CD Pipeline:**
@@ -165,7 +178,7 @@ export KIMINA_LEAN_SERVER__MAX_RETRIES="10"
 **Production Deployment:**
 ```bash
 # Use production-grade models
-export PROVER_AGENT_LLM__MODEL="kdavis/Goedel-Prover-V2:70b"
+export PROVER_AGENT_LLM__MODEL="Goedel-LM/Goedel-Prover-V2-32B"
 export PROVER_AGENT_LLM__MAX_SELF_CORRECTION_ATTEMPTS="3"
 export PROVER_AGENT_LLM__MAX_PASS="64"
 export DECOMPOSER_AGENT_LLM__OPENAI_MODEL="gpt-5-pro"
