@@ -108,6 +108,71 @@ uv sync
 uv run goedels_poetry --help
 ```
 
+### Setting Up LLM Models
+
+Gödel's Poetry uses OpenAI-compatible APIs to connect to LLM providers. The system supports both **Ollama** and **vLLM** through their OpenAI-compatible endpoints.
+
+#### Required Models
+
+Gödel's Poetry requires several models to be available on your configured provider:
+
+- **`kdavis/goedel-formalizer-v2:32b`** - Used by the formalizer agent to convert informal theorems to Lean 4
+- **`kdavis/Goedel-Prover-V2:32b`** - Used by the prover agent to generate proofs
+- **`qwen3:30b`** - Used by the semantics and search query agents
+
+#### Using Ollama (Default)
+
+**Prerequisites:**
+- [Ollama](https://ollama.com/download) must be installed and running
+
+**Download the models:**
+```bash
+ollama pull kdavis/goedel-formalizer-v2:32b
+ollama pull kdavis/Goedel-Prover-V2:32b
+ollama pull qwen3:30b
+```
+
+⚠️ **Important**: These models must be downloaded before using Gödel's Poetry. The system will not automatically download them.
+
+**Default Configuration:**
+The default configuration uses Ollama with its OpenAI-compatible endpoint at `http://localhost:11434/v1`. Ollama exposes this endpoint automatically when running.
+
+#### Using vLLM
+
+To use vLLM instead of Ollama, configure the agent sections in `goedels_poetry/data/config.ini` with:
+
+```ini
+[FORMALIZER_AGENT_LLM]
+provider = vllm
+url = http://localhost:8000/v1
+api_key = dummy-key
+model = Goedel-LM/Goedel-Formalizer-V2-32B
+max_tokens = 50000
+
+[PROVER_AGENT_LLM]
+provider = vllm
+url = http://localhost:8000/v1
+api_key = dummy-key
+model = Goedel-LM/Goedel-Prover-V2-32B
+max_tokens = 50000
+
+[SEMANTICS_AGENT_LLM]
+provider = vllm
+url = http://localhost:8000/v1
+api_key = dummy-key
+model = Qwen/Qwen3-30B-A3B-Instruct-2507
+max_tokens = 50000
+
+[SEARCH_QUERY_AGENT_LLM]
+provider = vllm
+url = http://localhost:8000/v1
+api_key = dummy-key
+model = Qwen/Qwen3-30B-A3B-Instruct-2507
+max_tokens = 50000
+```
+
+Ensure your vLLM server is running and accessible at the configured URL. See [CONFIGURATION.md](CONFIGURATION.md) for more details on vLLM-specific parameters.
+
 ### Running the Kimina Lean Server
 
 The Kimina Lean Server is **required** for Gödel's Poetry to verify Lean 4 proofs. It provides high-performance parallel proof checking.
@@ -228,9 +293,7 @@ For more information, see the [Lean Explore documentation](https://kellyjdavis.g
 
 ### Setting Up Your API Keys
 
-Gödel's Poetry supports both OpenAI and Google Generative AI for certain reasoning tasks. You can use either provider:
-
-#### Option 1: OpenAI (Default)
+Gödel's Poetry uses OpenAI for certain reasoning tasks. To use the decomposer agent, you'll need an OpenAI API key:
 
 1. **Get an API key** from [OpenAI's platform](https://platform.openai.com/api-keys)
 
@@ -250,34 +313,6 @@ Gödel's Poetry supports both OpenAI and Google Generative AI for certain reason
    ```powershell
    $env:OPENAI_API_KEY='your-api-key-here'
    ```
-
-#### Option 2: Google Generative AI
-
-1. **Get an API key** from [Google AI Studio](https://makersuite.google.com/app/apikey)
-
-2. **Set the environment variable**:
-
-   **On Linux/macOS**:
-   ```bash
-   export GOOGLE_API_KEY='your-api-key-here'
-   ```
-
-   **On Windows (Command Prompt)**:
-   ```cmd
-   set GOOGLE_API_KEY=your-api-key-here
-   ```
-
-   **On Windows (PowerShell)**:
-   ```powershell
-   $env:GOOGLE_API_KEY='your-api-key-here'
-   ```
-
-#### Provider Selection
-
-The system automatically selects the provider based on available API keys:
-- If both keys are set, **OpenAI takes priority**
-- If only one key is set, that provider is used
-- If no keys are set, the system falls back to OpenAI with a warning
 
 3. **Make it permanent** (optional):
 
@@ -580,19 +615,10 @@ model = qwen3:30b
 num_ctx = 262144
 
 [DECOMPOSER_AGENT_LLM]
-# Provider selection (openai, google, auto)
-provider = auto
-
-# OpenAI-specific settings
-openai_model = gpt-5-2025-08-07
-openai_max_completion_tokens = 50000
-openai_max_remote_retries = 5
-openai_max_self_correction_attempts = 6
-
-# Google-specific settings
-google_model = gemini-2.5-pro
-google_max_output_tokens = 50000
-google_max_self_correction_attempts = 6
+model = gpt-5-2025-08-07
+max_completion_tokens = 50000
+max_remote_retries = 5
+max_self_correction_attempts = 6
 
 [KIMINA_LEAN_SERVER]
 url = http://0.0.0.0:8000
@@ -622,14 +648,10 @@ package_filters = Mathlib,Batteries,Std,Init,Lean
 - `num_ctx`: Context window size (tokens)
 
 **Decomposer Agent**:
-- `provider`: Provider selection (`openai`, `google`, or `auto`)
-- `openai_model`: The OpenAI model used for proof sketching (when OpenAI is selected)
-- `openai_max_completion_tokens`: Maximum tokens in OpenAI-generated response
-- `openai_max_remote_retries`: Retry attempts for OpenAI API calls
-- `openai_max_self_correction_attempts`: Maximum decomposition self-correction attempts for OpenAI
-- `google_model`: The Google model used for proof sketching (when Google is selected)
-- `google_max_output_tokens`: Maximum tokens in Google-generated response
-- `google_max_self_correction_attempts`: Maximum decomposition self-correction attempts for Google
+- `model`: The OpenAI model used for proof sketching
+- `max_completion_tokens`: Maximum tokens in generated response
+- `max_remote_retries`: Retry attempts for API calls
+- `max_self_correction_attempts`: Maximum decomposition self-correction attempts
 
 **Kimina Lean Server**:
 - `url`: Server endpoint for Lean verification
@@ -672,18 +694,10 @@ goedels_poetry --formal-theorem "import Mathlib\n\nopen BigOperators\n\ntheorem 
 export PROVER_AGENT_LLM__MODEL="kdavis/Goedel-Prover-V2:70b"
 export PROVER_AGENT_LLM__MAX_SELF_CORRECTION_ATTEMPTS="3"
 export PROVER_AGENT_LLM__MAX_PASS="64"
-export DECOMPOSER_AGENT_LLM__OPENAI_MODEL="gpt-5-pro"
+export DECOMPOSER_AGENT_LLM__MODEL="gpt-5-pro"
 export KIMINA_LEAN_SERVER__MAX_RETRIES="10"
 # Provide the full preamble plus theorem body when invoking formal problems
 goedels_poetry --formal-theorem "import Mathlib\n\nopen BigOperators\n\ntheorem theorem_54_43 : 1 + 1 = 2 := by sorry"
-```
-
-**Using Google Generative AI**:
-```bash
-export GOOGLE_API_KEY="your-google-api-key"
-export DECOMPOSER_AGENT_LLM__GOOGLE_MODEL="gemini-2.5-pro"
-export DECOMPOSER_AGENT_LLM__GOOGLE_MAX_OUTPUT_TOKENS="100000"
-goedels_poetry --formal-theorem "..."
 ```
 
 **Environment variables are optional** - if not set, the system uses values from `config.ini`.

@@ -8,7 +8,7 @@ Implemented lazy loading for `FORMALIZER_AGENT_LLM` and `SEMANTICS_AGENT_LLM` to
 
 Previously, both the formalizer and semantics LLMs were eagerly loaded at module import time in `goedels_poetry/config/llm.py`. This meant:
 
-1. **Every** invocation of the CLI would download/initialize these large Ollama models (~32B and ~30B parameters)
+1. **Every** invocation of the CLI would initialize these large Ollama models (~32B and ~30B parameters)
 2. **Formal theorem processing** would wait unnecessarily since these models are only used for informal theorems
 3. Startup time included ~21 seconds of unnecessary model initialization
 
@@ -18,7 +18,7 @@ Previously, both the formalizer and semantics LLMs were eagerly loaded at module
 
 #### 1. `goedels_poetry/config/llm.py`
 - Created lazy-loading functions: `get_formalizer_agent_llm()` and `get_semantics_agent_llm()`
-- These functions only download/create LLMs on first access
+- These functions only create LLMs on first access (models must be pre-downloaded)
 - Results are cached in module-level variables for reuse
 - Removed eager initialization of these LLMs at import time
 
@@ -74,10 +74,10 @@ Verified that:
 # 2. Create GoedelsPoetryConfig() (fast)
 # 3. Call framework.formalize_informal_theorem()
 #    -> Accesses config.formalizer_agent_llm
-#    -> Triggers lazy load (~13s to download/init)
+#    -> Triggers lazy load (~13s to init)
 # 4. Call framework.check_informal_theorem_semantics()
 #    -> Accesses config.semantics_agent_llm
-#    -> Triggers lazy load (~8s to download/init)
+#    -> Triggers lazy load (~8s to init)
 # 5. Continue with proof...
 # Result: Models loaded only when actually needed!
 ```

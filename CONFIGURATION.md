@@ -11,11 +11,19 @@ The default configuration is stored in `goedels_poetry/data/config.ini`:
 ```ini
 [FORMALIZER_AGENT_LLM]
 model = kdavis/goedel-formalizer-v2:32b
+provider = ollama
+url = http://localhost:11434/v1
+api_key = ollama
+max_tokens = 50000
 num_ctx = 40960
 max_retries = 10
 
 [PROVER_AGENT_LLM]
 model = kdavis/Goedel-Prover-V2:32b
+provider = ollama
+url = http://localhost:11434/v1
+api_key = ollama
+max_tokens = 50000
 num_ctx = 40960
 max_self_correction_attempts = 2
 max_depth = 20
@@ -23,26 +31,25 @@ max_pass = 32
 
 [SEMANTICS_AGENT_LLM]
 model = qwen3:30b
+provider = ollama
+url = http://localhost:11434/v1
+api_key = ollama
+max_tokens = 50000
 num_ctx = 262144
 
 [SEARCH_QUERY_AGENT_LLM]
 model = qwen3:30b
+provider = ollama
+url = http://localhost:11434/v1
+api_key = ollama
+max_tokens = 50000
 num_ctx = 262144
 
 [DECOMPOSER_AGENT_LLM]
-# Provider selection (openai, google, auto)
-provider = auto
-
-# OpenAI-specific settings
-openai_model = gpt-5-2025-08-07
-openai_max_completion_tokens = 50000
-openai_max_remote_retries = 5
-openai_max_self_correction_attempts = 6
-
-# Google-specific settings
-google_model = gemini-2.5-pro
-google_max_output_tokens = 50000
-google_max_self_correction_attempts = 6
+model = gpt-5-2025-08-07
+max_completion_tokens = 50000
+max_remote_retries = 5
+max_self_correction_attempts = 6
 
 [KIMINA_LEAN_SERVER]
 url = http://0.0.0.0:8000
@@ -64,41 +71,111 @@ The Lean Explore Server provides vector database search capabilities for retriev
 
 The vector database agent queries this server after search queries are generated and before proof sketching, allowing the proof sketcher to use relevant theorems found in the database.
 
-## Decomposer Agent Provider Selection
+### LLM Agent Configuration
 
-The decomposer agent supports both OpenAI and Google Generative AI providers. The system automatically selects the provider based on available API keys:
+Gödel's Poetry uses OpenAI-compatible APIs (via `ChatOpenAI`) to connect to LLM providers. The system supports both Ollama and vLLM through their OpenAI-compatible endpoints.
 
-### Provider Priority Order
+#### Required Models
 
-1. **OpenAI** (if `OPENAI_API_KEY` is set)
-2. **Google Generative AI** (if `GOOGLE_API_KEY` is set and no OpenAI key)
-3. **Fallback to OpenAI** (with warning if no keys are found)
+Gödel's Poetry requires several models to be available on your configured provider:
 
-### API Key Setup
+- **`kdavis/goedel-formalizer-v2:32b`** - Used by the formalizer agent (FORMALIZER_AGENT_LLM)
+- **`kdavis/Goedel-Prover-V2:32b`** - Used by the prover agent (PROVER_AGENT_LLM)
+- **`qwen3:30b`** - Used by the semantics agent (SEMANTICS_AGENT_LLM) and search query agent (SEARCH_QUERY_AGENT_LLM)
 
-**For OpenAI:**
+#### Configuration Parameters
+
+Each LLM agent section supports the following parameters:
+
+- **`model`**: The model name/identifier (required)
+- **`provider`**: The provider type - `"ollama"` or `"vllm"` (required)
+- **`url`**: The base URL for the OpenAI-compatible API endpoint (default: `http://localhost:11434/v1` for Ollama)
+- **`api_key`**: API key for authentication (default: `"ollama"` for Ollama, which ignores this value)
+- **`max_tokens`**: Maximum tokens in generated response (default: `50000`)
+- **`num_ctx`**: Context window size (Ollama-specific, passed via `extra_body`)
+- **`max_retries`**: Retry attempts for API calls (FORMALIZER_AGENT_LLM only)
+
+#### Optional vLLM-Specific Parameters
+
+The following parameters are supported for vLLM and are ignored by Ollama:
+
+- **`use_beam_search`**: Enable beam search decoding (boolean, default: not set)
+- **`best_of`**: Number of completions to generate server-side and return the best (integer, default: not set)
+- **`top_k`**: Limit the number of highest probability vocabulary tokens to consider (integer, default: not set)
+- **`repetition_penalty`**: Penalty for repeated tokens to reduce repetition (float, default: not set)
+- **`length_penalty`**: Control the length of the output (float, default: not set)
+
+These parameters are passed via `extra_body` and will be ignored by providers that don't support them.
+
+#### Setting Up Ollama
+
+**Prerequisites:**
+- [Ollama](https://ollama.com/download) must be installed and running
+
+**Download the models:**
+```bash
+ollama pull kdavis/goedel-formalizer-v2:32b
+ollama pull kdavis/Goedel-Prover-V2:32b
+ollama pull qwen3:30b
+```
+
+⚠️ **Important**: These models must be downloaded before using Gödel's Poetry. The system will not automatically download them.
+
+**Default Configuration:**
+The default configuration uses Ollama with the OpenAI-compatible endpoint at `http://localhost:11434/v1`. Ollama exposes this endpoint automatically when running.
+
+#### Setting Up vLLM
+
+To use vLLM instead of Ollama, configure the agent sections with:
+
+```ini
+[FORMALIZER_AGENT_LLM]
+provider = vllm
+url = http://localhost:8000/v1
+api_key = dummy-key
+model = Goedel-LM/Goedel-Formalizer-V2-32B
+max_tokens = 50000
+# Optional vLLM-specific parameters
+use_beam_search = false
+best_of = 1
+
+[PROVER_AGENT_LLM]
+provider = vllm
+url = http://localhost:8000/v1
+api_key = dummy-key
+model = Goedel-LM/Goedel-Prover-V2-32B
+max_tokens = 50000
+
+[SEMANTICS_AGENT_LLM]
+provider = vllm
+url = http://localhost:8000/v1
+api_key = dummy-key
+model = Qwen/Qwen3-30B-A3B-Instruct-2507
+max_tokens = 50000
+
+[SEARCH_QUERY_AGENT_LLM]
+provider = vllm
+url = http://localhost:8000/v1
+api_key = dummy-key
+model = Qwen/Qwen3-30B-A3B-Instruct-2507
+max_tokens = 50000
+```
+
+Ensure your vLLM server is running and accessible at the configured URL.
+
+### Decomposer Agent
+
+The decomposer agent uses OpenAI for proof sketching. Configuration parameters:
+
+- **`model`**: The OpenAI model used for proof sketching (default: `gpt-5-2025-08-07`)
+- **`max_completion_tokens`**: Maximum tokens in generated response (default: `50000`)
+- **`max_remote_retries`**: Retry attempts for API calls (default: `5`)
+- **`max_self_correction_attempts`**: Maximum decomposition self-correction attempts (default: `6`)
+
+**API Key Setup:**
 ```bash
 export OPENAI_API_KEY="your-openai-api-key"
 ```
-
-**For Google Generative AI:**
-```bash
-export GOOGLE_API_KEY="your-google-api-key"
-```
-
-**Both providers available:**
-```bash
-export OPENAI_API_KEY="your-openai-api-key"
-export GOOGLE_API_KEY="your-google-api-key"
-# OpenAI will be selected (higher priority)
-```
-
-### Provider-Specific Configuration
-
-The decomposer agent uses different configuration parameters depending on the selected provider:
-
-– **OpenAI**: Uses `openai_model`, `openai_max_completion_tokens`, `openai_max_remote_retries`, `openai_max_self_correction_attempts`
-– **Google**: Uses `google_model`, `google_max_output_tokens`, `google_max_self_correction_attempts`
 
 ## Environment Variable Overrides
 
@@ -168,15 +245,7 @@ export KIMINA_LEAN_SERVER__MAX_RETRIES="10"
 export PROVER_AGENT_LLM__MODEL="kdavis/Goedel-Prover-V2:70b"
 export PROVER_AGENT_LLM__MAX_SELF_CORRECTION_ATTEMPTS="3"
 export PROVER_AGENT_LLM__MAX_PASS="64"
-export DECOMPOSER_AGENT_LLM__OPENAI_MODEL="gpt-5-pro"
-```
-
-**Using Google Generative AI:**
-```bash
-# Use Google's Gemini model for decomposer
-export GOOGLE_API_KEY="your-google-api-key"
-export DECOMPOSER_AGENT_LLM__GOOGLE_MODEL="gemini-2.5-pro"
-export DECOMPOSER_AGENT_LLM__GOOGLE_MAX_OUTPUT_TOKENS="100000"
+export DECOMPOSER_AGENT_LLM__MODEL="gpt-5-pro"
 ```
 
 ## Implementation Details

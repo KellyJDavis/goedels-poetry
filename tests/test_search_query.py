@@ -408,9 +408,13 @@ def test_is_backtracking_no_backtrack() -> None:
 
 def test_search_query_agent_factory() -> None:
     """Test that SearchQueryAgentFactory creates an agent."""
-    from langchain_ollama import ChatOllama
+    from langchain_openai import ChatOpenAI
 
-    llm = ChatOllama(model="test-model", validate_model_on_init=False)
+    llm = ChatOpenAI(
+        base_url="http://localhost:11434/v1",
+        api_key="ollama",
+        model="test-model",
+    )
     agent = SearchQueryAgentFactory.create_agent(llm)
 
     assert agent is not None
