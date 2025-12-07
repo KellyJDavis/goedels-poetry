@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Removed
+- Support for Google Generative AI decomposer agent: removed Google-specific configuration options (`google_model`, `google_max_output_tokens`, `google_max_self_correction_attempts`) and provider selection logic. The decomposer agent now exclusively uses OpenAI.
+
 ## [0.0.10] - 2025-12-02
 
 ### Added

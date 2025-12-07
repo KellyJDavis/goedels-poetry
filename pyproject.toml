@@ -24,7 +24,6 @@ dependencies = [
     "jinja2>=3.1.6",
     "kimina-ast-client>=0.2.2",
     "langchain-core>=0.3.77",
-    "langchain-google-genai>=2.1.12",
     "langchain-ollama>=0.3.10",
     "langchain-openai>=0.3.34",
     "langgraph>=0.6.8",
@@ -157,6 +156,7 @@ source = ["goedels_poetry"]
 root = ["goedels_poetry"]
 exclude = [
     "\\.venv/.*",
+    "\\.goedels_poetry/.*",
     "test-venv/.*",
     "dist/.*",
     "site/.*",

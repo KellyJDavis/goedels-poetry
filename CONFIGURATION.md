@@ -30,19 +30,10 @@ model = qwen3:30b
 num_ctx = 262144
 
 [DECOMPOSER_AGENT_LLM]
-# Provider selection (openai, google, auto)
-provider = auto
-
-# OpenAI-specific settings
-openai_model = gpt-5-2025-08-07
-openai_max_completion_tokens = 50000
-openai_max_remote_retries = 5
-openai_max_self_correction_attempts = 6
-
-# Google-specific settings
-google_model = gemini-2.5-pro
-google_max_output_tokens = 50000
-google_max_self_correction_attempts = 6
+model = gpt-5-2025-08-07
+max_completion_tokens = 50000
+max_remote_retries = 5
+max_self_correction_attempts = 6
 
 [KIMINA_LEAN_SERVER]
 url = http://0.0.0.0:8000
@@ -64,41 +55,19 @@ The Lean Explore Server provides vector database search capabilities for retriev
 
 The vector database agent queries this server after search queries are generated and before proof sketching, allowing the proof sketcher to use relevant theorems found in the database.
 
-## Decomposer Agent Provider Selection
+### Decomposer Agent
 
-The decomposer agent supports both OpenAI and Google Generative AI providers. The system automatically selects the provider based on available API keys:
+The decomposer agent uses OpenAI for proof sketching. Configuration parameters:
 
-### Provider Priority Order
+- **`model`**: The OpenAI model used for proof sketching (default: `gpt-5-2025-08-07`)
+- **`max_completion_tokens`**: Maximum tokens in generated response (default: `50000`)
+- **`max_remote_retries`**: Retry attempts for API calls (default: `5`)
+- **`max_self_correction_attempts`**: Maximum decomposition self-correction attempts (default: `6`)
 
-1. **OpenAI** (if `OPENAI_API_KEY` is set)
-2. **Google Generative AI** (if `GOOGLE_API_KEY` is set and no OpenAI key)
-3. **Fallback to OpenAI** (with warning if no keys are found)
-
-### API Key Setup
-
-**For OpenAI:**
+**API Key Setup:**
 ```bash
 export OPENAI_API_KEY="your-openai-api-key"
 ```
-
-**For Google Generative AI:**
-```bash
-export GOOGLE_API_KEY="your-google-api-key"
-```
-
-**Both providers available:**
-```bash
-export OPENAI_API_KEY="your-openai-api-key"
-export GOOGLE_API_KEY="your-google-api-key"
-# OpenAI will be selected (higher priority)
-```
-
-### Provider-Specific Configuration
-
-The decomposer agent uses different configuration parameters depending on the selected provider:
-
-– **OpenAI**: Uses `openai_model`, `openai_max_completion_tokens`, `openai_max_remote_retries`, `openai_max_self_correction_attempts`
-– **Google**: Uses `google_model`, `google_max_output_tokens`, `google_max_self_correction_attempts`
 
 ## Environment Variable Overrides
 
@@ -168,15 +137,7 @@ export KIMINA_LEAN_SERVER__MAX_RETRIES="10"
 export PROVER_AGENT_LLM__MODEL="kdavis/Goedel-Prover-V2:70b"
 export PROVER_AGENT_LLM__MAX_SELF_CORRECTION_ATTEMPTS="3"
 export PROVER_AGENT_LLM__MAX_PASS="64"
-export DECOMPOSER_AGENT_LLM__OPENAI_MODEL="gpt-5-pro"
-```
-
-**Using Google Generative AI:**
-```bash
-# Use Google's Gemini model for decomposer
-export GOOGLE_API_KEY="your-google-api-key"
-export DECOMPOSER_AGENT_LLM__GOOGLE_MODEL="gemini-2.5-pro"
-export DECOMPOSER_AGENT_LLM__GOOGLE_MAX_OUTPUT_TOKENS="100000"
+export DECOMPOSER_AGENT_LLM__MODEL="gpt-5-pro"
 ```
 
 ## Implementation Details

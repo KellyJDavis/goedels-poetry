@@ -1,6 +1,5 @@
 import warnings
 
-from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_ollama import ChatOllama
 from langchain_openai import ChatOpenAI
 from ollama import ResponseError, chat, pull
@@ -92,12 +91,7 @@ def _create_llm_safe(**kwargs):  # type: ignore[no-untyped-def]
 
 def _create_decomposer_llm_safe(**kwargs):  # type: ignore[no-untyped-def]
     """
-    Create a decomposer LLM instance, automatically selecting between OpenAI and Google providers.
-
-    Priority order:
-    1. If OPENAI_API_KEY is set -> use ChatOpenAI
-    2. Else if GOOGLE_API_KEY is set -> use ChatGoogleGenerativeAI
-    3. Else -> fall back to OpenAI with warning
+    Create a decomposer LLM instance using OpenAI.
 
     Parameters
     ----------
@@ -107,70 +101,29 @@ def _create_decomposer_llm_safe(**kwargs):  # type: ignore[no-untyped-def]
     Returns
     -------
     BaseChatModel
-        The appropriate LLM instance based on available API keys
+        The OpenAI LLM instance
     """
     import os
 
     openai_key = os.getenv("OPENAI_API_KEY")
-    google_key = os.getenv("GOOGLE_API_KEY")
 
-    # Determine provider based on available API keys
-    if openai_key and openai_key.strip() and openai_key != "dummy-key-for-testing":
-        provider = "openai"
-    elif google_key and google_key.strip():
-        provider = "google"
-    else:
-        # Fall back to OpenAI with warning
-        provider = "openai"
-        warnings.warn(
-            "No valid API key found. Falling back to OpenAI. Please set either "
-            "OPENAI_API_KEY or GOOGLE_API_KEY environment variable.",
-            UserWarning,
-            stacklevel=2,
-        )
-
-    # Create LLM based on selected provider
-    if provider == "openai":
-        try:
+    try:
+        return ChatOpenAI(**kwargs)
+    except Exception:
+        # In test/CI environments without OPENAI_API_KEY, create with a dummy key
+        if not openai_key or openai_key == "dummy-key-for-testing":
+            warnings.warn(
+                "OPENAI_API_KEY not set. OpenAI LLM functionality will not work until "
+                "the API key is configured. Set the OPENAI_API_KEY environment variable.",
+                UserWarning,
+                stacklevel=2,
+            )
+            # Set a dummy key to allow module import
+            os.environ["OPENAI_API_KEY"] = "dummy-key-for-testing"
             return ChatOpenAI(**kwargs)
-        except Exception:
-            # In test/CI environments without OPENAI_API_KEY, create with a dummy key
-            if not openai_key or openai_key == "dummy-key-for-testing":
-                warnings.warn(
-                    "OPENAI_API_KEY not set. OpenAI LLM functionality will not work until "
-                    "the API key is configured. Set the OPENAI_API_KEY environment variable.",
-                    UserWarning,
-                    stacklevel=2,
-                )
-                # Set a dummy key to allow module import
-                os.environ["OPENAI_API_KEY"] = "dummy-key-for-testing"
-                return ChatOpenAI(**kwargs)
-            else:
-                # Re-raise if it's a different error
-                raise
-    else:  # provider == "google"
-        # Convert OpenAI parameters to Google parameters
-        google_kwargs = kwargs.copy()
-        if "max_completion_tokens" in google_kwargs:
-            google_kwargs["max_output_tokens"] = google_kwargs.pop("max_completion_tokens")
-
-        try:
-            return ChatGoogleGenerativeAI(**google_kwargs)
-        except Exception:
-            # In test/CI environments without GOOGLE_API_KEY, create with a dummy key
-            if not google_key:
-                warnings.warn(
-                    "GOOGLE_API_KEY not set. Google LLM functionality will not work until "
-                    "the API key is configured. Set the GOOGLE_API_KEY environment variable.",
-                    UserWarning,
-                    stacklevel=2,
-                )
-                # Set a dummy key to allow module import
-                os.environ["GOOGLE_API_KEY"] = "dummy-key-for-testing"
-                return ChatGoogleGenerativeAI(**google_kwargs)
-            else:
-                # Re-raise if it's a different error
-                raise
+        else:
+            # Re-raise if it's a different error
+            raise
 
 
 # ============================================================================
@@ -287,50 +240,16 @@ PROVER_AGENT_LLM = _create_llm_safe(
 )
 
 
-# Create decomposer LLM with automatic provider selection
+# Create decomposer LLM
 def _create_decomposer_llm():  # type: ignore[no-untyped-def]
-    """Create decomposer LLM with automatic provider selection and appropriate configuration."""
-    import os
-
-    openai_key = os.getenv("OPENAI_API_KEY")
-    google_key = os.getenv("GOOGLE_API_KEY")
-
-    # Determine provider based on available API keys
-    if openai_key and openai_key.strip() and openai_key != "dummy-key-for-testing":
-        provider = "openai"
-    elif google_key and google_key.strip():
-        provider = "google"
-    else:
-        # Fall back to OpenAI with warning
-        provider = "openai"
-        warnings.warn(
-            "No valid API key found. Falling back to OpenAI. Please set either "
-            "OPENAI_API_KEY or GOOGLE_API_KEY environment variable.",
-            UserWarning,
-            stacklevel=2,
-        )
-
-    # Create LLM based on selected provider
-    if provider == "openai":
-        return _create_decomposer_llm_safe(
-            model=parsed_config.get(section="DECOMPOSER_AGENT_LLM", option="openai_model", fallback="gpt-5-2025-08-07"),
-            max_completion_tokens=parsed_config.getint(
-                section="DECOMPOSER_AGENT_LLM", option="openai_max_completion_tokens", fallback=50000
-            ),
-            max_retries=parsed_config.getint(
-                section="DECOMPOSER_AGENT_LLM", option="openai_max_remote_retries", fallback=5
-            ),
-        )
-    else:  # provider == "google"
-        return _create_decomposer_llm_safe(
-            model=parsed_config.get(section="DECOMPOSER_AGENT_LLM", option="google_model", fallback="gemini-2.5-pro"),
-            max_completion_tokens=parsed_config.getint(
-                section="DECOMPOSER_AGENT_LLM", option="google_max_output_tokens", fallback=50000
-            ),
-            max_retries=parsed_config.getint(
-                section="DECOMPOSER_AGENT_LLM", option="google_max_self_correction_attempts", fallback=6
-            ),
-        )
+    """Create decomposer LLM with OpenAI configuration."""
+    return _create_decomposer_llm_safe(
+        model=parsed_config.get(section="DECOMPOSER_AGENT_LLM", option="model", fallback="gpt-5-2025-08-07"),
+        max_completion_tokens=parsed_config.getint(
+            section="DECOMPOSER_AGENT_LLM", option="max_completion_tokens", fallback=50000
+        ),
+        max_retries=parsed_config.getint(section="DECOMPOSER_AGENT_LLM", option="max_remote_retries", fallback=5),
+    )
 
 
 DECOMPOSER_AGENT_LLM = _create_decomposer_llm()
@@ -341,8 +260,7 @@ PROVER_AGENT_MAX_SELF_CORRECTION_ATTEMPTS = parsed_config.getint(
 )
 PROVER_AGENT_MAX_DEPTH = parsed_config.getint(section="PROVER_AGENT_LLM", option="max_depth", fallback=20)
 PROVER_AGENT_MAX_PASS = parsed_config.getint(section="PROVER_AGENT_LLM", option="max_pass", fallback=32)
-# For DECOMPOSER_AGENT (openai and google), use the new key names
 DECOMPOSER_AGENT_MAX_SELF_CORRECTION_ATTEMPTS = parsed_config.getint(
-    section="DECOMPOSER_AGENT_LLM", option="openai_max_self_correction_attempts", fallback=6
+    section="DECOMPOSER_AGENT_LLM", option="max_self_correction_attempts", fallback=6
 )
 FORMALIZER_AGENT_MAX_RETRIES = parsed_config.getint(section="FORMALIZER_AGENT_LLM", option="max_retries", fallback=10)
