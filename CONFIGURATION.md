@@ -12,12 +12,14 @@ The default configuration is stored in `goedels_poetry/data/config.ini`:
 [FORMALIZER_AGENT_LLM]
 model = Goedel-LM/Goedel-Formalizer-V2-32B
 url = http://localhost:8002/v1
+max_tokens = 30000
 max_retries = 5
 timeout_seconds = 10800
 
 [PROVER_AGENT_LLM]
 model = Goedel-LM/Goedel-Prover-V2-32B
 url = http://localhost:8003/v1
+max_tokens = 30000
 max_retries = 5
 timeout_seconds = 10800
 max_self_correction_attempts = 2
@@ -27,12 +29,14 @@ max_pass = 32
 [SEMANTICS_AGENT_LLM]
 model = Qwen/Qwen3-30B-A3B-Instruct-2507
 url = http://localhost:8004/v1
+max_tokens = 240000
 max_retries = 5
 timeout_seconds = 10800
 
 [SEARCH_QUERY_AGENT_LLM]
 model = Qwen/Qwen3-30B-A3B-Instruct-2507
 url = http://localhost:8004/v1
+max_tokens = 240000
 max_retries = 5
 timeout_seconds = 10800
 
@@ -61,6 +65,15 @@ package_filters = Mathlib,Batteries,Std,Init,Lean
 ```
 
 ## Configuration Parameters Explained
+
+### Agent LLMs
+
+- `model`: Hugging Face model served by vLLM (must match the server’s model name).
+- `url`: OpenAI-compatible endpoint for that agent’s vLLM server.
+- `max_tokens`: Max completion tokens per request; ensure input + max_tokens ≤ server context (`--max-model-len`).
+- `max_retries`: Client retries for transient failures.
+- `timeout_seconds`: Client request timeout.
+- Additional prover-only controls: `max_self_correction_attempts`, `max_depth`, `max_pass`.
 
 ### Lean Explore Server
 

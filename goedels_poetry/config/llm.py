@@ -150,7 +150,10 @@ def get_formalizer_agent_llm():  # type: ignore[no-untyped-def]
         )
         base_url = _get_server_url(section="FORMALIZER_AGENT_LLM", fallback="http://localhost:8002/v1")
         _FORMALIZER_AGENT_LLM = _create_vllm_client(
-            model=model, base_url=base_url, max_tokens=50000, section="FORMALIZER_AGENT_LLM"
+            model=model,
+            base_url=base_url,
+            max_tokens=parsed_config.getint(section="FORMALIZER_AGENT_LLM", option="max_tokens", fallback=30000),
+            section="FORMALIZER_AGENT_LLM",
         )
     return _FORMALIZER_AGENT_LLM
 
@@ -164,7 +167,10 @@ def get_semantics_agent_llm():  # type: ignore[no-untyped-def]
         )
         base_url = _get_server_url(section="SEMANTICS_AGENT_LLM", fallback="http://localhost:8004/v1")
         _SEMANTICS_AGENT_LLM = _create_vllm_client(
-            model=model, base_url=base_url, max_tokens=50000, section="SEMANTICS_AGENT_LLM"
+            model=model,
+            base_url=base_url,
+            max_tokens=parsed_config.getint(section="SEMANTICS_AGENT_LLM", option="max_tokens", fallback=240000),
+            section="SEMANTICS_AGENT_LLM",
         )
     return _SEMANTICS_AGENT_LLM
 
@@ -178,7 +184,10 @@ def get_search_query_agent_llm():  # type: ignore[no-untyped-def]
         )
         base_url = _get_server_url(section="SEARCH_QUERY_AGENT_LLM", fallback="http://localhost:8004/v1")
         _SEARCH_QUERY_AGENT_LLM = _create_vllm_client(
-            model=model, base_url=base_url, max_tokens=50000, section="SEARCH_QUERY_AGENT_LLM"
+            model=model,
+            base_url=base_url,
+            max_tokens=parsed_config.getint(section="SEARCH_QUERY_AGENT_LLM", option="max_tokens", fallback=240000),
+            section="SEARCH_QUERY_AGENT_LLM",
         )
     return _SEARCH_QUERY_AGENT_LLM
 
@@ -190,7 +199,10 @@ def get_prover_agent_llm():  # type: ignore[no-untyped-def]
         model = parsed_config.get(section="PROVER_AGENT_LLM", option="model", fallback="Goedel-LM/Goedel-Prover-V2-32B")
         base_url = _get_server_url(section="PROVER_AGENT_LLM", fallback="http://localhost:8003/v1")
         _PROVER_AGENT_LLM = _create_vllm_client(
-            model=model, base_url=base_url, max_tokens=50000, section="PROVER_AGENT_LLM"
+            model=model,
+            base_url=base_url,
+            max_tokens=parsed_config.getint(section="PROVER_AGENT_LLM", option="max_tokens", fallback=30000),
+            section="PROVER_AGENT_LLM",
         )
     return _PROVER_AGENT_LLM
 

@@ -233,6 +233,7 @@ Gödel's Poetry expects vLLM servers for its LLM agents. Defaults (in `config.in
 - Formalizer: `http://localhost:8002/v1` serving `Goedel-LM/Goedel-Formalizer-V2-32B`
 - Prover: `http://localhost:8003/v1` serving `Goedel-LM/Goedel-Prover-V2-32B`
 - Semantics/Search: `http://localhost:8004/v1` serving `Qwen/Qwen3-30B-A3B-Instruct-2507`
+- Default per-agent `max_tokens` is 2048 (override via env/config if needed; keep within model context).
 
 #### Option 1: Run locally
 
@@ -248,6 +249,7 @@ Notes:
 - `--max-model-len` sets the context window (matches config defaults).
 - Qwen3 requires `--trust-remote-code`; set `HF_TOKEN` on the server if the repo is gated. You can also set `HF_HOME` to control the cache location.
 - You can pin different ports/models; update `config.ini` or env vars accordingly.
+- Ensure client `max_tokens` stays within the model context (input + max_tokens ≤ max-model-len).
 
 #### Option 2: Connect to remote servers
 
@@ -611,12 +613,14 @@ Configuration is stored in `goedels_poetry/data/config.ini`:
 [FORMALIZER_AGENT_LLM]
 model = Goedel-LM/Goedel-Formalizer-V2-32B
 url = http://localhost:8002/v1
+max_tokens = 30000
 max_retries = 5
 timeout_seconds = 10800
 
 [PROVER_AGENT_LLM]
 model = Goedel-LM/Goedel-Prover-V2-32B
 url = http://localhost:8003/v1
+max_tokens = 30000
 max_retries = 5
 timeout_seconds = 10800
 max_self_correction_attempts = 2
@@ -626,12 +630,14 @@ max_pass = 32
 [SEMANTICS_AGENT_LLM]
 model = Qwen/Qwen3-30B-A3B-Instruct-2507
 url = http://localhost:8004/v1
+max_tokens = 240000
 max_retries = 5
 timeout_seconds = 10800
 
 [SEARCH_QUERY_AGENT_LLM]
 model = Qwen/Qwen3-30B-A3B-Instruct-2507
 url = http://localhost:8004/v1
+max_tokens = 240000
 max_retries = 5
 timeout_seconds = 10800
 
