@@ -55,6 +55,26 @@ The Lean Explore Server provides vector database search capabilities for retriev
 
 The vector database agent queries this server after search queries are generated and before proof sketching, allowing the proof sketcher to use relevant theorems found in the database.
 
+### Required Ollama Models
+
+Gödel's Poetry requires several Ollama models to be downloaded before use. These models are used by different agents:
+
+- **`kdavis/goedel-formalizer-v2:32b`** - Used by the formalizer agent (FORMALIZER_AGENT_LLM)
+- **`kdavis/Goedel-Prover-V2:32b`** - Used by the prover agent (PROVER_AGENT_LLM)
+- **`qwen3:30b`** - Used by the semantics agent (SEMANTICS_AGENT_LLM) and search query agent (SEARCH_QUERY_AGENT_LLM)
+
+**Prerequisites:**
+- [Ollama](https://ollama.com/download) must be installed and running
+
+**Download the models:**
+```bash
+ollama pull kdavis/goedel-formalizer-v2:32b
+ollama pull kdavis/Goedel-Prover-V2:32b
+ollama pull qwen3:30b
+```
+
+⚠️ **Important**: These models must be downloaded before using Gödel's Poetry. The system will not automatically download them.
+
 ### Decomposer Agent
 
 The decomposer agent uses OpenAI for proof sketching. Configuration parameters:

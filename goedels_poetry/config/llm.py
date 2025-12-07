@@ -2,79 +2,8 @@ import warnings
 
 from langchain_ollama import ChatOllama
 from langchain_openai import ChatOpenAI
-from ollama import ResponseError, chat, pull
-from rich.console import Console
-from tqdm import tqdm
 
 from goedels_poetry.config.config import parsed_config
-
-# Create Console for outputs
-console = Console()
-
-
-def _download_llm(llm: str) -> None:
-    """
-    Method which ensures the specified LLM is downloaded. This code if based off of that provided
-    # by Ollama https://github.com/ollama/ollama-python/blob/main/examples/pull.py
-
-    Parameters
-    ----------
-    llm: str
-        The LLM to ensure download of
-    """
-    # Inform user of progress
-    console.print(f"Starting download of {llm}")
-
-    # Track progress for each layer
-    bars: dict = {}
-    current_digest: str = ""
-    for progress in pull(llm, stream=True):
-        digest = progress.get("digest", "")
-        if digest != current_digest and current_digest in bars:
-            bars[current_digest].close()
-
-        if not digest:
-            console.print(progress.get("status"))
-            continue
-
-        if digest not in bars and (total := progress.get("total")):
-            bars[digest] = tqdm(total=total, desc=f"pulling {digest[7:19]}", unit="B", unit_scale=True)
-
-        if completed := progress.get("completed"):
-            bars[digest].update(completed - bars[digest].n)
-
-        current_digest = digest
-
-
-def _download_llms(llms: list[str]) -> None:
-    """
-    Method which ensures the specified LLMs are downloaded.
-
-    Parameters
-    ----------
-    llms: list[str]
-        The LLMs to download
-    """
-    # Download the LLMs one at a time
-    for llm in llms:
-        try:
-            # Check to see if it's already downloaded
-            chat(llm)
-        except ResponseError as e:
-            # If it isn't downloaded, download it
-            if e.status_code == 404:
-                console.print(f"Starting download of {llm}")
-                _download_llm(llm)
-        except ConnectionError:
-            # Ollama is not running (e.g., in CI/test environments)
-            # Warn the user but allow import to succeed for testing
-            warnings.warn(
-                "Could not connect to Ollama. LLM functionality will not work until "
-                "Ollama is running. Download and start Ollama from https://ollama.com/download",
-                UserWarning,
-                stacklevel=2,
-            )
-            break  # Only warn once, not for each LLM
 
 
 # Create LLMS (with error handling for environments without Ollama)
@@ -84,7 +13,6 @@ def _create_llm_safe(**kwargs):  # type: ignore[no-untyped-def]
         return ChatOllama(**kwargs)
     except ConnectionError:
         # In test/CI environments without Ollama, create with validation disabled
-        # Note: A warning was already issued by _download_llms() above
         kwargs["validate_model_on_init"] = False
         return ChatOllama(**kwargs)
 
@@ -130,8 +58,8 @@ def _create_decomposer_llm_safe(**kwargs):  # type: ignore[no-untyped-def]
 # Lazy-loaded LLMs (for informal theorem processing only)
 # ============================================================================
 # These LLMs are only needed when processing informal theorems. By lazy-loading
-# them, we avoid downloading/initializing large Ollama models during startup
-# when processing formal theorems.
+# them, we avoid initializing large Ollama models during startup when processing
+# formal theorems.
 
 _FORMALIZER_AGENT_LLM = None  # Cache for lazy-loaded formalizer LLM
 _SEMANTICS_AGENT_LLM = None  # Cache for lazy-loaded semantics LLM
@@ -142,8 +70,11 @@ def get_formalizer_agent_llm():  # type: ignore[no-untyped-def]
     """
     Lazy-load and return the FORMALIZER_AGENT_LLM.
 
-    Only downloads and creates the LLM on first access, which speeds up
-    startup when processing formal theorems that don't need formalization.
+    Only creates the LLM on first access, which speeds up startup when processing
+    formal theorems that don't need formalization.
+
+    Note: The required Ollama model must be downloaded beforehand using:
+    `ollama pull kdavis/goedel-formalizer-v2:32b`
 
     Returns
     -------
@@ -155,8 +86,6 @@ def get_formalizer_agent_llm():  # type: ignore[no-untyped-def]
         model = parsed_config.get(
             section="FORMALIZER_AGENT_LLM", option="model", fallback="kdavis/goedel-formalizer-v2:32b"
         )
-        # Download the model if needed
-        _download_llms([model])
         # Create the LLM instance
         _FORMALIZER_AGENT_LLM = _create_llm_safe(
             model=model,
@@ -171,8 +100,11 @@ def get_semantics_agent_llm():  # type: ignore[no-untyped-def]
     """
     Lazy-load and return the SEMANTICS_AGENT_LLM.
 
-    Only downloads and creates the LLM on first access, which speeds up
-    startup when processing formal theorems that don't need semantic checking.
+    Only creates the LLM on first access, which speeds up startup when processing
+    formal theorems that don't need semantic checking.
+
+    Note: The required Ollama model must be downloaded beforehand using:
+    `ollama pull qwen3:30b`
 
     Returns
     -------
@@ -182,8 +114,6 @@ def get_semantics_agent_llm():  # type: ignore[no-untyped-def]
     global _SEMANTICS_AGENT_LLM
     if _SEMANTICS_AGENT_LLM is None:
         model = parsed_config.get(section="SEMANTICS_AGENT_LLM", option="model", fallback="qwen3:30b")
-        # Download the model if needed
-        _download_llms([model])
         # Create the LLM instance
         _SEMANTICS_AGENT_LLM = _create_llm_safe(
             model=model,
@@ -198,8 +128,11 @@ def get_search_query_agent_llm():  # type: ignore[no-untyped-def]
     """
     Lazy-load and return the SEARCH_QUERY_AGENT_LLM.
 
-    Only downloads and creates the LLM on first access, which speeds up
-    startup when processing theorems that don't need search query generation.
+    Only creates the LLM on first access, which speeds up startup when processing
+    theorems that don't need search query generation.
+
+    Note: The required Ollama model must be downloaded beforehand using:
+    `ollama pull qwen3:30b`
 
     Returns
     -------
@@ -209,8 +142,6 @@ def get_search_query_agent_llm():  # type: ignore[no-untyped-def]
     global _SEARCH_QUERY_AGENT_LLM
     if _SEARCH_QUERY_AGENT_LLM is None:
         model = parsed_config.get(section="SEARCH_QUERY_AGENT_LLM", option="model", fallback="qwen3:30b")
-        # Download the model if needed
-        _download_llms([model])
         # Create the LLM instance
         _SEARCH_QUERY_AGENT_LLM = _create_llm_safe(
             model=model,
@@ -227,9 +158,9 @@ def get_search_query_agent_llm():  # type: ignore[no-untyped-def]
 # These LLMs are used for both formal and informal theorems, so we load them
 # immediately at module import time.
 
-# Download prover model if needed
+# Note: The required Ollama model must be downloaded beforehand using:
+# `ollama pull kdavis/Goedel-Prover-V2:32b`
 _PROVER_MODEL = parsed_config.get(section="PROVER_AGENT_LLM", option="model", fallback="kdavis/Goedel-Prover-V2:32b")
-_download_llms([_PROVER_MODEL])
 
 # Create prover LLM
 PROVER_AGENT_LLM = _create_llm_safe(

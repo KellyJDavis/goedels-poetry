@@ -108,6 +108,26 @@ uv sync
 uv run goedels_poetry --help
 ```
 
+### Downloading Required Ollama Models
+
+Gödel's Poetry requires several Ollama models to be downloaded before use. These models are used by different agents in the system:
+
+- **`kdavis/goedel-formalizer-v2:32b`** - Used by the formalizer agent to convert informal theorems to Lean 4
+- **`kdavis/Goedel-Prover-V2:32b`** - Used by the prover agent to generate proofs
+- **`qwen3:30b`** - Used by the semantics and search query agents
+
+**Prerequisites:**
+- [Ollama](https://ollama.com/download) must be installed and running
+
+**Download the models:**
+```bash
+ollama pull kdavis/goedel-formalizer-v2:32b
+ollama pull kdavis/Goedel-Prover-V2:32b
+ollama pull qwen3:30b
+```
+
+⚠️ **Important**: These models must be downloaded before using Gödel's Poetry. The system will not automatically download them.
+
 ### Running the Kimina Lean Server
 
 The Kimina Lean Server is **required** for Gödel's Poetry to verify Lean 4 proofs. It provides high-performance parallel proof checking.
