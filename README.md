@@ -18,12 +18,10 @@
 ## Table of Contents
 
 - [What Does Gödel's Poetry Do?](#what-does-gödels-poetry-do)
-- [Quick Start](#quick-start)
-  - [Prerequisites](#prerequisites)
-  - [Installation](#installation)
-  - [Running the Kimina Lean Server](#running-the-kimina-lean-server)
-  - [Setting Up Your API Keys](#setting-up-your-api-keys)
-  - [Using the Command Line Tool](#using-the-command-line-tool)
+- [Quick Starts](#quick-starts)
+  - [Quick Start: Ollama](#quick-start-ollama)
+  - [Quick Start: vLLM](#quick-start-vllm)
+  - [Quick Start: LM Studio](#quick-start-lm-studio)
 - [Examples](#examples)
 - [How It Works](#how-it-works)
 - [Developer Guide](#developer-guide)
@@ -64,152 +62,116 @@ The system is designed for researchers, mathematicians, and AI practitioners int
 
 ---
 
-## Quick Start
+## Quick Starts
 
-### Prerequisites
+Quick Starts assume a clean PyPI install (`pip install goedels-poetry`) and configuration via environment variables only. Each backend section is self-contained—pick your provider and follow the steps. The OpenAI decomposer endpoint is always required, so every section sets `OPENAI_API_KEY`.
 
-Before installing Gödel's Poetry, ensure you have:
+### Quick Start: Ollama
 
-- **Python 3.10 or higher** (tested on Python 3.10-3.13)
-- **pip** (comes with Python)
-- **Lean 4** for the Kimina server (installation covered below)
-- **Lean Explore server** for vector database queries (installation covered below)
-
-For development:
-- **[uv](https://docs.astral.sh/uv/)** - Fast Python package installer (optional, but recommended for development)
-  ```bash
-  curl -LsSf https://astral.sh/uv/install.sh | sh
-  ```
-- **Git** for cloning the repository
-
-### Installation
-
-#### Option 1: Install from PyPI (Recommended)
-
+1) **Install Gödel's Poetry**
 ```bash
-# Install using pip
 pip install goedels-poetry
-
-# Verify installation
-goedels_poetry --help
 ```
 
-#### Option 2: Install from Source (For Development)
-
-```bash
-# Clone the repository
-git clone https://github.com/KellyJDavis/goedels-poetry.git
-cd goedels-poetry
-
-# Install with uv (recommended) or pip
-uv sync
-
-# The command line tool is now available via:
-uv run goedels_poetry --help
-```
-
-### Setting Up LLM Models
-
-Gödel's Poetry uses OpenAI-compatible APIs to connect to LLM providers. The system supports **Ollama**, **vLLM**, and **LM Studio** through their OpenAI-compatible endpoints.
-
-#### Required Models
-
-Gödel's Poetry requires several models to be available on your configured provider:
-
-- **`kdavis/goedel-formalizer-v2:32b`** - Used by the formalizer agent to convert informal theorems to Lean 4
-- **`kdavis/Goedel-Prover-V2:32b`** - Used by the prover agent to generate proofs
-- **`qwen3:30b`** - Used by the semantics and search query agents
-
-#### Using Ollama (Default)
-
-**Prerequisites:**
-- [Ollama](https://ollama.com/download) must be installed and running
-
-**Download the models:**
+2) **Start Ollama and pull models** (once)
 ```bash
 ollama pull kdavis/goedel-formalizer-v2:32b
 ollama pull kdavis/Goedel-Prover-V2:32b
 ollama pull qwen3:30b
 ```
 
-⚠️ **Important**: These models must be downloaded before using Gödel's Poetry. The system will not automatically download them.
-
-**Default Configuration:**
-The default configuration uses Ollama with its OpenAI-compatible endpoint at `http://localhost:11434/v1`. Ollama exposes this endpoint automatically when running.
-
-#### Using vLLM
-
-To use vLLM instead of Ollama, configure the agent sections in `goedels_poetry/data/config.ini` with:
-
-```ini
-[FORMALIZER_AGENT_LLM]
-provider = vllm
-url = http://localhost:8000/v1
-api_key = dummy-key
-model = Goedel-LM/Goedel-Formalizer-V2-32B
-max_tokens = 50000
-
-[PROVER_AGENT_LLM]
-provider = vllm
-url = http://localhost:8000/v1
-api_key = dummy-key
-model = Goedel-LM/Goedel-Prover-V2-32B
-max_tokens = 50000
-
-[SEMANTICS_AGENT_LLM]
-provider = vllm
-url = http://localhost:8000/v1
-api_key = dummy-key
-model = Qwen/Qwen3-30B-A3B-Instruct-2507
-max_tokens = 50000
-
-[SEARCH_QUERY_AGENT_LLM]
-provider = vllm
-url = http://localhost:8000/v1
-api_key = dummy-key
-model = Qwen/Qwen3-30B-A3B-Instruct-2507
-max_tokens = 50000
+3) **Set your OpenAI key**
+```bash
+export OPENAI_API_KEY="your-openai-key"
 ```
 
-Ensure your vLLM server is running and accessible at the configured URL. See [CONFIGURATION.md](CONFIGURATION.md) for more details on vLLM-specific parameters.
-
-#### Using LM Studio
-
-LM Studio also exposes an OpenAI-compatible endpoint. Configure the agent sections in `goedels_poetry/data/config.ini` with:
-
-```ini
-[FORMALIZER_AGENT_LLM]
-provider = lmstudio
-url = http://localhost:1234/v1
-api_key = lm-studio
-model = mlx-community/QwQ-32B-4bit
-max_tokens = 50000
-# Optional LM Studio parameter:
-# ttl = 300
-
-[PROVER_AGENT_LLM]
-provider = lmstudio
-url = http://localhost:1234/v1
-api_key = lm-studio
-model = mlx-community/QwQ-32B-4bit
-max_tokens = 50000
-
-[SEMANTICS_AGENT_LLM]
-provider = lmstudio
-url = http://localhost:1234/v1
-api_key = lm-studio
-model = mlx-community/QwQ-32B-4bit
-max_tokens = 50000
-
-[SEARCH_QUERY_AGENT_LLM]
-provider = lmstudio
-url = http://localhost:1234/v1
-api_key = lm-studio
-model = mlx-community/QwQ-32B-4bit
-max_tokens = 50000
+4) **Run a quick check**
+```bash
+goedels_poetry --help
 ```
 
-LM Studio accepts any API key string; `lm-studio` is a common placeholder. The optional `ttl` parameter enables LM Studio's auto-eviction feature to unload models after a period of inactivity.
+### Quick Start: vLLM (local server on port 8002)
+
+1) **Install Gödel's Poetry**
+```bash
+pip install goedels-poetry
+```
+
+2) **Start vLLM locally** on `http://localhost:8002/v1` with these models (avoid 8000/8001 used by Kimina/Lean Explore):
+   - `Goedel-LM/Goedel-Formalizer-V2-32B`
+   - `Goedel-LM/Goedel-Prover-V2-32B`
+   - `Qwen/Qwen3-30B-A3B-Instruct-2507`
+
+   Example (multi-model) start:
+   ```bash
+   python -m vllm.entrypoints.openai.api_server \
+     --served-model Goedel-LM/Goedel-Formalizer-V2-32B \
+     --served-model Goedel-LM/Goedel-Prover-V2-32B \
+     --served-model Qwen/Qwen3-30B-A3B-Instruct-2507 \
+     --host 0.0.0.0 --port 8002
+   ```
+
+3) **Configure environment**
+```bash
+export OPENAI_API_KEY="your-openai-key"
+export FORMALIZER_AGENT_LLM__PROVIDER="vllm"
+export FORMALIZER_AGENT_LLM__URL="http://localhost:8002/v1"
+export FORMALIZER_AGENT_LLM__MODEL="Goedel-LM/Goedel-Formalizer-V2-32B"
+
+export PROVER_AGENT_LLM__PROVIDER="vllm"
+export PROVER_AGENT_LLM__URL="http://localhost:8002/v1"
+export PROVER_AGENT_LLM__MODEL="Goedel-LM/Goedel-Prover-V2-32B"
+
+export SEMANTICS_AGENT_LLM__PROVIDER="vllm"
+export SEMANTICS_AGENT_LLM__URL="http://localhost:8002/v1"
+export SEMANTICS_AGENT_LLM__MODEL="Qwen/Qwen3-30B-A3B-Instruct-2507"
+
+export SEARCH_QUERY_AGENT_LLM__PROVIDER="vllm"
+export SEARCH_QUERY_AGENT_LLM__URL="http://localhost:8002/v1"
+export SEARCH_QUERY_AGENT_LLM__MODEL="Qwen/Qwen3-30B-A3B-Instruct-2507"
+```
+
+4) **Run a quick check**
+```bash
+goedels_poetry --help
+```
+
+### Quick Start: LM Studio
+
+1) **Install Gödel's Poetry**
+```bash
+pip install goedels-poetry
+```
+
+2) **Start LM Studio** with the OpenAI-compatible server enabled (default `http://localhost:1234/v1`) and load/download these models in the UI:
+   - `Goedel-LM/Goedel-Formalizer-V2-32B`
+   - `Goedel-LM/Goedel-Prover-V2-32B`
+   - `Qwen/Qwen3-30B-A3B-Instruct-2507`
+
+3) **Configure environment**
+```bash
+export OPENAI_API_KEY="your-openai-key"
+export FORMALIZER_AGENT_LLM__PROVIDER="lmstudio"
+export FORMALIZER_AGENT_LLM__URL="http://localhost:1234/v1"
+export FORMALIZER_AGENT_LLM__MODEL="Goedel-LM/Goedel-Formalizer-V2-32B"
+
+export PROVER_AGENT_LLM__PROVIDER="lmstudio"
+export PROVER_AGENT_LLM__URL="http://localhost:1234/v1"
+export PROVER_AGENT_LLM__MODEL="Goedel-LM/Goedel-Prover-V2-32B"
+
+export SEMANTICS_AGENT_LLM__PROVIDER="lmstudio"
+export SEMANTICS_AGENT_LLM__URL="http://localhost:1234/v1"
+export SEMANTICS_AGENT_LLM__MODEL="Qwen/Qwen3-30B-A3B-Instruct-2507"
+
+export SEARCH_QUERY_AGENT_LLM__PROVIDER="lmstudio"
+export SEARCH_QUERY_AGENT_LLM__URL="http://localhost:1234/v1"
+export SEARCH_QUERY_AGENT_LLM__MODEL="Qwen/Qwen3-30B-A3B-Instruct-2507"
+```
+
+4) **Run a quick check**
+```bash
+goedels_poetry --help
+```
 
 ### Running the Kimina Lean Server
 
@@ -328,36 +290,6 @@ The easiest way to install and run the Lean Explore Server is via PyPI:
 If you prefer to install from source, please refer to the [Lean Explore repository](https://github.com/KellyJDavis/lean-explore) for detailed installation instructions.
 
 For more information, see the [Lean Explore documentation](https://kellyjdavis.github.io/lean-explore/).
-
-### Setting Up Your API Keys
-
-Gödel's Poetry uses OpenAI for certain reasoning tasks. To use the decomposer agent, you'll need an OpenAI API key:
-
-1. **Get an API key** from [OpenAI's platform](https://platform.openai.com/api-keys)
-
-2. **Set the environment variable**:
-
-   **On Linux/macOS**:
-   ```bash
-   export OPENAI_API_KEY='your-api-key-here'
-   ```
-
-   **On Windows (Command Prompt)**:
-   ```cmd
-   set OPENAI_API_KEY=your-api-key-here
-   ```
-
-   **On Windows (PowerShell)**:
-   ```powershell
-   $env:OPENAI_API_KEY='your-api-key-here'
-   ```
-
-3. **Make it permanent** (optional):
-
-   Add the export command to your shell configuration file:
-   - Bash: `~/.bashrc` or `~/.bash_profile`
-   - Zsh: `~/.zshrc`
-   - Fish: `~/.config/fish/config.fish`
 
 ### Using the Command Line Tool
 
@@ -481,35 +413,27 @@ Results will be saved as `test1.proof` and `test2.proof`.
 
 ## How It Works
 
-Gödel's Poetry uses a sophisticated multi-agent architecture coordinated by a supervisor agent. The workflow adapts based on the input:
+Gödel's Poetry orchestrates a set of specialized agents over OpenAI-compatible LLM endpoints plus two external services (Kimina Lean Server and Lean Explore). The flow depends on whether the input is informal or already formal Lean.
 
-### For Informal Theorems:
+**Core loop (formal theorems)**
+- **Prover Agent** tries to solve the Lean theorem with the configured prover LLM.
+- **Proof Checker** verifies the proof via Kimina; failures trigger self-correction and retry limits.
+- **Vector Search** (when needed) uses the Search Query agent + Lean Explore to fetch related lemmas.
 
-1. **Formalizer Agent** - Converts natural language to Lean 4 syntax
-2. **Syntax Checker Agent** - Validates the formal theorem syntax
-3. **Semantics Agent** - Ensures the formalization preserves meaning
-4. **Prover Agent** - Generates the proof
-5. **Proof Checker Agent** - Verifies the proof in Lean 4
-6. **Parser Agent** - Extracts the AST structure
+**Informal path (adds formalization)**
+- **Formalizer Agent** converts natural language to Lean.
+- **Syntax & Semantics Checks** ensure the formal statement matches intent (Semantics Agent).
+- Then the core loop proceeds as above.
 
-### For Complex Theorems (Recursive Decomposition):
+**Decomposition for hard problems**
+- **Decomposer (OpenAI)** sketches a proof and splits it into subgoals.
+- Subgoals are proved recursively with the Prover + Proof Checker cycle.
+- Successful subproofs are merged into the final Lean proof.
 
-When direct proving fails, the system activates **proof sketching**:
-
-1. **Search Query Agent** - Generates search queries for retrieving relevant theorems
-2. **Vector DB Agent** - Queries the Lean Explore vector database to find relevant theorems and lemmas
-3. **Proof Sketcher Agent** - Creates a high-level proof outline using retrieved theorems
-4. **Sketch Checker Agent** - Validates the sketch syntax
-5. **Decomposition Agent** - Extracts sub-theorems from the sketch
-6. **Recursive Proving** - Each sub-theorem is proved independently
-7. **Proof Reconstruction** - Combines verified sub-proofs into the final proof
-
-### Key Features:
-
-- **Automatic Correction**: Agents iteratively fix syntax and logical errors
-- **Backtracking**: When a decomposition approach fails, the system tries alternatives
-- **State Management**: Complete provenance tracking for reproducibility
-- **Parallel Processing**: Batch theorem proving with efficient resource usage
+**Providers and endpoints**
+- LLMs use OpenAI-compatible endpoints from Ollama, vLLM, or LM Studio (one set of env vars per agent).
+- The decomposer always uses OpenAI (`OPENAI_API_KEY`).
+- Kimina Lean Server verifies proofs; Lean Explore provides vector search. These can be remote as long as URLs are set.
 
 ---
 
