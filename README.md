@@ -110,7 +110,7 @@ uv run goedels_poetry --help
 
 ### Setting Up LLM Models
 
-Gödel's Poetry uses OpenAI-compatible APIs to connect to LLM providers. The system supports both **Ollama** and **vLLM** through their OpenAI-compatible endpoints.
+Gödel's Poetry uses OpenAI-compatible APIs to connect to LLM providers. The system supports **Ollama**, **vLLM**, and **LM Studio** through their OpenAI-compatible endpoints.
 
 #### Required Models
 
@@ -172,6 +172,44 @@ max_tokens = 50000
 ```
 
 Ensure your vLLM server is running and accessible at the configured URL. See [CONFIGURATION.md](CONFIGURATION.md) for more details on vLLM-specific parameters.
+
+#### Using LM Studio
+
+LM Studio also exposes an OpenAI-compatible endpoint. Configure the agent sections in `goedels_poetry/data/config.ini` with:
+
+```ini
+[FORMALIZER_AGENT_LLM]
+provider = lmstudio
+url = http://localhost:1234/v1
+api_key = lm-studio
+model = mlx-community/QwQ-32B-4bit
+max_tokens = 50000
+# Optional LM Studio parameter:
+# ttl = 300
+
+[PROVER_AGENT_LLM]
+provider = lmstudio
+url = http://localhost:1234/v1
+api_key = lm-studio
+model = mlx-community/QwQ-32B-4bit
+max_tokens = 50000
+
+[SEMANTICS_AGENT_LLM]
+provider = lmstudio
+url = http://localhost:1234/v1
+api_key = lm-studio
+model = mlx-community/QwQ-32B-4bit
+max_tokens = 50000
+
+[SEARCH_QUERY_AGENT_LLM]
+provider = lmstudio
+url = http://localhost:1234/v1
+api_key = lm-studio
+model = mlx-community/QwQ-32B-4bit
+max_tokens = 50000
+```
+
+LM Studio accepts any API key string; `lm-studio` is a common placeholder. The optional `ttl` parameter enables LM Studio's auto-eviction feature to unload models after a period of inactivity.
 
 ### Running the Kimina Lean Server
 

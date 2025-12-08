@@ -17,7 +17,7 @@ def _build_extra_body(section: str, provider: str) -> dict[str, Any]:
     section : str
         Configuration section name (e.g., "FORMALIZER_AGENT_LLM")
     provider : str
-        Provider type ("ollama" or "vllm")
+        Provider type ("ollama", "vllm", or "lmstudio")
 
     Returns
     -------
@@ -33,6 +33,14 @@ def _build_extra_body(section: str, provider: str) -> dict[str, Any]:
             extra_body["num_ctx"] = num_ctx
         except (NoOptionError, NoSectionError):
             pass  # num_ctx is optional
+
+    # LM Studio-specific parameters
+    if provider == "lmstudio":
+        try:
+            ttl = parsed_config.getint(section=section, option="ttl")
+            extra_body["ttl"] = ttl
+        except (NoOptionError, NoSectionError):
+            pass  # ttl is optional
 
     # vLLM-specific parameters (always include, Ollama will ignore them)
     try:
@@ -72,7 +80,7 @@ def _build_extra_body(section: str, provider: str) -> dict[str, Any]:
 
 def _create_llm_safe(section: str, **kwargs):  # type: ignore[no-untyped-def]
     """
-    Create a ChatOpenAI instance configured for Ollama or vLLM.
+    Create a ChatOpenAI instance configured for Ollama, vLLM, or LM Studio.
 
     Parameters
     ----------
@@ -92,13 +100,24 @@ def _create_llm_safe(section: str, **kwargs):  # type: ignore[no-untyped-def]
         If connection to the LLM server fails
     """
     # Read provider-specific configuration
-    provider = parsed_config.get(section=section, option="provider", fallback="ollama").lower()
-    if provider not in ("ollama", "vllm"):
-        msg = f"Invalid provider '{provider}' in section '{section}'. Must be 'ollama' or 'vllm'."
+    provider_raw = parsed_config.get(section=section, option="provider", fallback="ollama").lower()
+    provider = provider_raw.replace("-", "").replace("_", "")
+    if provider not in ("ollama", "vllm", "lmstudio"):
+        msg = (
+            f"Invalid provider '{provider_raw}' in section '{section}'. "
+            "Must be 'ollama', 'vllm', or 'lmstudio' (LM Studio)."
+        )
         raise ValueError(msg)
 
-    url = parsed_config.get(section=section, option="url", fallback="http://localhost:11434/v1")
-    api_key = parsed_config.get(section=section, option="api_key", fallback="ollama")
+    default_url_by_provider = {
+        "ollama": "http://localhost:11434/v1",
+        "vllm": "http://localhost:8000/v1",
+        "lmstudio": "http://localhost:1234/v1",
+    }
+    url = parsed_config.get(section=section, option="url", fallback=default_url_by_provider[provider])
+
+    default_api_key_by_provider = {"ollama": "ollama", "vllm": "dummy-key", "lmstudio": "lm-studio"}
+    api_key = parsed_config.get(section=section, option="api_key", fallback=default_api_key_by_provider[provider])
     model = kwargs.pop("model", None)
     if model is None:
         try:
@@ -183,7 +202,7 @@ def get_formalizer_agent_llm():  # type: ignore[no-untyped-def]
     formal theorems that don't need formalization.
 
     Note: The required model must be available on the configured provider
-    (Ollama or vLLM). For Ollama, download the model beforehand using:
+    (Ollama, vLLM, or LM Studio). For Ollama, download the model beforehand using:
     `ollama pull kdavis/goedel-formalizer-v2:32b`
 
     Returns
@@ -206,7 +225,7 @@ def get_semantics_agent_llm():  # type: ignore[no-untyped-def]
     formal theorems that don't need semantic checking.
 
     Note: The required model must be available on the configured provider
-    (Ollama or vLLM). For Ollama, download the model beforehand using:
+    (Ollama, vLLM, or LM Studio). For Ollama, download the model beforehand using:
     `ollama pull qwen3:30b`
 
     Returns
@@ -229,7 +248,7 @@ def get_search_query_agent_llm():  # type: ignore[no-untyped-def]
     theorems that don't need search query generation.
 
     Note: The required model must be available on the configured provider
-    (Ollama or vLLM). For Ollama, download the model beforehand using:
+    (Ollama, vLLM, or LM Studio). For Ollama, download the model beforehand using:
     `ollama pull qwen3:30b`
 
     Returns
@@ -251,7 +270,7 @@ def get_search_query_agent_llm():  # type: ignore[no-untyped-def]
 # immediately at module import time.
 
 # Note: The required model must be available on the configured provider
-# (Ollama or vLLM). For Ollama, download the model beforehand using:
+# (Ollama, vLLM, or LM Studio). For Ollama, download the model beforehand using:
 # `ollama pull kdavis/Goedel-Prover-V2:32b`
 
 # Create prover LLM
