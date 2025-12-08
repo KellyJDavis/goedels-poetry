@@ -5,10 +5,25 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.0.11] - 2025-12-08
+
+### Added
+- LM Studio provider support in the LLM configuration, enabling LM Studio to be used alongside existing Ollama and vLLM providers.
+
+### Changed
+- Unified Ollama and vLLM handling by migrating from `ChatOllama` to `ChatOpenAI` for consistent provider integration.
+- Updated type hints across the codebase to improve clarity and compatibility.
 
 ### Removed
 - Support for Google Generative AI decomposer agent: removed Google-specific configuration options (`google_model`, `google_max_output_tokens`, `google_max_self_correction_attempts`) and provider selection logic. The decomposer agent now exclusively uses OpenAI.
+- Automatic Ollama model downloading; users now manage model availability explicitly.
+
+### Fixed
+- Addressed make check failures to keep automated checks green.
+
+### Documentation
+- Expanded README Quick Start instructions for Ollama, vLLM, and LM Studio, clarifying prerequisites and environment configuration.
+- Added an architecture diagram to the README to improve the visual overview of the system.
 
 ## [0.0.10] - 2025-12-02
 
@@ -168,6 +183,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Typer for CLI
 - Rich for beautiful terminal output
 
+[0.0.11]: https://github.com/KellyJDavis/goedels-poetry/releases/tag/v0.0.11
 [0.0.10]: https://github.com/KellyJDavis/goedels-poetry/releases/tag/v0.0.10
 [0.0.9]: https://github.com/KellyJDavis/goedels-poetry/releases/tag/v0.0.9
 [0.0.8]: https://github.com/KellyJDavis/goedels-poetry/releases/tag/v0.0.8
