@@ -10,6 +10,8 @@
 
 **Gödel's Poetry** is an advanced automated theorem proving system that combines Large Language Models (LLMs) with formal verification in Lean 4. The system takes mathematical theorems—either in informal natural language or formal Lean syntax—and automatically generates verified proofs through a sophisticated multi-agent architecture.
 
+![Gödel's Poetry architecture](https://raw.githubusercontent.com/KellyJDavis/goedels-poetry/main/docs/images/goedels-poetry-architecture.png)
+
 - **Github repository**: <https://github.com/KellyJDavis/goedels-poetry/>
 - **Documentation**: <https://KellyJDavis.github.io/goedels-poetry/>
 
