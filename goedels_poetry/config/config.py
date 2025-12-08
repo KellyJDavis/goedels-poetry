@@ -1,7 +1,7 @@
 import os
 from configparser import ConfigParser
 from pathlib import Path
-from typing import Union, cast, overload
+from typing import cast, overload
 
 # Sentinel value for "no fallback provided" (similar to ConfigParser's _UNSET)
 _UNSET = object()
@@ -33,7 +33,7 @@ class ConfigParserWrapper:
     @overload
     def get(self, section: str, option: str, fallback: str) -> str: ...
 
-    def get(self, section: str, option: str, fallback: Union[str, object] = _UNSET) -> str:
+    def get(self, section: str, option: str, fallback: str | object = _UNSET) -> str:
         """
         Get a configuration value as a string.
 
@@ -71,7 +71,7 @@ class ConfigParserWrapper:
     @overload
     def getint(self, section: str, option: str, fallback: int) -> int: ...
 
-    def getint(self, section: str, option: str, fallback: Union[int, object] = _UNSET) -> int:
+    def getint(self, section: str, option: str, fallback: int | object = _UNSET) -> int:
         """
         Get a configuration value as an integer.
 

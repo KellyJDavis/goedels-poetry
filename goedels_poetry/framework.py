@@ -1,5 +1,5 @@
 import traceback
-from typing import ClassVar, Optional, cast
+from typing import ClassVar, cast
 
 from langchain_core.language_models.chat_models import BaseChatModel
 from rich.console import Console
@@ -63,11 +63,11 @@ class GoedelsPoetryConfig:
 
     def __init__(
         self,
-        formalizer_agent_llm: Optional[BaseChatModel] = None,
+        formalizer_agent_llm: BaseChatModel | None = None,
         formalizer_agent_max_retries: int = FORMALIZER_AGENT_MAX_RETRIES,
         prover_agent_llm: BaseChatModel = PROVER_AGENT_LLM,
         prover_agent_max_retries: int = PROVER_AGENT_MAX_SELF_CORRECTION_ATTEMPTS,
-        semantics_agent_llm: Optional[BaseChatModel] = None,
+        semantics_agent_llm: BaseChatModel | None = None,
         decomposer_agent_llm: BaseChatModel = DECOMPOSER_AGENT_LLM,
         kimina_lean_server_url: str = KIMINA_LEAN_SERVER["url"],
         kimina_lean_server_max_retries: int = KIMINA_LEAN_SERVER["max_retries"],
@@ -126,7 +126,7 @@ class GoedelsPoetryFramework:
         self,
         config: GoedelsPoetryConfig,
         state_manager: GoedelsPoetryStateManager,
-        console: Optional[Console] = None,
+        console: Console | None = None,
     ):
         self._config = config
         self._state_manager = state_manager

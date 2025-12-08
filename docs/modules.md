@@ -52,6 +52,8 @@
 
 ::: goedels_poetry.agents.sketch_parser_agent
 
+::: goedels_poetry.agents.sketch_backtrack_agent
+
 ::: goedels_poetry.agents.state
 
 ::: goedels_poetry.agents.supervisor_agent

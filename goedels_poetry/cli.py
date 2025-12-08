@@ -4,7 +4,6 @@ os.environ["TQDM_DISABLE"] = "1"
 
 import traceback
 from pathlib import Path
-from typing import Optional
 
 import typer
 from rich.console import Console
@@ -48,8 +47,8 @@ def _handle_processing_error(theorem_file: Path, error: Exception) -> None:
 
 
 def process_single_theorem(
-    formal_theorem: Optional[str] = None,
-    informal_theorem: Optional[str] = None,
+    formal_theorem: str | None = None,
+    informal_theorem: str | None = None,
 ) -> None:
     """
     Process a single theorem (either formal or informal) and output proof to stdout.
@@ -165,25 +164,25 @@ def process_theorems_from_directory(
 
 @app.command()
 def main(
-    formal_theorem: Optional[str] = typer.Option(
+    formal_theorem: str | None = typer.Option(
         None,
         "--formal-theorem",
         "-ft",
         help="A single formal theorem to prove (e.g., 'theorem example : 1 + 1 = 2 := by sorry')",
     ),
-    informal_theorem: Optional[str] = typer.Option(
+    informal_theorem: str | None = typer.Option(
         None,
         "--informal-theorem",
         "-ift",
         help="A single informal theorem to prove (e.g., 'Prove that 3 cannot be written as the sum of two cubes.')",
     ),
-    formal_theorems: Optional[Path] = typer.Option(
+    formal_theorems: Path | None = typer.Option(
         None,
         "--formal-theorems",
         "-fts",
         help="Directory containing .lean files with formal theorems to prove",
     ),
-    informal_theorems: Optional[Path] = typer.Option(
+    informal_theorems: Path | None = typer.Option(
         None,
         "--informal-theorems",
         "-ifts",

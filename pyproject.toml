@@ -13,7 +13,6 @@ classifiers = [
     "Intended Audience :: Developers",
     "Programming Language :: Python",
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.9",
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
@@ -86,7 +85,7 @@ show_error_codes = true
 testpaths = ["tests"]
 
 [tool.ruff]
-target-version = "py39"
+target-version = "py310"
 line-length = 120
 fix = true
 
@@ -128,10 +127,6 @@ ignore = [
     "E501",
     # DoNotAssignLambda
     "E731",
-    # Use X | Y for type annotations (requires Python 3.10+, we support 3.9)
-    "UP007",
-    # Use X | None for type annotations (requires Python 3.10+, we support 3.9)
-    "UP045",
 ]
 
 [tool.ruff.lint.per-file-ignores]
