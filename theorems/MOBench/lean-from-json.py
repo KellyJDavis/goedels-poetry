@@ -16,7 +16,6 @@ import json
 import re
 from collections.abc import Iterable
 from pathlib import Path
-from typing import Optional
 
 import typer
 from rich.console import Console
@@ -64,7 +63,7 @@ def ensure_newlines(content: str) -> str:
     return content
 
 
-def detect_fields(obj: dict) -> tuple[Optional[str], Optional[str]]:
+def detect_fields(obj: dict) -> tuple[str | None, str | None]:
     """
     Extract (name, lean_code) from a dataset object.
     - Prefer 'name' for filename stem; fallback to 'problem_id'

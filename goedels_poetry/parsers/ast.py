@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any, Optional, Union
+from typing import Any
 
 from goedels_poetry.parsers.util import (
     _ast_to_code,
@@ -15,7 +15,7 @@ class AST:
     Class representing Lean code's abstract syntax tree (AST).
     """
 
-    def __init__(self, ast: dict[str, Any], sorries: Optional[list[dict[str, Any]]] = None):
+    def __init__(self, ast: dict[str, Any], sorries: list[dict[str, Any]] | None = None):
         """
         Constructs an AST using the AST dict[str, Any] representation provided by the Kimin server.
 
@@ -39,7 +39,7 @@ class AST:
         self._ast: dict[str, Any] = ast
         self._sorries: list[dict[str, Any]] = sorries or []
 
-    def get_ast(self) -> Union[dict[str, Any], list[Any]]:
+    def get_ast(self) -> dict[str, Any] | list[Any]:
         """
         Returns the AST representation.
 
@@ -59,11 +59,11 @@ class AST:
         list[str]
             List of unproven subgoals.
         """
-        results: dict[Optional[str], list[str]] = {}
+        results: dict[str | None, list[str]] = {}
         _get_unproven_subgoal_names(self._ast, {}, results)
         return [name for names in list(results.values()) for name in names]
 
-    def get_named_subgoal_ast(self, subgoal_name: str) -> Optional[dict]:
+    def get_named_subgoal_ast(self, subgoal_name: str) -> dict | None:
         """
         Gets the AST of the named subgoal.
 

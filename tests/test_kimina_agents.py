@@ -12,7 +12,7 @@ They test the 6 agent factories that use KiminaClient but not BaseChatModel:
 
 from __future__ import annotations
 
-from typing import Any, Optional, cast
+from typing import Any, cast
 
 import pytest
 
@@ -76,8 +76,8 @@ if IMPORTS_AVAILABLE:
     def _make_formal_theorem_state(
         formal_theorem: str,
         *,
-        formal_proof: Optional[str] = "",
-        overrides: Optional[dict[str, Any]] = None,
+        formal_proof: str | None = "",
+        overrides: dict[str, Any] | None = None,
     ) -> FormalTheoremProofState:
         """Create a FormalTheoremProofState with sensible defaults for tests."""
         base: dict[str, Any] = {
@@ -101,8 +101,8 @@ if IMPORTS_AVAILABLE:
     def _make_decomposed_theorem_state(
         formal_theorem: str,
         *,
-        proof_sketch: Optional[str] = None,
-        overrides: Optional[dict[str, Any]] = None,
+        proof_sketch: str | None = None,
+        overrides: dict[str, Any] | None = None,
     ) -> DecomposedFormalTheoremState:
         """Create a DecomposedFormalTheoremState with sensible defaults for tests."""
         base: dict[str, Any] = {
@@ -126,7 +126,7 @@ if IMPORTS_AVAILABLE:
         informal_theorem: str,
         formal_theorem: str,
         *,
-        overrides: Optional[dict[str, Any]] = None,
+        overrides: dict[str, Any] | None = None,
     ) -> InformalTheoremState:
         """Create an InformalTheoremState with sensible defaults for tests."""
         base: dict[str, Any] = {
