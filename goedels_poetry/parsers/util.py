@@ -1,8 +1,9 @@
 import logging
+from collections.abc import Callable
 from copy import deepcopy
-from typing import Any, Callable, Optional, Union
+from typing import Any
 
-Node = Union[dict[str, Any], list[Any]]
+Node = dict[str, Any] | list[Any]
 
 
 # ---------------------------
@@ -41,7 +42,7 @@ def _validate_ast_structure(ast: Node, raise_on_error: bool = False) -> bool:  #
         return False
 
     # AST must be a dict or list
-    if not isinstance(ast, (dict, list)):
+    if not isinstance(ast, dict | list):
         if raise_on_error:
             raise TypeError(f"AST must be a dict or list, got {type(ast).__name__}")  # noqa: TRY003
         return False
@@ -67,7 +68,7 @@ def _validate_ast_structure(ast: Node, raise_on_error: bool = False) -> bool:  #
     # If it's a list, validate that all elements are valid nodes
     if isinstance(ast, list):
         for item in ast:
-            if not isinstance(item, (dict, list)):
+            if not isinstance(item, dict | list):
                 if raise_on_error:
                     raise TypeError(f"AST list contains invalid item type: {type(item).__name__}")  # noqa: TRY003
                 return False
@@ -75,7 +76,7 @@ def _validate_ast_structure(ast: Node, raise_on_error: bool = False) -> bool:  #
             if isinstance(item, dict) and ("header" in item or "commands" in item or "kind" in item):
                 # This looks like a valid node, continue
                 pass
-            elif isinstance(item, (dict, list)):
+            elif isinstance(item, dict | list):
                 # Nested structure - validate recursively but limit depth
                 # For now, we'll be lenient and just check it's a dict/list
                 pass
@@ -86,7 +87,7 @@ def _validate_ast_structure(ast: Node, raise_on_error: bool = False) -> bool:  #
 # ---------------------------
 # Safe nested value extraction helpers
 # ---------------------------
-def _extract_nested_value(node: dict, path: list[Union[int, str]], default: Any = None) -> Any:
+def _extract_nested_value(node: dict, path: list[int | str], default: Any = None) -> Any:
     """
     Safely extract value from nested structure using a path.
 
@@ -145,7 +146,7 @@ def _extract_nested_value(node: dict, path: list[Union[int, str]], default: Any 
     return current
 
 
-def _extract_decl_id_name(node: dict[str, Any]) -> Optional[str]:
+def _extract_decl_id_name(node: dict[str, Any]) -> str | None:
     """
     Extract the name from a Lean.Parser.Command.declId node.
 
@@ -175,7 +176,7 @@ def _extract_decl_id_name(node: dict[str, Any]) -> Optional[str]:
     return None
 
 
-def _extract_have_id_name(node: dict[str, Any]) -> Optional[str]:
+def _extract_have_id_name(node: dict[str, Any]) -> str | None:
     """
     Extract the name from a Lean.Parser.Tactic.tacticHave_ node.
 
@@ -216,7 +217,7 @@ def _extract_have_id_name(node: dict[str, Any]) -> Optional[str]:
     return None
 
 
-def _context_after_decl(node: dict[str, Any], context: dict[str, Optional[str]]) -> dict[str, Optional[str]]:
+def _context_after_decl(node: dict[str, Any], context: dict[str, str | None]) -> dict[str, str | None]:
     """
     Update context after encountering a theorem or lemma declaration.
 
@@ -230,7 +231,7 @@ def _context_after_decl(node: dict[str, Any], context: dict[str, Optional[str]])
     return context
 
 
-def _context_after_have(node: dict[str, Any], context: dict[str, Optional[str]]) -> dict[str, Optional[str]]:
+def _context_after_have(node: dict[str, Any], context: dict[str, str | None]) -> dict[str, str | None]:
     """
     Update context after encountering a have statement.
 
@@ -243,9 +244,7 @@ def _context_after_have(node: dict[str, Any], context: dict[str, Optional[str]])
     return context
 
 
-def _record_sorry(
-    node: dict[str, Any], context: dict[str, Optional[str]], results: dict[Optional[str], list[str]]
-) -> None:
+def _record_sorry(node: dict[str, Any], context: dict[str, str | None], results: dict[str | None, list[str]]) -> None:
     if node.get("kind") == "Lean.Parser.Tactic.tacticSorry":
         theorem = context.get("theorem")
         have = context.get("have")
@@ -253,7 +252,7 @@ def _record_sorry(
 
 
 def _get_unproven_subgoal_names(
-    node: Node, context: dict[str, Optional[str]], results: dict[Optional[str], list[str]]
+    node: Node, context: dict[str, str | None], results: dict[str | None, list[str]]
 ) -> None:
     if isinstance(node, dict):
         context = _context_after_decl(node, context)
@@ -266,7 +265,7 @@ def _get_unproven_subgoal_names(
             _get_unproven_subgoal_names(item, dict(context), results)
 
 
-def _get_named_subgoal_ast(node: Node, target_name: str) -> Optional[dict[str, Any]]:  # noqa: C901
+def _get_named_subgoal_ast(node: Node, target_name: str) -> dict[str, Any] | None:  # noqa: C901
     """
     Find the sub-AST for a given theorem/lemma/have name.
     Returns the entire subtree rooted at that declaration.
@@ -361,7 +360,7 @@ def _ast_to_code(node: Any) -> str:
 # ---------------------------
 # Generic AST walkers
 # ---------------------------
-def __find_first(node: Node, predicate: Callable[[dict[str, Any]], bool]) -> Optional[dict[str, Any]]:
+def __find_first(node: Node, predicate: Callable[[dict[str, Any]], bool]) -> dict[str, Any] | None:
     if isinstance(node, dict):
         if predicate(node):
             return node
@@ -378,7 +377,7 @@ def __find_first(node: Node, predicate: Callable[[dict[str, Any]], bool]) -> Opt
 
 
 def __find_all(
-    node: Node, predicate: Callable[[dict[str, Any]], bool], acc: Optional[list[dict[str, Any]]] = None
+    node: Node, predicate: Callable[[dict[str, Any]], bool], acc: list[dict[str, Any]] | None = None
 ) -> list[dict[str, Any]]:
     if acc is None:
         acc = []
@@ -531,7 +530,7 @@ __TYPE_KIND_CANDIDATES = {
 }
 
 
-def __extract_type_ast(node: Any, binding_name: Optional[str] = None) -> Optional[dict]:  # noqa: C901
+def __extract_type_ast(node: Any, binding_name: str | None = None) -> dict | None:  # noqa: C901
     """
     Extract type AST from a node (theorem, have, let, set, suffices, choose, obtain, generalize, etc.).
 
@@ -922,7 +921,7 @@ def __strip_leading_colon(type_ast: Any) -> Any:
 # ---------------------------
 # Make an explicit binder AST for "(name : TYPE)"
 # ---------------------------
-def __make_binder(name: str, type_ast: Optional[dict]) -> dict:
+def __make_binder(name: str, type_ast: dict | None) -> dict:
     if type_ast is None:
         type_ast = {"val": "Prop", "info": {"leading": " ", "trailing": " "}}
     inner_type = __strip_leading_colon(type_ast)
@@ -1116,7 +1115,7 @@ def __contains_target_name(node: Node, target_name: str, name_map: dict[str, dic
     return False
 
 
-def __find_enclosing_theorem(ast: Node, target_name: str) -> Optional[dict]:  # noqa: C901
+def __find_enclosing_theorem(ast: Node, target_name: str) -> dict | None:  # noqa: C901
     """
     Find the theorem/lemma that encloses the given target (typically a have statement).
     Returns the theorem/lemma node if found, None otherwise.
@@ -1424,7 +1423,7 @@ def __find_earlier_bindings(  # noqa: C901
     return earlier_bindings
 
 
-def __extract_let_name(let_node: dict) -> Optional[str]:
+def __extract_let_name(let_node: dict) -> str | None:
     """
     Extract the variable name from a let binding node.
 
@@ -1702,7 +1701,7 @@ def __extract_match_pattern_names(match_alt_node: dict) -> list[str]:  # noqa: C
     return names
 
 
-def __extract_binder_name(binder: dict) -> Optional[str]:
+def __extract_binder_name(binder: dict) -> str | None:
     """
     Extract the variable name from a binder AST node.
 
@@ -1731,7 +1730,7 @@ def __extract_binder_name(binder: dict) -> Optional[str]:
     return str(val)
 
 
-def __extract_set_name(set_node: dict) -> Optional[str]:
+def __extract_set_name(set_node: dict) -> str | None:
     """
     Extract the variable name from a set statement node.
     set x := value or set x : Type := value
@@ -1774,7 +1773,7 @@ def __extract_set_name(set_node: dict) -> Optional[str]:
     return None
 
 
-def __extract_set_with_hypothesis_name(set_node: dict) -> Optional[str]:
+def __extract_set_with_hypothesis_name(set_node: dict) -> str | None:
     """
     Extract the hypothesis name from a set statement with a 'with' clause.
     set x := value with h extracts "h"
@@ -1834,7 +1833,7 @@ def __extract_set_with_hypothesis_name(set_node: dict) -> Optional[str]:
     return None
 
 
-def __extract_let_value(let_node: dict, binding_name: Optional[str] = None) -> Optional[dict]:  # noqa: C901
+def __extract_let_value(let_node: dict, binding_name: str | None = None) -> dict | None:  # noqa: C901
     """
     Extract the value expression from a let binding node.
     Returns the AST of the value expression (everything after :=).
@@ -1948,7 +1947,7 @@ def __extract_let_value(let_node: dict, binding_name: Optional[str] = None) -> O
     return None
 
 
-def __extract_set_value(set_node: dict, binding_name: Optional[str] = None) -> Optional[dict]:  # noqa: C901
+def __extract_set_value(set_node: dict, binding_name: str | None = None) -> dict | None:  # noqa: C901
     """
     Extract the value expression from a set statement node.
     Returns the AST of the value expression (everything after :=).
@@ -2058,7 +2057,7 @@ def __extract_set_value(set_node: dict, binding_name: Optional[str] = None) -> O
     return None
 
 
-def __get_binding_type_from_node(node: Optional[dict]) -> Optional[str]:
+def __get_binding_type_from_node(node: dict | None) -> str | None:
     """
     Determine if a node represents a set or let binding.
     Returns "set", "let", or None.
@@ -2079,7 +2078,7 @@ def __handle_set_let_binding_as_equality(
     binding_node: dict,
     existing_names: set[str],
     variables_in_equality_hypotheses: set[str],
-) -> tuple[Optional[dict], bool]:
+) -> tuple[dict | None, bool]:
     """
     Handle a set or let binding by creating an equality hypothesis.
 
@@ -2161,7 +2160,7 @@ def __generate_equality_hypothesis_name(var_name: str, existing_names: set[str])
             return f"h{counter}{var_name}"
 
 
-def __extract_suffices_name(suffices_node: dict) -> Optional[str]:
+def __extract_suffices_name(suffices_node: dict) -> str | None:
     """
     Extract the hypothesis name from a suffices statement node.
     suffices h : P from Q or suffices h : P by ...
@@ -2192,7 +2191,7 @@ def __extract_suffices_name(suffices_node: dict) -> Optional[str]:
 
 
 def _get_named_subgoal_rewritten_ast(  # noqa: C901
-    ast: Node, target_name: str, sorries: Optional[list[dict[str, Any]]] = None
+    ast: Node, target_name: str, sorries: list[dict[str, Any]] | None = None
 ) -> dict:
     # Validate AST structure
     if not _validate_ast_structure(ast, raise_on_error=False):
@@ -2352,7 +2351,7 @@ def _get_named_subgoal_rewritten_ast(  # noqa: C901
 
         # Check if this dependency came from a set or let statement
         dep_node = name_map.get(d)
-        dep_binding_type: Optional[str] = None
+        dep_binding_type: str | None = None
         if dep_node is not None:
             dep_binding_type = __get_binding_type_from_node(dep_node)
 
