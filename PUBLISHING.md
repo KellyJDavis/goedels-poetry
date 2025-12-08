@@ -25,22 +25,25 @@ The repository is configured to automatically publish to PyPI when you push a ve
 
 ```bash
 # 1. Update the version in pyproject.toml
-# Edit pyproject.toml and change: version = "0.0.5"
+# Edit pyproject.toml and change: version = "0.0.10"
 
-# 2. Synchronize version in uv.lock with version in pyproject.toml
+# 2. Update the version in goedels_poetry/__init__.py
+# Edit goedels_poetry/__init__.py and change: __version__ = "0.0.10"
+
+# 3. Synchronize version in uv.lock with version in pyproject.toml
 uv lock
 
-# 3. Update CHANGELOG.md with the new version
+# 4. Update CHANGELOG.md with the new version
 # Add a new section for the version
 
-# 4. Commit your changes
-git add pyproject.toml uv.lock CHANGELOG.md
-git commit -m "Bump version to 0.0.5"
+# 5. Commit your changes
+git add pyproject.toml goedels_poetry/__init__.py uv.lock CHANGELOG.md
+git commit -m "Bump version to 0.0.10"
 
-# 5. Create and push the tag
-git tag v0.0.5
+# 6. Create and push the tag
+git tag v0.0.10
 git push origin main
-git push origin v0.0.5
+git push origin v0.0.10
 ```
 
 The GitHub Action will automatically:
@@ -94,7 +97,7 @@ This project follows [Semantic Versioning](https://semver.org/):
 ## Checklist Before Publishing
 
 - [ ] Version updated in `pyproject.toml`
-- [ ] Version updated in `goedels_poetry/__init__.py` (if changed)
+- [ ] Version updated in `goedels_poetry/__init__.py`
 - [ ] CHANGELOG.md updated with changes
 - [ ] All tests passing (`make test`)
 - [ ] Package builds successfully (`make build`)
@@ -104,7 +107,7 @@ This project follows [Semantic Versioning](https://semver.org/):
 ## Troubleshooting
 
 ### "Version mismatch" error
-The tag version must match the version in `pyproject.toml`. If you tagged `v0.0.5` but `pyproject.toml` has `0.0.4`, the workflow will fail.
+The tag version must match the version in `pyproject.toml`. If you tagged `v0.0.10` but `pyproject.toml` has `0.0.9`, the workflow will fail.
 
 ### "File already exists" error
 You cannot re-upload the same version to PyPI. You must increment the version number.

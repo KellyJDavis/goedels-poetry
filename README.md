@@ -614,6 +614,10 @@ max_pass = 32
 model = qwen3:30b
 num_ctx = 262144
 
+[SEARCH_QUERY_AGENT_LLM]
+model = qwen3:30b
+num_ctx = 262144
+
 [DECOMPOSER_AGENT_LLM]
 model = gpt-5-2025-08-07
 max_completion_tokens = 50000
@@ -645,6 +649,10 @@ package_filters = Mathlib,Batteries,Std,Init,Lean
 
 **Semantics Agent**:
 - `model`: The LLM used to validate semantic equivalence
+- `num_ctx`: Context window size (tokens)
+
+**Search Query Agent**:
+- `model`: The LLM used to generate search queries for vector database retrieval
 - `num_ctx`: Context window size (tokens)
 
 **Decomposer Agent**:
