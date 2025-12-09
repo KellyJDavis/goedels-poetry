@@ -146,28 +146,28 @@ pip install goedels-poetry
 ```
 
 2) **Start LM Studio** with the OpenAI-compatible server enabled (default `http://localhost:1234/v1`) and load/download these models in the UI:
-   - `Goedel-LM/Goedel-Formalizer-V2-32B`
-   - `Goedel-LM/Goedel-Prover-V2-32B`
-   - `Qwen/Qwen3-30B-A3B-Instruct-2507`
+   - `mradermacher/Goedel-Formalizer-V2-32B-GGUF`
+   - `mradermacher/Goedel-Prover-V2-32B-GGUF`
+   - `lmstudio-community/Qwen3-30B-A3B-Instruct-2507-GGUF`
 
 3) **Configure environment**
 ```bash
 export OPENAI_API_KEY="your-openai-key"
 export FORMALIZER_AGENT_LLM__PROVIDER="lmstudio"
 export FORMALIZER_AGENT_LLM__URL="http://localhost:1234/v1"
-export FORMALIZER_AGENT_LLM__MODEL="Goedel-LM/Goedel-Formalizer-V2-32B"
+export FORMALIZER_AGENT_LLM__MODEL="mradermacher/Goedel-Formalizer-V2-32B-GGUF"
 
 export PROVER_AGENT_LLM__PROVIDER="lmstudio"
 export PROVER_AGENT_LLM__URL="http://localhost:1234/v1"
-export PROVER_AGENT_LLM__MODEL="Goedel-LM/Goedel-Prover-V2-32B"
+export PROVER_AGENT_LLM__MODEL="mradermacher/Goedel-Prover-V2-32B-GGUF"
 
 export SEMANTICS_AGENT_LLM__PROVIDER="lmstudio"
 export SEMANTICS_AGENT_LLM__URL="http://localhost:1234/v1"
-export SEMANTICS_AGENT_LLM__MODEL="Qwen/Qwen3-30B-A3B-Instruct-2507"
+export SEMANTICS_AGENT_LLM__MODEL="lmstudio-community/Qwen3-30B-A3B-Instruct-2507-GGUF"
 
 export SEARCH_QUERY_AGENT_LLM__PROVIDER="lmstudio"
 export SEARCH_QUERY_AGENT_LLM__URL="http://localhost:1234/v1"
-export SEARCH_QUERY_AGENT_LLM__MODEL="Qwen/Qwen3-30B-A3B-Instruct-2507"
+export SEARCH_QUERY_AGENT_LLM__MODEL="lmstudio-community/Qwen3-30B-A3B-Instruct-2507-GGUF"
 ```
 
 4) **Run a quick check**
