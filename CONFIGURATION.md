@@ -163,6 +163,50 @@ max_tokens = 50000
 
 Ensure your vLLM server is running and accessible at the configured URL.
 
+#### Setting Up LM Studio
+
+To use LM Studio instead of Ollama or vLLM, configure the agent sections with:
+
+```ini
+[FORMALIZER_AGENT_LLM]
+provider = lmstudio
+url = http://localhost:1234/v1
+api_key = lm-studio
+model = mradermacher/Goedel-Formalizer-V2-32B-GGUF
+max_tokens = 50000
+# Optional LM Studio-specific parameters
+# ttl = 300
+
+[PROVER_AGENT_LLM]
+provider = lmstudio
+url = http://localhost:1234/v1
+api_key = lm-studio
+model = mradermacher/Goedel-Prover-V2-32B-GGUF
+max_tokens = 50000
+# Optional LM Studio-specific parameters
+# ttl = 300
+
+[SEMANTICS_AGENT_LLM]
+provider = lmstudio
+url = http://localhost:1234/v1
+api_key = lm-studio
+model = lmstudio-community/Qwen3-30B-A3B-Instruct-2507-GGUF
+max_tokens = 50000
+# Optional LM Studio-specific parameters
+# ttl = 300
+
+[SEARCH_QUERY_AGENT_LLM]
+provider = lmstudio
+url = http://localhost:1234/v1
+api_key = lm-studio
+model = lmstudio-community/Qwen3-30B-A3B-Instruct-2507-GGUF
+max_tokens = 50000
+# Optional LM Studio-specific parameters
+# ttl = 300
+```
+
+Ensure your LM Studio server is running with the OpenAI-compatible server enabled (default `http://localhost:1234/v1`) and that the models are loaded in the LM Studio UI.
+
 ### Decomposer Agent
 
 The decomposer agent uses OpenAI for proof sketching. Configuration parameters:
