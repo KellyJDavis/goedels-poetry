@@ -213,7 +213,10 @@ def get_formalizer_agent_llm():  # type: ignore[no-untyped-def]
     global _FORMALIZER_AGENT_LLM
     if _FORMALIZER_AGENT_LLM is None:
         # Create the LLM instance
-        _FORMALIZER_AGENT_LLM = _create_llm_safe(section="FORMALIZER_AGENT_LLM")
+        _FORMALIZER_AGENT_LLM = _create_llm_safe(
+            section="FORMALIZER_AGENT_LLM",
+            max_retries=parsed_config.getint(section="FORMALIZER_AGENT_LLM", option="max_remote_retries", fallback=5),
+        )
     return _FORMALIZER_AGENT_LLM
 
 
@@ -236,7 +239,10 @@ def get_semantics_agent_llm():  # type: ignore[no-untyped-def]
     global _SEMANTICS_AGENT_LLM
     if _SEMANTICS_AGENT_LLM is None:
         # Create the LLM instance
-        _SEMANTICS_AGENT_LLM = _create_llm_safe(section="SEMANTICS_AGENT_LLM")
+        _SEMANTICS_AGENT_LLM = _create_llm_safe(
+            section="SEMANTICS_AGENT_LLM",
+            max_retries=parsed_config.getint(section="SEMANTICS_AGENT_LLM", option="max_remote_retries", fallback=5),
+        )
     return _SEMANTICS_AGENT_LLM
 
 
@@ -259,7 +265,10 @@ def get_search_query_agent_llm():  # type: ignore[no-untyped-def]
     global _SEARCH_QUERY_AGENT_LLM
     if _SEARCH_QUERY_AGENT_LLM is None:
         # Create the LLM instance
-        _SEARCH_QUERY_AGENT_LLM = _create_llm_safe(section="SEARCH_QUERY_AGENT_LLM")
+        _SEARCH_QUERY_AGENT_LLM = _create_llm_safe(
+            section="SEARCH_QUERY_AGENT_LLM",
+            max_retries=parsed_config.getint(section="SEARCH_QUERY_AGENT_LLM", option="max_remote_retries", fallback=5),
+        )
     return _SEARCH_QUERY_AGENT_LLM
 
 
@@ -274,7 +283,10 @@ def get_search_query_agent_llm():  # type: ignore[no-untyped-def]
 # `ollama pull kdavis/Goedel-Prover-V2:32b`
 
 # Create prover LLM
-PROVER_AGENT_LLM = _create_llm_safe(section="PROVER_AGENT_LLM")
+PROVER_AGENT_LLM = _create_llm_safe(
+    section="PROVER_AGENT_LLM",
+    max_retries=parsed_config.getint(section="PROVER_AGENT_LLM", option="max_remote_retries", fallback=5),
+)
 
 
 # Create decomposer LLM
