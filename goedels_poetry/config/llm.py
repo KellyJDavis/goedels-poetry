@@ -183,109 +183,40 @@ def _create_decomposer_llm_safe(**kwargs):  # type: ignore[no-untyped-def]
 
 
 # ============================================================================
-# Lazy-loaded LLMs (for informal theorem processing only)
+# LLM Instances
 # ============================================================================
-# These LLMs are only needed when processing informal theorems. By lazy-loading
-# them, we avoid initializing large LLM models during startup when processing
-# formal theorems.
+# All LLM instances are created at module import time. These are ChatOpenAI
+# clients that connect to remote servers (Ollama, vLLM, or LM Studio), so
+# creation is lightweight and does not require loading models into memory.
 
-_FORMALIZER_AGENT_LLM = None  # Cache for lazy-loaded formalizer LLM
-_SEMANTICS_AGENT_LLM = None  # Cache for lazy-loaded semantics LLM
-_SEARCH_QUERY_AGENT_LLM = None  # Cache for lazy-loaded search query LLM
+# Note: The required models must be available on the configured provider
+# (Ollama, vLLM, or LM Studio). For Ollama, download the models beforehand using:
+# - `ollama pull kdavis/goedel-formalizer-v2:32b` (for formalizer)
+# - `ollama pull kdavis/Goedel-Prover-V2:32b` (for prover)
+# - `ollama pull qwen3:30b` (for semantics and search query)
 
-
-def get_formalizer_agent_llm():  # type: ignore[no-untyped-def]
-    """
-    Lazy-load and return the FORMALIZER_AGENT_LLM.
-
-    Only creates the LLM on first access, which speeds up startup when processing
-    formal theorems that don't need formalization.
-
-    Note: The required model must be available on the configured provider
-    (Ollama, vLLM, or LM Studio). For Ollama, download the model beforehand using:
-    `ollama pull kdavis/goedel-formalizer-v2:32b`
-
-    Returns
-    -------
-    ChatOpenAI
-        The formalizer agent LLM instance
-    """
-    global _FORMALIZER_AGENT_LLM
-    if _FORMALIZER_AGENT_LLM is None:
-        # Create the LLM instance
-        _FORMALIZER_AGENT_LLM = _create_llm_safe(
-            section="FORMALIZER_AGENT_LLM",
-            max_retries=parsed_config.getint(section="FORMALIZER_AGENT_LLM", option="max_remote_retries", fallback=5),
-        )
-    return _FORMALIZER_AGENT_LLM
-
-
-def get_semantics_agent_llm():  # type: ignore[no-untyped-def]
-    """
-    Lazy-load and return the SEMANTICS_AGENT_LLM.
-
-    Only creates the LLM on first access, which speeds up startup when processing
-    formal theorems that don't need semantic checking.
-
-    Note: The required model must be available on the configured provider
-    (Ollama, vLLM, or LM Studio). For Ollama, download the model beforehand using:
-    `ollama pull qwen3:30b`
-
-    Returns
-    -------
-    ChatOpenAI
-        The semantics agent LLM instance
-    """
-    global _SEMANTICS_AGENT_LLM
-    if _SEMANTICS_AGENT_LLM is None:
-        # Create the LLM instance
-        _SEMANTICS_AGENT_LLM = _create_llm_safe(
-            section="SEMANTICS_AGENT_LLM",
-            max_retries=parsed_config.getint(section="SEMANTICS_AGENT_LLM", option="max_remote_retries", fallback=5),
-        )
-    return _SEMANTICS_AGENT_LLM
-
-
-def get_search_query_agent_llm():  # type: ignore[no-untyped-def]
-    """
-    Lazy-load and return the SEARCH_QUERY_AGENT_LLM.
-
-    Only creates the LLM on first access, which speeds up startup when processing
-    theorems that don't need search query generation.
-
-    Note: The required model must be available on the configured provider
-    (Ollama, vLLM, or LM Studio). For Ollama, download the model beforehand using:
-    `ollama pull qwen3:30b`
-
-    Returns
-    -------
-    ChatOpenAI
-        The search query agent LLM instance
-    """
-    global _SEARCH_QUERY_AGENT_LLM
-    if _SEARCH_QUERY_AGENT_LLM is None:
-        # Create the LLM instance
-        _SEARCH_QUERY_AGENT_LLM = _create_llm_safe(
-            section="SEARCH_QUERY_AGENT_LLM",
-            max_retries=parsed_config.getint(section="SEARCH_QUERY_AGENT_LLM", option="max_remote_retries", fallback=5),
-        )
-    return _SEARCH_QUERY_AGENT_LLM
-
-
-# ============================================================================
-# Eagerly-loaded LLMs (needed for all theorem processing)
-# ============================================================================
-# These LLMs are used for both formal and informal theorems, so we load them
-# immediately at module import time.
-
-# Note: The required model must be available on the configured provider
-# (Ollama, vLLM, or LM Studio). For Ollama, download the model beforehand using:
-# `ollama pull kdavis/Goedel-Prover-V2:32b`
+# Create formalizer LLM
+FORMALIZER_AGENT_LLM = _create_llm_safe(
+    section="FORMALIZER_AGENT_LLM",
+    max_retries=parsed_config.getint(section="FORMALIZER_AGENT_LLM", option="max_remote_retries", fallback=5),
+)
 
 # Create prover LLM
 PROVER_AGENT_LLM = _create_llm_safe(
     section="PROVER_AGENT_LLM",
     max_retries=parsed_config.getint(section="PROVER_AGENT_LLM", option="max_remote_retries", fallback=5),
+)
+
+# Create semantics LLM
+SEMANTICS_AGENT_LLM = _create_llm_safe(
+    section="SEMANTICS_AGENT_LLM",
+    max_retries=parsed_config.getint(section="SEMANTICS_AGENT_LLM", option="max_remote_retries", fallback=5),
+)
+
+# Create search query LLM
+SEARCH_QUERY_AGENT_LLM = _create_llm_safe(
+    section="SEARCH_QUERY_AGENT_LLM",
+    max_retries=parsed_config.getint(section="SEARCH_QUERY_AGENT_LLM", option="max_remote_retries", fallback=5),
 )
 
 
