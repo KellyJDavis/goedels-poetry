@@ -212,3 +212,4 @@ __marimo__/
 
 # Test theorem directory
 theorem/
+theorems/*/*.proof

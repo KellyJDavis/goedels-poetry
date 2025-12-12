@@ -134,13 +134,22 @@ def _proof_sketcher(llm: BaseChatModel, state: DecomposedFormalTheoremState) -> 
     log_llm_response("DECOMPOSER_AGENT_LLM", str(response_content))
 
     # Parse sketcher response
-    proof_sketch = _parse_proof_sketcher_response(str(response_content), state["preamble"])
+    try:
+        proof_sketch = _parse_proof_sketcher_response(str(response_content), state["preamble"])
 
-    # Add the proof sketch to the state
-    state["proof_sketch"] = proof_sketch
+        # Add the proof sketch to the state
+        state["proof_sketch"] = proof_sketch
 
-    # Add the proof sketch to the state's decomposition_history
-    state["decomposition_history"] += [AIMessage(content=proof_sketch)]
+        # Add the proof sketch to the state's decomposition_history
+        state["decomposition_history"] += [AIMessage(content=proof_sketch)]
+    except LLMParsingError:
+        # Set parse failure markers - state manager will handle requeueing and attempt increments
+        state["proof_sketch"] = None
+        state["errors"] = (
+            "Malformed LLM response: unable to parse proof sketch from LLM output. "
+            "The response did not contain a valid Lean4 code block or the code block could not be extracted."
+        )
+        # Do not add to decomposition_history on parse failure
 
     # Return a DecomposedFormalTheoremStates with state added to its outputs
     return {"outputs": [state]}  # type: ignore[typeddict-item]

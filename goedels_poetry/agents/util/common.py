@@ -757,6 +757,34 @@ def _format_query_section(query: str, valid_results: list[dict[str, Any]]) -> st
     return query_header + "".join(theorem_sections)
 
 
+def parse_semantic_check_response(response: str) -> str:
+    """
+    Parses the passed semantic response into a string used by Goedel-Prover-V2.
+
+    Parameters
+    ----------
+    response: str
+        The semantic check response from the server.
+
+    Returns
+    -------
+    str:
+        The parsed judgement string.
+
+    Raises
+    ------
+    LLMParsingError
+        If no judgement is found in the response.
+    """
+    from typing import cast
+
+    pattern = r"Judgement:\s*(.+)"
+    matches = re.findall(pattern, response, re.IGNORECASE)
+    if not matches:
+        raise LLMParsingError("Failed to extract judgement from LLM response", response)  # noqa: TRY003
+    return cast(str, matches[-1]).strip()
+
+
 def _format_theorem_hints_section(search_results: list[APISearchResponseTypedDict] | None) -> str:
     """
     Format search results into a theorem hints section for prompts.
