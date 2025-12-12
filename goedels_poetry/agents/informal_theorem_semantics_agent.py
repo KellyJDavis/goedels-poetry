@@ -5,9 +5,14 @@ from langgraph.graph import END, START, StateGraph
 from langgraph.graph.state import CompiledStateGraph
 
 from goedels_poetry.agents.state import InformalTheoremState
-from goedels_poetry.agents.util.common import DEFAULT_IMPORTS, LLMParsingError, combine_preamble_and_body, load_prompt
+from goedels_poetry.agents.util.common import (
+    DEFAULT_IMPORTS,
+    LLMParsingError,
+    combine_preamble_and_body,
+    load_prompt,
+    parse_semantic_check_response,
+)
 from goedels_poetry.agents.util.debug import log_llm_prompt, log_llm_response
-from goedels_poetry.agents.util.kimina_server import parse_semantic_check_response
 
 
 class InformalTheoremSemanticsAgentFactory:
