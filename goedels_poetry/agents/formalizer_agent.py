@@ -105,14 +105,18 @@ def _formalizer(llm: BaseChatModel, state: InformalTheoremState) -> InformalTheo
     log_llm_response("FORMALIZER_AGENT_LLM", str(response_content))
 
     # Parse formalizer response
-    formal_statement = _parser_formalizer_response(str(response_content))
+    try:
+        formal_statement = _parser_formalizer_response(str(response_content))
 
-    # Remove DEFAULT_IMPORTS from the formal_statement
-    if formal_statement:
-        formal_statement = remove_default_imports(formal_statement)
-
-    # Return InformalTheoremState with the formal theorem
-    return {"formal_theorem": formal_statement}  # type: ignore[typeddict-item]
+        # Remove DEFAULT_IMPORTS from the formal_statement
+        if formal_statement:
+            formal_statement = remove_default_imports(formal_statement)
+    except LLMParsingError:
+        # Return parse failure marker - state manager will handle requeueing and attempt increments
+        return {"formal_theorem": None}  # type: ignore[typeddict-item]
+    else:
+        # Return InformalTheoremState with the formal theorem
+        return {"formal_theorem": formal_statement}  # type: ignore[typeddict-item]
 
 
 def _hash_informal_statement(informal_statement: str) -> str:

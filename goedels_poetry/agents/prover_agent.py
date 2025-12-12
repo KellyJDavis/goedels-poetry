@@ -127,13 +127,22 @@ def _prover(llm: BaseChatModel, state: FormalTheoremProofState) -> FormalTheorem
     log_llm_response("PROVER_AGENT_LLM", str(response_content))
 
     # Parse prover response
-    formal_proof = _parse_prover_response(str(response_content), state["preamble"])
+    try:
+        formal_proof = _parse_prover_response(str(response_content), state["preamble"])
 
-    # Add the formal proof to the state
-    state["formal_proof"] = formal_proof
+        # Add the formal proof to the state
+        state["formal_proof"] = formal_proof
 
-    # Add the formal proof to the state's proof_history
-    state["proof_history"] += [AIMessage(content=formal_proof)]
+        # Add the formal proof to the state's proof_history
+        state["proof_history"] += [AIMessage(content=formal_proof)]
+    except LLMParsingError:
+        # Set parse failure markers - state manager will handle requeueing and attempt increments
+        state["formal_proof"] = None
+        state["errors"] = (
+            "Malformed LLM response: unable to parse proof body from LLM output. "
+            "The response did not contain a valid Lean4 code block or the code block could not be extracted."
+        )
+        # Do not add to proof_history on parse failure
 
     # Return a FormalTheoremProofStates with state added to its outputs
     return {"outputs": [state]}  # type: ignore[typeddict-item]

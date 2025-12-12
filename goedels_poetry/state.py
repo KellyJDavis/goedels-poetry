@@ -436,7 +436,25 @@ class GoedelsPoetryStateManager:
         # Remove all elements from the formalizer queue
         self._state.informal_formalizer_queue = None
 
-        # Place formalized_informal_theorem on the queue to be syntactically validated
+        # Check if this is a parse failure (formal_theorem is None indicates LLMParsingError)
+        if formalized_informal_theorem["formal_theorem"] is None:
+            # Increment formalization attempts
+            formalized_informal_theorem["formalization_attempts"] += 1
+
+            # Check if we've exceeded max attempts
+            if formalized_informal_theorem["formalization_attempts"] >= FORMALIZER_AGENT_MAX_RETRIES:
+                # Exceeded max attempts - finish with error
+                self._state.is_finished = True
+                self._state.reason = (
+                    "Proof failed: Unable to formalize informal theorem - maximum formalization attempts exceeded."
+                )
+                return
+
+            # Still within retry limit - requeue for retry
+            self._state.informal_formalizer_queue = formalized_informal_theorem
+            return
+
+        # Successful parse - place formalized_informal_theorem on the queue to be syntactically validated
         self._state.informal_syntax_queue = formalized_informal_theorem
 
     def get_informal_theorem_to_validate(self) -> InformalTheoremState | None:
@@ -611,8 +629,43 @@ class GoedelsPoetryStateManager:
         # Remove all attempted proofs elements from the queue to be proven
         self._state.proof_prove_queue.clear()
 
-        # Place attempted proofs in the queue of proofs to be validated
-        self._state.proof_validate_queue += proven_theorems["outputs"]
+        # Partition outputs into parse failures and successful parses
+        parse_failure_message = (
+            "Malformed LLM response: unable to parse proof body from LLM output. "
+            "The response did not contain a valid Lean4 code block or the code block could not be extracted."
+        )
+        parse_failures = [
+            pt
+            for pt in proven_theorems["outputs"]
+            if pt["formal_proof"] is None and pt["errors"] == parse_failure_message
+        ]
+        successful_parses = [
+            pt
+            for pt in proven_theorems["outputs"]
+            if not (pt["formal_proof"] is None and pt["errors"] == parse_failure_message)
+        ]
+
+        # Handle parse failures: increment attempts, requeue or handle exhaustion
+        for parse_failure in parse_failures:
+            parse_failure["self_correction_attempts"] += 1
+
+            # Check if we've exceeded max self-correction attempts
+            if parse_failure["self_correction_attempts"] >= PROVER_AGENT_MAX_SELF_CORRECTION_ATTEMPTS:
+                # Exceeded max attempts - handle like a too-difficult proof
+                parse_failure["pass_attempts"] += 1
+                if parse_failure["pass_attempts"] < PROVER_AGENT_MAX_PASS:
+                    # Restart self-correction loop: reset state, requeue for correction
+                    self._reset_self_correction_state(parse_failure)
+                    self._state.proof_prove_queue.append(parse_failure)
+                else:
+                    # Hit max_pass: queue for decomposition
+                    self._queue_proofs_for_decomposition([parse_failure])
+            else:
+                # Still within retry limit - requeue for retry
+                self._state.proof_prove_queue.append(parse_failure)
+
+        # Handle successful parses - place attempted proofs in the queue of proofs to be validated
+        self._state.proof_validate_queue += successful_parses
 
     def get_proofs_to_validate(self) -> FormalTheoremProofStates:
         """
@@ -889,8 +942,36 @@ class GoedelsPoetryStateManager:
         # Remove all elements from the queue of theorems to sketch
         self._state.decomposition_sketch_queue.clear()
 
-        # Place all sketched theorems into the queue of sketches to be validated
-        self._state.decomposition_validate_queue += sketched_theorems["outputs"]
+        # Partition outputs into parse failures and successful parses
+        parse_failure_message = (
+            "Malformed LLM response: unable to parse proof sketch from LLM output. "
+            "The response did not contain a valid Lean4 code block or the code block could not be extracted."
+        )
+        parse_failures = [
+            st
+            for st in sketched_theorems["outputs"]
+            if st["proof_sketch"] is None and st["errors"] == parse_failure_message
+        ]
+        successful_parses = [
+            st
+            for st in sketched_theorems["outputs"]
+            if not (st["proof_sketch"] is None and st["errors"] == parse_failure_message)
+        ]
+
+        # Handle parse failures: increment attempts, requeue or handle exhaustion
+        for parse_failure in parse_failures:
+            parse_failure["self_correction_attempts"] += 1
+
+            # Check if we've exceeded max self-correction attempts
+            if parse_failure["self_correction_attempts"] >= DECOMPOSER_AGENT_MAX_SELF_CORRECTION_ATTEMPTS:
+                # Exceeded max attempts - handle like a failed sketch (backtrack or finish)
+                self._handle_failed_sketch(parse_failure)
+            else:
+                # Still within retry limit - requeue for retry
+                self._state.decomposition_sketch_queue.append(parse_failure)
+
+        # Handle successful parses - place all sketched theorems into the queue of sketches to be validated
+        self._state.decomposition_validate_queue += successful_parses
 
     def get_sketches_to_validate(self) -> DecomposedFormalTheoremStates:
         """

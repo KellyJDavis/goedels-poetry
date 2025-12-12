@@ -5,7 +5,7 @@ from langgraph.graph import END, START, StateGraph
 from langgraph.graph.state import CompiledStateGraph
 
 from goedels_poetry.agents.state import InformalTheoremState
-from goedels_poetry.agents.util.common import DEFAULT_IMPORTS, combine_preamble_and_body, load_prompt
+from goedels_poetry.agents.util.common import DEFAULT_IMPORTS, LLMParsingError, combine_preamble_and_body, load_prompt
 from goedels_poetry.agents.util.debug import log_llm_prompt, log_llm_response
 from goedels_poetry.agents.util.kimina_server import parse_semantic_check_response
 
@@ -100,7 +100,11 @@ def _check_semantics(llm: BaseChatModel, state: InformalTheoremState) -> Informa
     log_llm_response("SEMANTICS_AGENT_LLM", str(response_content))
 
     # Parse semantics checker response
-    judgement = parse_semantic_check_response(str(response_content))
-
-    # Return InformalTheoremState with semantic set appropriately
-    return {"semantic": (judgement == "Appropriate")}  # type: ignore[typeddict-item]
+    try:
+        judgement = parse_semantic_check_response(str(response_content))
+    except LLMParsingError:
+        # On parse failure, return semantic=False - existing code will handle retry
+        return {"semantic": False}  # type: ignore[typeddict-item]
+    else:
+        # Return InformalTheoremState with semantic set appropriately
+        return {"semantic": (judgement == "Appropriate")}  # type: ignore[typeddict-item]
