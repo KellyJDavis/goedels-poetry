@@ -11,7 +11,6 @@ from goedels_poetry.cli import (
     _handle_processing_error,
     process_theorems_from_directory,
 )
-from goedels_poetry.state import GoedelsPoetryState, GoedelsPoetryStateManager
 
 
 @pytest.fixture
@@ -23,6 +22,9 @@ def temp_dir(tmp_path):
 def test_proof_validation_result_field_exists():
     """Test that proof_validation_result field exists in GoedelsPoetryState."""
     import os
+
+    # Import inside function to avoid triggering import at module level
+    from goedels_poetry.state import GoedelsPoetryState
 
     old_env = os.environ.get("GOEDELS_POETRY_DIR")
 
@@ -300,7 +302,9 @@ def test_framework_stores_validation_result():
     import tempfile
     import uuid
 
+    # Import inside function to avoid triggering import at module level
     from goedels_poetry.framework import GoedelsPoetryConfig, GoedelsPoetryFramework
+    from goedels_poetry.state import GoedelsPoetryState, GoedelsPoetryStateManager
 
     old_env = os.environ.get("GOEDELS_POETRY_DIR")
 
