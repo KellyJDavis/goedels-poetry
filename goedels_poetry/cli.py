@@ -9,6 +9,7 @@ import typer
 from rich.console import Console
 
 from goedels_poetry.agents.util.common import split_preamble_and_body
+from goedels_poetry.state import GoedelsPoetryStateManager
 
 app = typer.Typer()
 console = Console()
@@ -29,7 +30,7 @@ def _read_theorem_content(theorem_file: Path) -> str | None:
 
 def _handle_missing_header(theorem_file: Path) -> None:
     console.print("[bold red]Error:[/bold red] Formal theorems must include a Lean header (imports/options).")
-    output_file = theorem_file.with_suffix(".proof")
+    output_file = theorem_file.with_suffix(".failed-proof")
     output_file.write_text(
         "Proof failed: Missing Lean header/preamble in supplied formal theorem.",
         encoding="utf-8",
@@ -40,10 +41,53 @@ def _handle_processing_error(theorem_file: Path, error: Exception) -> None:
     console.print(f"[bold red]Error processing {theorem_file.name}:[/bold red] {error}")
     console.print(traceback.format_exc())
 
-    output_file = theorem_file.with_suffix(".proof")
+    output_file = theorem_file.with_suffix(".failed-proof")
     error_message = f"Error during processing: {error}\n\n{traceback.format_exc()}"
     output_file.write_text(error_message, encoding="utf-8")
     console.print(f"[bold yellow]Error details saved to {output_file.name}[/bold yellow]")
+
+
+def _write_proof_result(theorem_file: Path, state_manager: GoedelsPoetryStateManager, console: Console) -> None:
+    """
+    Write proof result to appropriate file based on completion status and validation result.
+
+    Args:
+        theorem_file: The theorem file being processed
+        state_manager: The state manager containing proof results
+        console: Console for output messages
+    """
+
+    # Determine output filename based on completion status and validation result
+    if state_manager.reason == "Proof completed successfully.":
+        # Check validation result to determine filename
+        validation_result = state_manager._state.proof_validation_result
+        if validation_result is True:
+            output_file = theorem_file.with_suffix(".proof")
+        else:
+            # validation_result is False or None (validation failed or exception)
+            output_file = theorem_file.with_suffix(".failed-proof")
+
+        try:
+            # Note: Final verification already performed in framework.finish()
+            # No need to verify again here
+            complete_proof = state_manager.reconstruct_complete_proof()
+            output_file.write_text(complete_proof, encoding="utf-8")
+            if validation_result is True:
+                console.print(f"[bold green]✓ Successfully proved and saved to {output_file.name}[/bold green]")
+            else:
+                console.print(
+                    f"[bold yellow]⚠ Proof completed but validation failed, saved to {output_file.name}[/bold yellow]"
+                )
+        except Exception as e:
+            error_message = f"Proof completed but error reconstructing proof: {e}\n{traceback.format_exc()}"
+            output_file.write_text(error_message, encoding="utf-8")
+            console.print(f"[bold yellow]⚠ Proof had errors, details saved to {output_file.name}[/bold yellow]")
+    else:
+        # Non-successful completion - use .failed-proof
+        output_file = theorem_file.with_suffix(".failed-proof")
+        failure_message = f"Proof failed: {state_manager.reason}"
+        output_file.write_text(failure_message, encoding="utf-8")
+        console.print(f"[bold red]✗ Failed to prove, details saved to {output_file.name}[/bold red]")
 
 
 def process_single_theorem(
@@ -138,22 +182,8 @@ def process_theorems_from_directory(
             framework = GoedelsPoetryFramework(config, state_manager, file_console)
             framework.run()
 
-            output_file = theorem_file.with_suffix(".proof")
-            if state_manager.reason == "Proof completed successfully.":
-                try:
-                    # Note: Final verification already performed in framework.finish()
-                    # No need to verify again here
-                    complete_proof = state_manager.reconstruct_complete_proof()
-                    output_file.write_text(complete_proof, encoding="utf-8")
-                    console.print(f"[bold green]✓ Successfully proved and saved to {output_file.name}[/bold green]")
-                except Exception as e:
-                    error_message = f"Proof completed but error reconstructing proof: {e}\n{traceback.format_exc()}"
-                    output_file.write_text(error_message, encoding="utf-8")
-                    console.print(f"[bold yellow]⚠ Proof had errors, details saved to {output_file.name}[/bold yellow]")
-            else:
-                failure_message = f"Proof failed: {state_manager.reason}"
-                output_file.write_text(failure_message, encoding="utf-8")
-                console.print(f"[bold red]✗ Failed to prove, details saved to {output_file.name}[/bold red]")
+            # Write proof result to appropriate file
+            _write_proof_result(theorem_file, state_manager, console)
 
         except Exception as e:
             _handle_processing_error(theorem_file, e)

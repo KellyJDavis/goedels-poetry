@@ -375,6 +375,9 @@ class GoedelsPoetryFramework:
                     server_max_retries=self._config.kimina_lean_server_max_retries,
                 )
 
+                # Store validation result in state
+                self._state_manager._state.proof_validation_result = is_valid
+
                 if is_valid:
                     self._console.print("[bold green]✓ Final verification passed: Proof is valid[/bold green]")
                 else:
