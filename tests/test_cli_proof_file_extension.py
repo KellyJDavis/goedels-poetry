@@ -1,8 +1,9 @@
 """Tests for CLI proof file extension based on validation result."""
 
+import sys
 import tempfile
 from contextlib import suppress
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock, Mock, patch
 
 import pytest
 
@@ -17,6 +18,17 @@ from goedels_poetry.cli import (
 def temp_dir(tmp_path):
     """Create a temporary directory for test files."""
     return tmp_path
+
+
+def _create_mock_state_module(state_manager_mock):
+    """Create a mock state module to avoid importing the real module on Python 3.11."""
+    mock_state_module = Mock()
+    mock_state_manager_class = MagicMock()
+    mock_state_manager_class.return_value = state_manager_mock
+    mock_state_module.GoedelsPoetryStateManager = mock_state_manager_class
+    # GoedelsPoetryState needs to be callable since it's instantiated in the code
+    mock_state_module.GoedelsPoetryState = MagicMock(return_value=MagicMock())
+    return mock_state_module
 
 
 def test_proof_validation_result_field_exists():
@@ -78,24 +90,25 @@ def test_valid_proof_writes_to_proof_file(temp_dir):
     os.environ["GOEDELS_POETRY_DIR"] = str(temp_dir)
 
     try:
+        # Setup mock state manager
+        mock_state_manager = MagicMock()
+        mock_state_manager.reason = "Proof completed successfully."
+        mock_state_manager._state.proof_validation_result = True
+        mock_state_manager.reconstruct_complete_proof.return_value = (
+            f"import Mathlib.Data.Nat.Basic\n\ntheorem {unique_name} : True := by trivial"
+        )
+        mock_state_module = _create_mock_state_module(mock_state_manager)
+
         # Setup mocks - patch where they're imported inside process_theorems_from_directory
         with (
             patch("goedels_poetry.framework.GoedelsPoetryFramework") as mock_framework_class,
-            patch("goedels_poetry.state.GoedelsPoetryStateManager") as mock_sm_class,
+            patch.dict(sys.modules, {"goedels_poetry.state": mock_state_module}),
             patch("goedels_poetry.framework.GoedelsPoetryConfig") as mock_config_class,
         ):
             mock_framework = MagicMock()
             mock_framework_class.return_value = mock_framework
             mock_config = MagicMock()
             mock_config_class.return_value = mock_config
-
-            mock_state_manager = MagicMock()
-            mock_state_manager.reason = "Proof completed successfully."
-            mock_state_manager._state.proof_validation_result = True
-            mock_state_manager.reconstruct_complete_proof.return_value = (
-                f"import Mathlib.Data.Nat.Basic\n\ntheorem {unique_name} : True := by trivial"
-            )
-            mock_sm_class.return_value = mock_state_manager
 
             # Process the theorem
             process_theorems_from_directory(temp_dir, ".lean", is_formal=True)
@@ -117,36 +130,35 @@ def test_valid_proof_writes_to_proof_file(temp_dir):
 def test_invalid_proof_writes_to_failed_proof_file(temp_dir):
     """Test that an invalid proof writes to .failed-proof file."""
     import os
+    import uuid
 
     old_env = os.environ.get("GOEDELS_POETRY_DIR")
     os.environ["GOEDELS_POETRY_DIR"] = str(temp_dir)
 
     try:
         # Create a test theorem file with unique content
-        import uuid
-
         unique_name = f"test_{uuid.uuid4().hex[:8]}"
         theorem_content = f"import Mathlib.Data.Nat.Basic\n\ntheorem {unique_name} : True := by sorry"
         theorem_file = temp_dir / f"{unique_name}.lean"
         theorem_file.write_text(theorem_content)
 
+        # Setup mock state manager with invalid validation result
+        mock_state_manager = MagicMock()
+        mock_state_manager.reason = "Proof completed successfully."
+        mock_state_manager._state.proof_validation_result = False
+        mock_state_manager.reconstruct_complete_proof.return_value = theorem_content
+        mock_state_module = _create_mock_state_module(mock_state_manager)
+
         # Setup mocks - patch where they're imported inside process_theorems_from_directory
         with (
             patch("goedels_poetry.framework.GoedelsPoetryFramework") as mock_framework_class,
-            patch("goedels_poetry.state.GoedelsPoetryStateManager") as mock_sm_class,
+            patch.dict(sys.modules, {"goedels_poetry.state": mock_state_module}),
             patch("goedels_poetry.framework.GoedelsPoetryConfig") as mock_config_class,
         ):
             mock_framework = MagicMock()
             mock_framework_class.return_value = mock_framework
             mock_config = MagicMock()
             mock_config_class.return_value = mock_config
-
-            # Setup mock state manager with invalid validation result
-            mock_state_manager = MagicMock()
-            mock_state_manager.reason = "Proof completed successfully."
-            mock_state_manager._state.proof_validation_result = False
-            mock_state_manager.reconstruct_complete_proof.return_value = theorem_content
-            mock_sm_class.return_value = mock_state_manager
 
             # Process the theorem
             process_theorems_from_directory(temp_dir, ".lean", is_formal=True)
@@ -177,25 +189,25 @@ def test_validation_exception_writes_to_failed_proof_file(temp_dir):
         theorem_file = temp_dir / f"{unique_name}.lean"
         theorem_file.write_text(theorem_content)
 
+        # Setup mock state manager with None validation result (exception case)
+        mock_state_manager = MagicMock()
+        mock_state_manager.reason = "Proof completed successfully."
+        mock_state_manager._state.proof_validation_result = None
+        mock_state_manager.reconstruct_complete_proof.return_value = (
+            f"import Mathlib.Data.Nat.Basic\n\ntheorem {unique_name} : True := by trivial"
+        )
+        mock_state_module = _create_mock_state_module(mock_state_manager)
+
         # Setup mocks - patch where they're imported inside process_theorems_from_directory
         with (
             patch("goedels_poetry.framework.GoedelsPoetryFramework") as mock_framework_class,
-            patch("goedels_poetry.state.GoedelsPoetryStateManager") as mock_sm_class,
+            patch.dict(sys.modules, {"goedels_poetry.state": mock_state_module}),
             patch("goedels_poetry.framework.GoedelsPoetryConfig") as mock_config_class,
         ):
             mock_framework = MagicMock()
             mock_framework_class.return_value = mock_framework
             mock_config = MagicMock()
             mock_config_class.return_value = mock_config
-
-            # Setup mock state manager with None validation result (exception case)
-            mock_state_manager = MagicMock()
-            mock_state_manager.reason = "Proof completed successfully."
-            mock_state_manager._state.proof_validation_result = None
-            mock_state_manager.reconstruct_complete_proof.return_value = (
-                f"import Mathlib.Data.Nat.Basic\n\ntheorem {unique_name} : True := by trivial"
-            )
-            mock_sm_class.return_value = mock_state_manager
 
             # Process the theorem
             process_theorems_from_directory(temp_dir, ".lean", is_formal=True)
@@ -226,21 +238,21 @@ def test_non_successful_completion_writes_to_failed_proof_file(temp_dir):
         theorem_file = temp_dir / f"{unique_name}.lean"
         theorem_file.write_text(theorem_content)
 
+        # Setup mock state manager with non-successful reason
+        mock_state_manager = MagicMock()
+        mock_state_manager.reason = "Proof failed: Maximum attempts exceeded."
+        mock_state_module = _create_mock_state_module(mock_state_manager)
+
         # Setup mocks - patch where they're imported inside process_theorems_from_directory
         with (
             patch("goedels_poetry.framework.GoedelsPoetryFramework") as mock_framework_class,
-            patch("goedels_poetry.state.GoedelsPoetryStateManager") as mock_sm_class,
+            patch.dict(sys.modules, {"goedels_poetry.state": mock_state_module}),
             patch("goedels_poetry.framework.GoedelsPoetryConfig") as mock_config_class,
         ):
             mock_framework = MagicMock()
             mock_framework_class.return_value = mock_framework
             mock_config = MagicMock()
             mock_config_class.return_value = mock_config
-
-            # Setup mock state manager with non-successful reason
-            mock_state_manager = MagicMock()
-            mock_state_manager.reason = "Proof failed: Maximum attempts exceeded."
-            mock_sm_class.return_value = mock_state_manager
 
             # Process the theorem
             process_theorems_from_directory(temp_dir, ".lean", is_formal=True)
@@ -267,7 +279,6 @@ def test_missing_header_writes_to_failed_proof_file(temp_dir):
 
     _handle_missing_header(theorem_file)
 
-    # Check that .failed-proof file was created
     failed_proof_file = temp_dir / "test.failed-proof"
     assert failed_proof_file.exists(), ".failed-proof file should exist for missing header"
     assert not (temp_dir / "test.proof").exists(), ".proof file should not exist"
@@ -280,12 +291,11 @@ def test_missing_header_writes_to_failed_proof_file(temp_dir):
 def test_processing_error_writes_to_failed_proof_file(temp_dir):
     """Test that processing error writes to .failed-proof file."""
     theorem_file = temp_dir / "test.lean"
-    theorem_file.write_text("theorem test : True := by sorry")
+    theorem_file.write_text("import Mathlib.Data.Nat.Basic\n\ntheorem test : True := by sorry")
 
-    test_error = ValueError("Test error message")
-    _handle_processing_error(theorem_file, test_error)
+    error = Exception("Test error message")
+    _handle_processing_error(theorem_file, error)
 
-    # Check that .failed-proff file was created
     failed_proof_file = temp_dir / "test.failed-proof"
     assert failed_proof_file.exists(), ".failed-proof file should exist for processing error"
     assert not (temp_dir / "test.proof").exists(), ".proof file should not exist"
@@ -414,25 +424,25 @@ def test_informal_theorem_processing(temp_dir):
         theorem_file = temp_dir / f"{unique_name}.txt"
         theorem_file.write_text(theorem_content)
 
+        # Setup mock state manager with valid validation result
+        mock_state_manager = MagicMock()
+        mock_state_manager.reason = "Proof completed successfully."
+        mock_state_manager._state.proof_validation_result = True
+        mock_state_manager.reconstruct_complete_proof.return_value = (
+            f"import Mathlib.Data.Nat.Basic\n\ntheorem {unique_name} : 1 + 1 = 2 := by rfl"
+        )
+        mock_state_module = _create_mock_state_module(mock_state_manager)
+
         # Setup mocks - patch where they're imported inside process_theorems_from_directory
         with (
             patch("goedels_poetry.framework.GoedelsPoetryFramework") as mock_framework_class,
-            patch("goedels_poetry.state.GoedelsPoetryStateManager") as mock_sm_class,
+            patch.dict(sys.modules, {"goedels_poetry.state": mock_state_module}),
             patch("goedels_poetry.framework.GoedelsPoetryConfig") as mock_config_class,
         ):
             mock_framework = MagicMock()
             mock_framework_class.return_value = mock_framework
             mock_config = MagicMock()
             mock_config_class.return_value = mock_config
-
-            # Setup mock state manager with valid validation result
-            mock_state_manager = MagicMock()
-            mock_state_manager.reason = "Proof completed successfully."
-            mock_state_manager._state.proof_validation_result = True
-            mock_state_manager.reconstruct_complete_proof.return_value = (
-                f"import Mathlib.Data.Nat.Basic\n\ntheorem {unique_name} : 1 + 1 = 2 := by rfl"
-            )
-            mock_sm_class.return_value = mock_state_manager
 
             # Process the theorem
             process_theorems_from_directory(temp_dir, ".txt", is_formal=False)
