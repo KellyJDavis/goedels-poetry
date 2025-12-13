@@ -4,12 +4,15 @@ os.environ["TQDM_DISABLE"] = "1"
 
 import traceback
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import typer
 from rich.console import Console
 
 from goedels_poetry.agents.util.common import split_preamble_and_body
-from goedels_poetry.state import GoedelsPoetryStateManager
+
+if TYPE_CHECKING:
+    from goedels_poetry.state import GoedelsPoetryStateManager
 
 app = typer.Typer()
 console = Console()
@@ -47,7 +50,7 @@ def _handle_processing_error(theorem_file: Path, error: Exception) -> None:
     console.print(f"[bold yellow]Error details saved to {output_file.name}[/bold yellow]")
 
 
-def _write_proof_result(theorem_file: Path, state_manager: GoedelsPoetryStateManager, console: Console) -> None:
+def _write_proof_result(theorem_file: Path, state_manager: "GoedelsPoetryStateManager", console: Console) -> None:
     """
     Write proof result to appropriate file based on completion status and validation result.
 
