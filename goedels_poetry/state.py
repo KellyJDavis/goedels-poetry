@@ -65,6 +65,10 @@ class GoedelsPoetryState:
         # Introduce a string to hold the reason for finishing
         self.reason: str | None = None
 
+        # Introduce a bool | None to hold the final proof validation result
+        # True = validation passed, False = validation failed, None = validation not run or exception occurred
+        self.proof_validation_result: bool | None = None
+
         # Introduce a list of strings to hold the action history
         self.action_history: list[str] = []
 
