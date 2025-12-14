@@ -17,6 +17,7 @@ api_key = ollama
 max_tokens = 50000
 num_ctx = 40960
 max_retries = 10
+max_remote_retries = 5
 
 [PROVER_AGENT_LLM]
 model = kdavis/Goedel-Prover-V2:32b
@@ -28,6 +29,7 @@ num_ctx = 40960
 max_self_correction_attempts = 2
 max_depth = 20
 max_pass = 32
+max_remote_retries = 5
 
 [SEMANTICS_AGENT_LLM]
 model = qwen3:30b
@@ -36,6 +38,7 @@ url = http://localhost:11434/v1
 api_key = ollama
 max_tokens = 50000
 num_ctx = 262144
+max_remote_retries = 5
 
 [SEARCH_QUERY_AGENT_LLM]
 model = qwen3:30b
@@ -44,6 +47,7 @@ url = http://localhost:11434/v1
 api_key = ollama
 max_tokens = 50000
 num_ctx = 262144
+max_remote_retries = 5
 
 [DECOMPOSER_AGENT_LLM]
 model = gpt-5-2025-08-07
@@ -73,7 +77,7 @@ The vector database agent queries this server after search queries are generated
 
 ### LLM Agent Configuration
 
-Gödel's Poetry uses OpenAI-compatible APIs (via `ChatOpenAI`) to connect to LLM providers. The system supports both Ollama and vLLM through their OpenAI-compatible endpoints.
+Gödel's Poetry uses OpenAI-compatible APIs (via `ChatOpenAI`) to connect to LLM providers. The system supports Ollama, vLLM, and LM Studio through their OpenAI-compatible endpoints.
 
 #### Required Models
 
@@ -88,22 +92,31 @@ Gödel's Poetry requires several models to be available on your configured provi
 Each LLM agent section supports the following parameters:
 
 - **`model`**: The model name/identifier (required)
-- **`provider`**: The provider type - `"ollama"` or `"vllm"` (required)
+- **`provider`**: The provider type - `"ollama"`, `"vllm"`, or `"lmstudio"` (required)
 - **`url`**: The base URL for the OpenAI-compatible API endpoint (default: `http://localhost:11434/v1` for Ollama)
 - **`api_key`**: API key for authentication (default: `"ollama"` for Ollama, which ignores this value)
 - **`max_tokens`**: Maximum tokens in generated response (default: `50000`)
 - **`num_ctx`**: Context window size (Ollama-specific, passed via `extra_body`)
-- **`max_retries`**: Retry attempts for API calls (FORMALIZER_AGENT_LLM only)
+- **`max_retries`**: Maximum formalization attempts (FORMALIZER_AGENT_LLM only) - controls how many times the system will attempt to formalize an informal theorem before giving up
+- **`max_remote_retries`**: Maximum remote API retry attempts for network/API errors (default: `5` for all LLM agents) - controls how many times the system will retry failed API calls to the LLM provider
 
 #### Optional vLLM-Specific Parameters
 
-The following parameters are supported for vLLM and are ignored by Ollama:
+The following parameters are supported for vLLM and are ignored by Ollama and LM Studio:
 
 - **`use_beam_search`**: Enable beam search decoding (boolean, default: not set)
 - **`best_of`**: Number of completions to generate server-side and return the best (integer, default: not set)
 - **`top_k`**: Limit the number of highest probability vocabulary tokens to consider (integer, default: not set)
 - **`repetition_penalty`**: Penalty for repeated tokens to reduce repetition (float, default: not set)
 - **`length_penalty`**: Control the length of the output (float, default: not set)
+
+These parameters are passed via `extra_body` and will be ignored by providers that don't support them.
+
+#### Optional LM Studio-Specific Parameters
+
+The following parameters are supported for LM Studio and are ignored by Ollama and vLLM:
+
+- **`ttl`**: Time-to-live for the request in seconds (integer, default: not set)
 
 These parameters are passed via `extra_body` and will be ignored by providers that don't support them.
 
@@ -213,7 +226,7 @@ The decomposer agent uses OpenAI for proof sketching. Configuration parameters:
 
 - **`model`**: The OpenAI model used for proof sketching (default: `gpt-5-2025-08-07`)
 - **`max_completion_tokens`**: Maximum tokens in generated response (default: `50000`)
-- **`max_remote_retries`**: Retry attempts for API calls (default: `5`)
+- **`max_remote_retries`**: Maximum remote API retry attempts for network/API errors (default: `5`)
 - **`max_self_correction_attempts`**: Maximum decomposition self-correction attempts (default: `6`)
 
 **API Key Setup:**

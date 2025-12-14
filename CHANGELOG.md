@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 - Parse failure handling with requeueing and attempt tracking: implemented robust error handling for `LLMParsingError` exceptions across all agents (formalizer, semantics, proof sketcher, prover) with centralized attempt tracking and automatic requeueing in the state manager
-- `max_remote_retries` configuration option to LLM settings (`FORMALIZER_AGENT_LLM`, `PROVER_AGENT_LLM`, `DECOMPOSER_AGENT_LLM`) for controlling maximum remote API retry attempts
+- `max_remote_retries` configuration option to LLM settings (`FORMALIZER_AGENT_LLM`, `PROVER_AGENT_LLM`, `SEMANTICS_AGENT_LLM`, `SEARCH_QUERY_AGENT_LLM`, `DECOMPOSER_AGENT_LLM`) for controlling maximum remote API retry attempts
 - Proof file extensions based on validation result: proofs are now written to `.proof` files for valid proofs and `.failed-proof` files for invalid proofs, validation exceptions, or non-successful completions
 - `proof_validation_result` field in `GoedelsPoetryState` to track final validation status from the Kimina server
 - Comprehensive test coverage for parse failure handling functionality (519 lines of new tests)
