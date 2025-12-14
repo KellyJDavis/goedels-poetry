@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.0.14] - 2025-12-14
+
+### Documentation
+- Updated documentation to accurately reflect current codebase state: fixed discrepancies and added missing information across all documentation files
+- Updated README.md batch processing description to mention both `.proof` and `.failed-proof` file outputs, matching actual CLI behavior
+- Added `max_remote_retries` parameter documentation for all LLM agents (FORMALIZER, PROVER, SEMANTICS, SEARCH_QUERY, DECOMPOSER) in both README.md and CONFIGURATION.md, including in simplified config examples
+- Clarified distinction between `max_retries` (formalization attempts, FORMALIZER only) and `max_remote_retries` (network/API retries, all LLM agents) in CONFIGURATION.md
+- Updated Makefile test-integration instructions to use `kimina-ast-server` command instead of deprecated `python -m server`, matching README.md
+- Enhanced CONFIGURATION.md with complete LM Studio parameter documentation and ensured all provider descriptions are accurate
+
 ## [0.0.13] - 2025-12-14
 
 ### Added
@@ -212,6 +222,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Typer for CLI
 - Rich for beautiful terminal output
 
+[0.0.14]: https://github.com/KellyJDavis/goedels-poetry/releases/tag/v0.0.14
 [0.0.13]: https://github.com/KellyJDavis/goedels-poetry/releases/tag/v0.0.13
 [0.0.12]: https://github.com/KellyJDavis/goedels-poetry/releases/tag/v0.0.12
 [0.0.11]: https://github.com/KellyJDavis/goedels-poetry/releases/tag/v0.0.11
