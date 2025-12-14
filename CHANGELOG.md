@@ -5,6 +5,30 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.0.13] - 2025-12-14
+
+### Added
+- Parse failure handling with requeueing and attempt tracking: implemented robust error handling for `LLMParsingError` exceptions across all agents (formalizer, semantics, proof sketcher, prover) with centralized attempt tracking and automatic requeueing in the state manager
+- `max_remote_retries` configuration option to LLM settings (`FORMALIZER_AGENT_LLM`, `PROVER_AGENT_LLM`, `DECOMPOSER_AGENT_LLM`) for controlling maximum remote API retry attempts
+- Proof file extensions based on validation result: proofs are now written to `.proof` files for valid proofs and `.failed-proof` files for invalid proofs, validation exceptions, or non-successful completions
+- `proof_validation_result` field in `GoedelsPoetryState` to track final validation status from the Kimina server
+- Comprehensive test coverage for parse failure handling functionality (519 lines of new tests)
+- `parse_semantic_check_response` function moved to `common.py` for better code organization and Python 3.11 compatibility
+
+### Changed
+- Refactored LLM initialization from lazy loading to eager loading, improving performance and error detection
+- Updated type hinting in CLI module to use `TYPE_CHECKING` for conditional imports of `GoedelsPoetryStateManager`, improving type checker compatibility without affecting runtime performance
+- Enhanced CLI proof file handling logic with refactored `_write_proof_result()` helper function for better maintainability and clarity
+- Moved `parse_semantic_check_response` from `kimina_server.py` to `common.py` to avoid kimina_client import dependencies that caused Python 3.11 compatibility issues
+
+### Fixed
+- Fixed CI failures on Python 3.11 by avoiding problematic state module import that triggered Pydantic validation errors about using `typing.TypedDict` instead of `typing_extensions.TypedDict`
+- Fixed import chain issues in test files by using `patch.dict(sys.modules, ...)` to inject mock modules before imports occur
+- Fixed Python 3.11 compatibility issues by eliminating kimina_client import dependencies in semantics agent
+
+### Documentation
+- Updated README.md and CONFIGURATION.md to reflect LM Studio integration changes, including updated model references to new GGUF versions and detailed setup instructions for LM Studio
+
 ## [0.0.12] - 2025-12-08
 
 ### Changed
@@ -188,6 +212,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Typer for CLI
 - Rich for beautiful terminal output
 
+[0.0.13]: https://github.com/KellyJDavis/goedels-poetry/releases/tag/v0.0.13
+[0.0.12]: https://github.com/KellyJDavis/goedels-poetry/releases/tag/v0.0.12
 [0.0.11]: https://github.com/KellyJDavis/goedels-poetry/releases/tag/v0.0.11
 [0.0.10]: https://github.com/KellyJDavis/goedels-poetry/releases/tag/v0.0.10
 [0.0.9]: https://github.com/KellyJDavis/goedels-poetry/releases/tag/v0.0.9
