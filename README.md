@@ -326,7 +326,7 @@ goedels_poetry --informal-theorems ./informal-theorems/
 For batch processing, the tool will:
 - Read each theorem from its file
 - Attempt to generate and verify a proof
-- Save results to `.proof` files alongside the originals
+- Save results to `.proof` files (for successful proofs) or `.failed-proof` files (for failed proofs, validation failures, or errors) alongside the originals
 
 #### Get Help
 
@@ -566,6 +566,7 @@ Configuration is stored in `goedels_poetry/data/config.ini`:
 model = kdavis/goedel-formalizer-v2:32b
 num_ctx = 40960
 max_retries = 10
+max_remote_retries = 5
 
 [PROVER_AGENT_LLM]
 model = kdavis/Goedel-Prover-V2:32b
@@ -573,14 +574,17 @@ num_ctx = 40960
 max_self_correction_attempts = 2
 max_depth = 20
 max_pass = 32
+max_remote_retries = 5
 
 [SEMANTICS_AGENT_LLM]
 model = qwen3:30b
 num_ctx = 262144
+max_remote_retries = 5
 
 [SEARCH_QUERY_AGENT_LLM]
 model = qwen3:30b
 num_ctx = 262144
+max_remote_retries = 5
 
 [DECOMPOSER_AGENT_LLM]
 model = gpt-5-2025-08-07
@@ -603,6 +607,7 @@ package_filters = Mathlib,Batteries,Std,Init,Lean
 - `model`: The LLM used to convert informal theorems to Lean 4
 - `num_ctx`: Context window size (tokens)
 - `max_retries`: Maximum attempts to formalize a theorem
+- `max_remote_retries`: Maximum remote API retry attempts for network/API errors
 
 **Prover Agent**:
 - `model`: The LLM used to generate proofs
@@ -610,19 +615,22 @@ package_filters = Mathlib,Batteries,Std,Init,Lean
 - `max_self_correction_attempts`: Maximum proof generation self-correction attempts
 - `max_depth`: Maximum recursion depth for proof decomposition
 - `max_pass`: Maximum number of proof attempts before triggering decomposition
+- `max_remote_retries`: Maximum remote API retry attempts for network/API errors
 
 **Semantics Agent**:
 - `model`: The LLM used to validate semantic equivalence
 - `num_ctx`: Context window size (tokens)
+- `max_remote_retries`: Maximum remote API retry attempts for network/API errors
 
 **Search Query Agent**:
 - `model`: The LLM used to generate search queries for vector database retrieval
 - `num_ctx`: Context window size (tokens)
+- `max_remote_retries`: Maximum remote API retry attempts for network/API errors
 
 **Decomposer Agent**:
 - `model`: The OpenAI model used for proof sketching
 - `max_completion_tokens`: Maximum tokens in generated response
-- `max_remote_retries`: Retry attempts for API calls
+- `max_remote_retries`: Maximum remote API retry attempts for network/API errors
 - `max_self_correction_attempts`: Maximum decomposition self-correction attempts
 
 **Kimina Lean Server**:
