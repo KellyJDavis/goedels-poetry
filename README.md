@@ -797,6 +797,20 @@ For the Kimina Lean Server:
 }
 ```
 
+For LeanExplore:
+
+```bibtex
+@misc{asher2025leanexploresearchenginelean,
+      title={LeanExplore: A search engine for Lean 4 declarations},
+      author={Justin Asher},
+      year={2025},
+      eprint={2506.11085},
+      archivePrefix={arXiv},
+      primaryClass={cs.SE},
+      url={https://arxiv.org/abs/2506.11085},
+}
+```
+
 ---
 
 ## Support
