@@ -772,11 +772,14 @@ This project is licensed under the Apache License 2.0. See the [LICENSE](./LICEN
 If you use Gödel's Poetry in your research, please cite:
 
 ```bibtex
-@software{goedels_poetry,
-  author = {Davis, Kelly J.},
-  title = {Gödel's Poetry: Recursive Automated Theorem Proving},
-  year = {2025},
-  url = {https://github.com/KellyJDavis/goedels-poetry}
+@misc{davis2025godelspoetry,
+      title={G\"odel's Poetry},
+      author={Kelly J. Davis},
+      year={2025},
+      eprint={2512.14252},
+      archivePrefix={arXiv},
+      primaryClass={cs.AI},
+      url={https://arxiv.org/abs/2512.14252},
 }
 ```
 
