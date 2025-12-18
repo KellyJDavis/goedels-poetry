@@ -5,6 +5,22 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.0] - 2025-12-18
+
+### Added
+- Quick Start: OpenAI instructions covering all agents using OpenAI-compatible endpoints
+- BibTeX citations updated to include the Gödel's Poetry arXiv entry and a LeanExplore reference
+
+### Changed
+- Unified LLM provider handling: all agents now accept `provider` values of `ollama`, `vllm`, `lmstudio`, or `openai`, with provider-specific defaults and automatic API key handling
+- Decomposer agent configuration now aligns with other agents (`provider`, `url`, `max_tokens`, optional `num_ctx`) instead of using OpenAI-only `max_completion_tokens`
+- Removed `api_key` requirements from configuration sections; OpenAI now relies on `OPENAI_API_KEY` and other providers derive keys automatically
+- Formalizer prompt refined to encourage explicit thinking before generating Lean statements
+
+### Documentation
+- Clarified provider/endpoints section to reflect unified provider support for every agent
+- Added LeanExplore citation and refreshed instructions to set `OPENAI_API_KEY` when any agent uses OpenAI
+
 ## [1.0.0] - 2025-12-15
 
 ### Changed
@@ -228,6 +244,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Typer for CLI
 - Rich for beautiful terminal output
 
+[1.1.0]: https://github.com/KellyJDavis/goedels-poetry/releases/tag/v1.1.0
 [1.0.0]: https://github.com/KellyJDavis/goedels-poetry/releases/tag/v1.0.0
 [0.0.14]: https://github.com/KellyJDavis/goedels-poetry/releases/tag/v0.0.14
 [0.0.13]: https://github.com/KellyJDavis/goedels-poetry/releases/tag/v0.0.13
