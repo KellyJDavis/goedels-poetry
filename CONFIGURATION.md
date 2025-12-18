@@ -46,7 +46,7 @@ num_ctx = 262144
 max_remote_retries = 5
 
 [DECOMPOSER_AGENT_LLM]
-model = gpt-5-2025-08-07
+model = gpt-5.2-2025-12-11
 provider = openai
 url = https://api.openai.com/v1
 max_tokens = 50000
@@ -218,7 +218,7 @@ Ensure your LM Studio server is running with the OpenAI-compatible server enable
 The decomposer agent can use any supported provider (Ollama, vLLM, LM Studio, or OpenAI) for proof sketching. By default, it uses OpenAI. Configuration parameters:
 
 - **`provider`**: The provider type - `"ollama"`, `"vllm"`, `"lmstudio"`, or `"openai"` (default: `"openai"`)
-- **`model`**: The model used for proof sketching (default: `gpt-5-2025-08-07` for OpenAI)
+- **`model`**: The model used for proof sketching (default: `gpt-5.2-2025-12-11` for OpenAI)
 - **`url`**: The base URL for the API endpoint (default: `https://api.openai.com/v1` for OpenAI, provider-specific defaults for others)
 - **`max_tokens`**: Maximum tokens in generated response (default: `50000`). Note: `max_completion_tokens` is also supported for backward compatibility but `max_tokens` is preferred.
 - **`max_remote_retries`**: Maximum remote API retry attempts for network/API errors (default: `5`)
