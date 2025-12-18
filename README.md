@@ -23,6 +23,7 @@
 - [Quick Starts](#quick-starts)
   - [Quick Start: Ollama](#quick-start-ollama)
   - [Quick Start: vLLM](#quick-start-vllm)
+  - [Quick Start: OpenAI](#quick-start-openai)
   - [Quick Start: LM Studio](#quick-start-lm-studio)
 - [Examples](#examples)
 - [How It Works](#how-it-works)
@@ -134,6 +135,39 @@ export SEARCH_QUERY_AGENT_LLM__MODEL="Qwen/Qwen3-30B-A3B-Instruct-2507"
 ```
 
 4) **Run a quick check**
+```bash
+goedels_poetry --help
+```
+
+### Quick Start: OpenAI
+
+1) **Install Gödel's Poetry**
+```bash
+pip install goedels-poetry
+```
+
+2) **Configure environment**
+```bash
+export OPENAI_API_KEY="your-openai-key"
+
+export FORMALIZER_AGENT_LLM__PROVIDER="openai"
+export FORMALIZER_AGENT_LLM__URL="https://api.openai.com/v1"
+export FORMALIZER_AGENT_LLM__MODEL="gpt-5-2025-08-07"
+
+export PROVER_AGENT_LLM__PROVIDER="openai"
+export PROVER_AGENT_LLM__URL="https://api.openai.com/v1"
+export PROVER_AGENT_LLM__MODEL="gpt-5-2025-08-07"
+
+export SEMANTICS_AGENT_LLM__PROVIDER="openai"
+export SEMANTICS_AGENT_LLM__URL="https://api.openai.com/v1"
+export SEMANTICS_AGENT_LLM__MODEL="gpt-5-2025-08-07"
+
+export SEARCH_QUERY_AGENT_LLM__PROVIDER="openai"
+export SEARCH_QUERY_AGENT_LLM__URL="https://api.openai.com/v1"
+export SEARCH_QUERY_AGENT_LLM__MODEL="gpt-5-2025-08-07"
+```
+
+3) **Run a quick check**
 ```bash
 goedels_poetry --help
 ```
