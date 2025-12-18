@@ -66,7 +66,7 @@ The system is designed for researchers, mathematicians, and AI practitioners int
 
 ## Quick Starts
 
-Quick Starts assume a clean PyPI install (`pip install goedels-poetry`) and configuration via environment variables only. Each backend section is self-contained—pick your provider and follow the steps. The OpenAI decomposer endpoint is always required, so every section sets `OPENAI_API_KEY`.
+Quick Starts assume a clean PyPI install (`pip install goedels-poetry`) and configuration via environment variables only. Each backend section is self-contained—pick your provider and follow the steps. If using OpenAI for any agent (including the decomposer), set the `OPENAI_API_KEY` environment variable.
 
 ### Quick Start: Ollama
 
@@ -433,8 +433,9 @@ Gödel's Poetry orchestrates a set of specialized agents over OpenAI-compatible 
 - Successful subproofs are merged into the final Lean proof.
 
 **Providers and endpoints**
-- LLMs use OpenAI-compatible endpoints from Ollama, vLLM, or LM Studio (one set of env vars per agent).
-- The decomposer always uses OpenAI (`OPENAI_API_KEY`).
+- LLMs use OpenAI-compatible endpoints from Ollama, vLLM, LM Studio, or OpenAI (one set of env vars per agent).
+- All agents, including the decomposer, can use any supported provider (Ollama, vLLM, LM Studio, or OpenAI).
+- When using OpenAI, set the `OPENAI_API_KEY` environment variable.
 - Kimina Lean Server verifies proofs; Lean Explore provides vector search. These can be remote as long as URLs are set.
 
 ---
@@ -588,7 +589,9 @@ max_remote_retries = 5
 
 [DECOMPOSER_AGENT_LLM]
 model = gpt-5-2025-08-07
-max_completion_tokens = 50000
+provider = openai
+url = https://api.openai.com/v1
+max_tokens = 50000
 max_remote_retries = 5
 max_self_correction_attempts = 6
 
@@ -628,10 +631,15 @@ package_filters = Mathlib,Batteries,Std,Init,Lean
 - `max_remote_retries`: Maximum remote API retry attempts for network/API errors
 
 **Decomposer Agent**:
-- `model`: The OpenAI model used for proof sketching
-- `max_completion_tokens`: Maximum tokens in generated response
+- `provider`: The provider type - `"ollama"`, `"vllm"`, `"lmstudio"`, or `"openai"` (default: `"openai"`)
+- `model`: The model used for proof sketching (default: `gpt-5-2025-08-07` for OpenAI)
+- `url`: The base URL for the API endpoint (default: `https://api.openai.com/v1` for OpenAI)
+- `max_tokens`: Maximum tokens in generated response (preferred over `max_completion_tokens`)
 - `max_remote_retries`: Maximum remote API retry attempts for network/API errors
 - `max_self_correction_attempts`: Maximum decomposition self-correction attempts
+- `num_ctx`: Context window size (only used when `provider != "openai"`, optional)
+
+**Note**: The `api_key` parameter is no longer required in configuration. For OpenAI, set the `OPENAI_API_KEY` environment variable. For other providers, API keys are automatically derived from the `provider` setting.
 
 **Kimina Lean Server**:
 - `url`: Server endpoint for Lean verification
