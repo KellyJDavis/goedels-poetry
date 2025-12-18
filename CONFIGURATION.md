@@ -13,7 +13,6 @@ The default configuration is stored in `goedels_poetry/data/config.ini`:
 model = kdavis/goedel-formalizer-v2:32b
 provider = ollama
 url = http://localhost:11434/v1
-api_key = ollama
 max_tokens = 50000
 num_ctx = 40960
 max_retries = 10
@@ -23,7 +22,6 @@ max_remote_retries = 5
 model = kdavis/Goedel-Prover-V2:32b
 provider = ollama
 url = http://localhost:11434/v1
-api_key = ollama
 max_tokens = 50000
 num_ctx = 40960
 max_self_correction_attempts = 2
@@ -35,7 +33,6 @@ max_remote_retries = 5
 model = qwen3:30b
 provider = ollama
 url = http://localhost:11434/v1
-api_key = ollama
 max_tokens = 50000
 num_ctx = 262144
 max_remote_retries = 5
@@ -44,14 +41,15 @@ max_remote_retries = 5
 model = qwen3:30b
 provider = ollama
 url = http://localhost:11434/v1
-api_key = ollama
 max_tokens = 50000
 num_ctx = 262144
 max_remote_retries = 5
 
 [DECOMPOSER_AGENT_LLM]
 model = gpt-5-2025-08-07
-max_completion_tokens = 50000
+provider = openai
+url = https://api.openai.com/v1
+max_tokens = 50000
 max_remote_retries = 5
 max_self_correction_attempts = 6
 
@@ -77,7 +75,7 @@ The vector database agent queries this server after search queries are generated
 
 ### LLM Agent Configuration
 
-Gödel's Poetry uses OpenAI-compatible APIs (via `ChatOpenAI`) to connect to LLM providers. The system supports Ollama, vLLM, and LM Studio through their OpenAI-compatible endpoints.
+Gödel's Poetry uses OpenAI-compatible APIs (via `ChatOpenAI`) to connect to LLM providers. The system supports Ollama, vLLM, LM Studio, and OpenAI through their OpenAI-compatible endpoints.
 
 #### Required Models
 
@@ -92,17 +90,20 @@ Gödel's Poetry requires several models to be available on your configured provi
 Each LLM agent section supports the following parameters:
 
 - **`model`**: The model name/identifier (required)
-- **`provider`**: The provider type - `"ollama"`, `"vllm"`, or `"lmstudio"` (required)
-- **`url`**: The base URL for the OpenAI-compatible API endpoint (default: `http://localhost:11434/v1` for Ollama)
-- **`api_key`**: API key for authentication (default: `"ollama"` for Ollama, which ignores this value)
+- **`provider`**: The provider type - `"ollama"`, `"vllm"`, `"lmstudio"`, or `"openai"` (required)
+- **`url`**: The base URL for the OpenAI-compatible API endpoint (defaults vary by provider: `http://localhost:11434/v1` for Ollama, `http://localhost:8000/v1` for vLLM, `http://localhost:1234/v1` for LM Studio, `https://api.openai.com/v1` for OpenAI)
 - **`max_tokens`**: Maximum tokens in generated response (default: `50000`)
-- **`num_ctx`**: Context window size (Ollama-specific, passed via `extra_body`)
+- **`num_ctx`**: Context window size (passed via `extra_body`, supported by all non-OpenAI providers, ignored when `provider="openai"`)
 - **`max_retries`**: Maximum formalization attempts (FORMALIZER_AGENT_LLM only) - controls how many times the system will attempt to formalize an informal theorem before giving up
 - **`max_remote_retries`**: Maximum remote API retry attempts for network/API errors (default: `5` for all LLM agents) - controls how many times the system will retry failed API calls to the LLM provider
 
+**Note**: The `api_key` parameter is no longer required in configuration. API keys are automatically derived from the `provider` setting:
+- For `provider="openai"`, the system uses the `OPENAI_API_KEY` environment variable
+- For other providers, appropriate default API keys are used automatically
+
 #### Optional vLLM-Specific Parameters
 
-The following parameters are supported for vLLM and are ignored by Ollama and LM Studio:
+The following parameters are supported for vLLM and are ignored by Ollama, LM Studio, and OpenAI:
 
 - **`use_beam_search`**: Enable beam search decoding (boolean, default: not set)
 - **`best_of`**: Number of completions to generate server-side and return the best (integer, default: not set)
@@ -114,7 +115,7 @@ These parameters are passed via `extra_body` and will be ignored by providers th
 
 #### Optional LM Studio-Specific Parameters
 
-The following parameters are supported for LM Studio and are ignored by Ollama and vLLM:
+The following parameters are supported for LM Studio and are ignored by Ollama, vLLM, and OpenAI:
 
 - **`ttl`**: Time-to-live for the request in seconds (integer, default: not set)
 
@@ -145,7 +146,6 @@ To use vLLM instead of Ollama, configure the agent sections with:
 [FORMALIZER_AGENT_LLM]
 provider = vllm
 url = http://localhost:8000/v1
-api_key = dummy-key
 model = Goedel-LM/Goedel-Formalizer-V2-32B
 max_tokens = 50000
 # Optional vLLM-specific parameters
@@ -155,21 +155,18 @@ best_of = 1
 [PROVER_AGENT_LLM]
 provider = vllm
 url = http://localhost:8000/v1
-api_key = dummy-key
 model = Goedel-LM/Goedel-Prover-V2-32B
 max_tokens = 50000
 
 [SEMANTICS_AGENT_LLM]
 provider = vllm
 url = http://localhost:8000/v1
-api_key = dummy-key
 model = Qwen/Qwen3-30B-A3B-Instruct-2507
 max_tokens = 50000
 
 [SEARCH_QUERY_AGENT_LLM]
 provider = vllm
 url = http://localhost:8000/v1
-api_key = dummy-key
 model = Qwen/Qwen3-30B-A3B-Instruct-2507
 max_tokens = 50000
 ```
@@ -184,7 +181,6 @@ To use LM Studio instead of Ollama or vLLM, configure the agent sections with:
 [FORMALIZER_AGENT_LLM]
 provider = lmstudio
 url = http://localhost:1234/v1
-api_key = lm-studio
 model = mradermacher/Goedel-Formalizer-V2-32B-GGUF
 max_tokens = 50000
 # Optional LM Studio-specific parameters
@@ -193,7 +189,6 @@ max_tokens = 50000
 [PROVER_AGENT_LLM]
 provider = lmstudio
 url = http://localhost:1234/v1
-api_key = lm-studio
 model = mradermacher/Goedel-Prover-V2-32B-GGUF
 max_tokens = 50000
 # Optional LM Studio-specific parameters
@@ -202,7 +197,6 @@ max_tokens = 50000
 [SEMANTICS_AGENT_LLM]
 provider = lmstudio
 url = http://localhost:1234/v1
-api_key = lm-studio
 model = lmstudio-community/Qwen3-30B-A3B-Instruct-2507-GGUF
 max_tokens = 50000
 # Optional LM Studio-specific parameters
@@ -211,7 +205,6 @@ max_tokens = 50000
 [SEARCH_QUERY_AGENT_LLM]
 provider = lmstudio
 url = http://localhost:1234/v1
-api_key = lm-studio
 model = lmstudio-community/Qwen3-30B-A3B-Instruct-2507-GGUF
 max_tokens = 50000
 # Optional LM Studio-specific parameters
@@ -222,17 +215,22 @@ Ensure your LM Studio server is running with the OpenAI-compatible server enable
 
 ### Decomposer Agent
 
-The decomposer agent uses OpenAI for proof sketching. Configuration parameters:
+The decomposer agent can use any supported provider (Ollama, vLLM, LM Studio, or OpenAI) for proof sketching. By default, it uses OpenAI. Configuration parameters:
 
-- **`model`**: The OpenAI model used for proof sketching (default: `gpt-5-2025-08-07`)
-- **`max_completion_tokens`**: Maximum tokens in generated response (default: `50000`)
+- **`provider`**: The provider type - `"ollama"`, `"vllm"`, `"lmstudio"`, or `"openai"` (default: `"openai"`)
+- **`model`**: The model used for proof sketching (default: `gpt-5-2025-08-07` for OpenAI)
+- **`url`**: The base URL for the API endpoint (default: `https://api.openai.com/v1` for OpenAI, provider-specific defaults for others)
+- **`max_tokens`**: Maximum tokens in generated response (default: `50000`). Note: `max_completion_tokens` is also supported for backward compatibility but `max_tokens` is preferred.
 - **`max_remote_retries`**: Maximum remote API retry attempts for network/API errors (default: `5`)
 - **`max_self_correction_attempts`**: Maximum decomposition self-correction attempts (default: `6`)
+- **`num_ctx`**: Context window size (only used when `provider != "openai"`, optional)
 
-**API Key Setup:**
+**API Key Setup (when using OpenAI):**
 ```bash
 export OPENAI_API_KEY="your-openai-api-key"
 ```
+
+**Note**: When `provider="openai"`, the system uses the `OPENAI_API_KEY` environment variable. For other providers, API keys are automatically derived from the provider setting.
 
 ## Environment Variable Overrides
 

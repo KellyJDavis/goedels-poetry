@@ -8,6 +8,22 @@ from langchain_openai import ChatOpenAI
 from goedels_poetry.config.config import parsed_config
 
 
+def _get_optional_int(section: str, option: str) -> int | None:
+    """Get optional integer config value, returning None if not found."""
+    try:
+        return int(parsed_config.getint(section=section, option=option))
+    except (NoOptionError, NoSectionError):
+        return None
+
+
+def _get_optional_str(section: str, option: str) -> str | None:
+    """Get optional string config value, returning None if not found."""
+    try:
+        return parsed_config.get(section=section, option=option)
+    except (NoOptionError, NoSectionError):
+        return None
+
+
 def _build_extra_body(section: str, provider: str) -> dict[str, Any]:
     """
     Build extra_body dictionary with provider-specific parameters.
@@ -17,70 +33,93 @@ def _build_extra_body(section: str, provider: str) -> dict[str, Any]:
     section : str
         Configuration section name (e.g., "FORMALIZER_AGENT_LLM")
     provider : str
-        Provider type ("ollama", "vllm", or "lmstudio")
+        Provider type ("ollama", "vllm", "lmstudio", or "openai")
 
     Returns
     -------
     dict[str, Any]
         Dictionary of parameters to include in extra_body
     """
+    # OpenAI doesn't support extra_body parameters
+    if provider == "openai":
+        return {}
+
     extra_body: dict[str, Any] = {}
 
-    # Ollama-specific parameters
-    if provider == "ollama":
-        try:
-            num_ctx = parsed_config.getint(section=section, option="num_ctx")
-            extra_body["num_ctx"] = num_ctx
-        except (NoOptionError, NoSectionError):
-            pass  # num_ctx is optional
+    # num_ctx parameter (supported by all non-OpenAI providers)
+    if num_ctx := _get_optional_int(section, "num_ctx"):
+        extra_body["num_ctx"] = num_ctx
 
     # LM Studio-specific parameters
-    if provider == "lmstudio":
-        try:
-            ttl = parsed_config.getint(section=section, option="ttl")
-            extra_body["ttl"] = ttl
-        except (NoOptionError, NoSectionError):
-            pass  # ttl is optional
+    if provider == "lmstudio" and (ttl := _get_optional_int(section, "ttl")):
+        extra_body["ttl"] = ttl
 
     # vLLM-specific parameters (always include, Ollama will ignore them)
-    try:
-        use_beam_search = parsed_config.get(section=section, option="use_beam_search")
+    if use_beam_search := _get_optional_str(section, "use_beam_search"):
         extra_body["use_beam_search"] = use_beam_search.lower() in ("true", "1", "yes")
-    except (NoOptionError, NoSectionError):
-        pass  # use_beam_search is optional
 
-    try:
-        best_of = parsed_config.getint(section=section, option="best_of")
+    if best_of := _get_optional_int(section, "best_of"):
         extra_body["best_of"] = best_of
-    except (NoOptionError, NoSectionError):
-        pass  # best_of is optional
 
-    try:
-        top_k = parsed_config.getint(section=section, option="top_k")
+    if top_k := _get_optional_int(section, "top_k"):
         extra_body["top_k"] = top_k
-    except (NoOptionError, NoSectionError):
-        pass  # top_k is optional
 
-    try:
-        repetition_penalty_str = parsed_config.get(section=section, option="repetition_penalty")
+    if repetition_penalty_str := _get_optional_str(section, "repetition_penalty"):
         with contextlib.suppress(ValueError):
             extra_body["repetition_penalty"] = float(repetition_penalty_str)
-    except (NoOptionError, NoSectionError):
-        pass  # repetition_penalty is optional
 
-    try:
-        length_penalty_str = parsed_config.get(section=section, option="length_penalty")
+    if length_penalty_str := _get_optional_str(section, "length_penalty"):
         with contextlib.suppress(ValueError):
             extra_body["length_penalty"] = float(length_penalty_str)
-    except (NoOptionError, NoSectionError):
-        pass  # length_penalty is optional
 
     return extra_body
 
 
+def _get_max_completion_tokens(section: str, **kwargs: Any) -> int:
+    """Get max_completion_tokens from kwargs or config."""
+    max_completion_tokens = kwargs.pop("max_completion_tokens", None)
+    if max_completion_tokens is not None:
+        return int(max_completion_tokens)
+
+    if section == "DECOMPOSER_AGENT_LLM":
+        # Try max_tokens first, then fallback to max_completion_tokens
+        try:
+            return parsed_config.getint(section=section, option="max_tokens")
+        except (NoOptionError, NoSectionError):
+            try:
+                return parsed_config.getint(section=section, option="max_completion_tokens", fallback=50000)
+            except (NoOptionError, NoSectionError):
+                return 50000
+
+    return parsed_config.getint(section=section, option="max_tokens", fallback=50000)
+
+
+def _create_openai_llm_with_fallback(chat_openai_kwargs: dict[str, Any]) -> ChatOpenAI:
+    """Create OpenAI LLM with test environment fallback."""
+    import os
+
+    openai_key = os.getenv("OPENAI_API_KEY")
+    try:
+        return ChatOpenAI(**chat_openai_kwargs)
+    except Exception:
+        # In test/CI environments without OPENAI_API_KEY, create with a dummy key
+        if not openai_key or openai_key == "dummy-key-for-testing":
+            warnings.warn(
+                "OPENAI_API_KEY not set. OpenAI LLM functionality will not work until "
+                "the API key is configured. Set the OPENAI_API_KEY environment variable.",
+                UserWarning,
+                stacklevel=2,
+            )
+            # Set a dummy key to allow module import
+            os.environ["OPENAI_API_KEY"] = "dummy-key-for-testing"
+            return ChatOpenAI(**chat_openai_kwargs)
+        # Re-raise if it's a different error
+        raise
+
+
 def _create_llm_safe(section: str, **kwargs):  # type: ignore[no-untyped-def]
     """
-    Create a ChatOpenAI instance configured for Ollama, vLLM, or LM Studio.
+    Create a ChatOpenAI instance configured for Ollama, vLLM, LM Studio, or OpenAI.
 
     Parameters
     ----------
@@ -98,14 +137,18 @@ def _create_llm_safe(section: str, **kwargs):  # type: ignore[no-untyped-def]
     ------
     ConnectionError
         If connection to the LLM server fails
+    ValueError
+        If provider is invalid or required configuration is missing
     """
     # Read provider-specific configuration
-    provider_raw = parsed_config.get(section=section, option="provider", fallback="ollama").lower()
+    # For DECOMPOSER_AGENT_LLM, default to "openai" for backward compatibility
+    default_provider = "openai" if section == "DECOMPOSER_AGENT_LLM" else "ollama"
+    provider_raw = parsed_config.get(section=section, option="provider", fallback=default_provider).lower()
     provider = provider_raw.replace("-", "").replace("_", "")
-    if provider not in ("ollama", "vllm", "lmstudio"):
+    if provider not in ("ollama", "vllm", "lmstudio", "openai"):
         msg = (
             f"Invalid provider '{provider_raw}' in section '{section}'. "
-            "Must be 'ollama', 'vllm', or 'lmstudio' (LM Studio)."
+            "Must be 'ollama', 'vllm', 'lmstudio', or 'openai'."
         )
         raise ValueError(msg)
 
@@ -113,11 +156,15 @@ def _create_llm_safe(section: str, **kwargs):  # type: ignore[no-untyped-def]
         "ollama": "http://localhost:11434/v1",
         "vllm": "http://localhost:8000/v1",
         "lmstudio": "http://localhost:1234/v1",
+        "openai": "https://api.openai.com/v1",
     }
     url = parsed_config.get(section=section, option="url", fallback=default_url_by_provider[provider])
 
+    # Derive api_key from provider (ignore api_key in config for backward compatibility)
     default_api_key_by_provider = {"ollama": "ollama", "vllm": "dummy-key", "lmstudio": "lm-studio"}
-    api_key = parsed_config.get(section=section, option="api_key", fallback=default_api_key_by_provider[provider])
+    # For OpenAI, don't set api_key - let ChatOpenAI use OPENAI_API_KEY env var
+    api_key = None if provider == "openai" else default_api_key_by_provider[provider]
+
     model = kwargs.pop("model", None)
     if model is None:
         try:
@@ -126,74 +173,55 @@ def _create_llm_safe(section: str, **kwargs):  # type: ignore[no-untyped-def]
             msg = f"Model not specified in section '{section}' and not provided as argument."
             raise ValueError(msg) from err
 
-    max_completion_tokens = kwargs.pop(
-        "max_completion_tokens",
-        parsed_config.getint(section=section, option="max_tokens", fallback=50000),
-    )
+    max_completion_tokens = _get_max_completion_tokens(section, **kwargs)
 
     # Build extra_body with provider-specific parameters
     extra_body = _build_extra_body(section, provider)
 
-    # Create ChatOpenAI instance
-    return ChatOpenAI(
-        base_url=url,
-        api_key=api_key,  # type: ignore[arg-type]
-        model=model,
-        max_completion_tokens=max_completion_tokens,
-        extra_body=extra_body if extra_body else None,
-        **kwargs,
-    )
+    # Check if api_key or base_url are explicitly provided in kwargs (for testing/overrides)
+    explicit_api_key = kwargs.pop("api_key", None)
+    explicit_base_url = kwargs.pop("base_url", None)
 
+    # Prepare ChatOpenAI arguments
+    chat_openai_kwargs: dict[str, Any] = {
+        "model": model,
+        "max_completion_tokens": max_completion_tokens,
+        "base_url": explicit_base_url if explicit_base_url is not None else url,
+    }
 
-def _create_decomposer_llm_safe(**kwargs):  # type: ignore[no-untyped-def]
-    """
-    Create a decomposer LLM instance using OpenAI.
+    # Set api_key based on provider
+    if provider == "openai":
+        if explicit_api_key is not None:
+            chat_openai_kwargs["api_key"] = explicit_api_key
+    else:
+        chat_openai_kwargs["api_key"] = explicit_api_key if explicit_api_key is not None else api_key
 
-    Parameters
-    ----------
-    **kwargs
-        Configuration parameters for the LLM
+    # Add extra_body only if not empty (OpenAI doesn't support it)
+    if extra_body:
+        chat_openai_kwargs["extra_body"] = extra_body
 
-    Returns
-    -------
-    BaseChatModel
-        The OpenAI LLM instance
-    """
-    import os
+    # Add any remaining kwargs (these will override the above settings)
+    chat_openai_kwargs.update(kwargs)
 
-    openai_key = os.getenv("OPENAI_API_KEY")
-
-    try:
-        return ChatOpenAI(**kwargs)
-    except Exception:
-        # In test/CI environments without OPENAI_API_KEY, create with a dummy key
-        if not openai_key or openai_key == "dummy-key-for-testing":
-            warnings.warn(
-                "OPENAI_API_KEY not set. OpenAI LLM functionality will not work until "
-                "the API key is configured. Set the OPENAI_API_KEY environment variable.",
-                UserWarning,
-                stacklevel=2,
-            )
-            # Set a dummy key to allow module import
-            os.environ["OPENAI_API_KEY"] = "dummy-key-for-testing"
-            return ChatOpenAI(**kwargs)
-        else:
-            # Re-raise if it's a different error
-            raise
+    # Create ChatOpenAI instance with error handling for OpenAI in test environments
+    if provider == "openai":
+        return _create_openai_llm_with_fallback(chat_openai_kwargs)
+    return ChatOpenAI(**chat_openai_kwargs)
 
 
 # ============================================================================
 # LLM Instances
 # ============================================================================
 # All LLM instances are created at module import time. These are ChatOpenAI
-# clients that connect to remote servers (Ollama, vLLM, or LM Studio), so
+# clients that connect to remote servers (Ollama, vLLM, LM Studio, or OpenAI), so
 # creation is lightweight and does not require loading models into memory.
 
 # Note: The required models must be available on the configured provider
-# (Ollama, vLLM, or LM Studio). For Ollama, download the models beforehand using:
+# (Ollama, vLLM, LM Studio, or OpenAI). For non-OpenAI models, download the models beforehand using:
 # - `ollama pull kdavis/goedel-formalizer-v2:32b` (for formalizer)
 # - `ollama pull kdavis/Goedel-Prover-V2:32b` (for prover)
 # - `ollama pull qwen3:30b` (for semantics and search query)
+# For OpenAI, ensure OPENAI_API_KEY environment variable is set.
 
 # Create formalizer LLM
 FORMALIZER_AGENT_LLM = _create_llm_safe(
@@ -220,19 +248,11 @@ SEARCH_QUERY_AGENT_LLM = _create_llm_safe(
 )
 
 
-# Create decomposer LLM
-def _create_decomposer_llm():  # type: ignore[no-untyped-def]
-    """Create decomposer LLM with OpenAI configuration."""
-    return _create_decomposer_llm_safe(
-        model=parsed_config.get(section="DECOMPOSER_AGENT_LLM", option="model", fallback="gpt-5-2025-08-07"),
-        max_completion_tokens=parsed_config.getint(
-            section="DECOMPOSER_AGENT_LLM", option="max_completion_tokens", fallback=50000
-        ),
-        max_retries=parsed_config.getint(section="DECOMPOSER_AGENT_LLM", option="max_remote_retries", fallback=5),
-    )
-
-
-DECOMPOSER_AGENT_LLM = _create_decomposer_llm()
+# Create decomposer LLM using unified function
+DECOMPOSER_AGENT_LLM = _create_llm_safe(
+    section="DECOMPOSER_AGENT_LLM",
+    max_retries=parsed_config.getint(section="DECOMPOSER_AGENT_LLM", option="max_remote_retries", fallback=5),
+)
 
 # Create LLM configurations
 PROVER_AGENT_MAX_SELF_CORRECTION_ATTEMPTS = parsed_config.getint(
