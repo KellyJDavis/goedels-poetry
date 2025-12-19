@@ -49,11 +49,12 @@ Gödel's Poetry is an AI-powered theorem proving system that bridges the gap bet
    - **Formalization**: Converts informal statements into formal Lean 4 theorems
    - **Semantic Checking**: Validates that formalizations preserve the original meaning
    - **Proof Generation**: Creates proofs using specialized LLMs trained on Lean 4
+   - **Verification**: Validates all proofs using the Lean 4 proof assistant
    - **Search Query Generation**: Generates queries for retrieving relevant theorems from knowledge bases
    - **Vector Database Querying**: Queries a Lean Explore vector database to retrieve relevant theorems and lemmas
-   - **Proof Sketching**: Decomposes difficult theorems into manageable subgoals
-   - **Verification**: Validates all proofs using the Lean 4 proof assistant
-   - **Recursive Refinement**: Iteratively improves proofs until they are complete and verified
+   - **Proof Sketching**: Decomposes difficult theorems into manageable subgoals using retrieved results
+   - **Verification**: Validates sketches using the Lean 4 proof assistant
+   - **Recursive Refinement**: Recursively applies proof generation/sketching to subgoals
 
 3. **Leverages state-of-the-art technology**:
    - Custom fine-tuned models (Goedel-Prover-V2, Goedel-Formalizer-V2)
@@ -454,7 +455,6 @@ Gödel's Poetry orchestrates a set of specialized agents over OpenAI-compatible 
 **Core loop (formal theorems)**
 - **Prover Agent** tries to solve the Lean theorem with the configured prover LLM.
 - **Proof Checker** verifies the proof via Kimina; failures trigger self-correction and retry limits.
-- **Vector Search** (when needed) uses the Search Query agent + Lean Explore to fetch related lemmas.
 
 **Informal path (adds formalization)**
 - **Formalizer Agent** converts natural language to Lean.
@@ -462,7 +462,8 @@ Gödel's Poetry orchestrates a set of specialized agents over OpenAI-compatible 
 - Then the core loop proceeds as above.
 
 **Decomposition for hard problems**
-- **Decomposer (OpenAI)** sketches a proof and splits it into subgoals.
+- **Vector Search** (when needed) uses the Search Query agent + Lean Explore to fetch related lemmas.
+- **Decomposer** sketches a proof and splits it into subgoals using lemmas found via vector search.
 - Subgoals are proved recursively with the Prover + Proof Checker cycle.
 - Successful subproofs are merged into the final Lean proof.
 
@@ -599,12 +600,18 @@ Configuration is stored in `goedels_poetry/data/config.ini`:
 ```ini
 [FORMALIZER_AGENT_LLM]
 model = kdavis/goedel-formalizer-v2:32b
+provider = ollama
+url = http://localhost:11434/v1
+max_tokens = 50000
 num_ctx = 40960
 max_retries = 10
 max_remote_retries = 5
 
 [PROVER_AGENT_LLM]
 model = kdavis/Goedel-Prover-V2:32b
+provider = ollama
+url = http://localhost:11434/v1
+max_tokens = 50000
 num_ctx = 40960
 max_self_correction_attempts = 2
 max_depth = 20
@@ -613,11 +620,17 @@ max_remote_retries = 5
 
 [SEMANTICS_AGENT_LLM]
 model = qwen3:30b
+provider = ollama
+url = http://localhost:11434/v1
+max_tokens = 50000
 num_ctx = 262144
 max_remote_retries = 5
 
 [SEARCH_QUERY_AGENT_LLM]
 model = qwen3:30b
+provider = ollama
+url = http://localhost:11434/v1
+max_tokens = 50000
 num_ctx = 262144
 max_remote_retries = 5
 
@@ -642,12 +655,18 @@ package_filters = Mathlib,Batteries,Std,Init,Lean
 
 **Formalizer Agent**:
 - `model`: The LLM used to convert informal theorems to Lean 4
+- `provider`: Backend provider (`ollama`, `vllm`, `lmstudio`, or `openai`)
+- `url`: Base URL for the provider API (required for non-OpenAI providers)
+- `max_tokens`: Maximum tokens in a generated response
 - `num_ctx`: Context window size (tokens)
 - `max_retries`: Maximum attempts to formalize a theorem
 - `max_remote_retries`: Maximum remote API retry attempts for network/API errors
 
 **Prover Agent**:
 - `model`: The LLM used to generate proofs
+- `provider`: Backend provider (`ollama`, `vllm`, `lmstudio`, or `openai`)
+- `url`: Base URL for the provider API (required for non-OpenAI providers)
+- `max_tokens`: Maximum tokens in a generated response
 - `num_ctx`: Context window size (tokens)
 - `max_self_correction_attempts`: Maximum proof generation self-correction attempts
 - `max_depth`: Maximum recursion depth for proof decomposition
@@ -656,11 +675,17 @@ package_filters = Mathlib,Batteries,Std,Init,Lean
 
 **Semantics Agent**:
 - `model`: The LLM used to validate semantic equivalence
+- `provider`: Backend provider (`ollama`, `vllm`, `lmstudio`, or `openai`)
+- `url`: Base URL for the provider API (required for non-OpenAI providers)
+- `max_tokens`: Maximum tokens in a generated response
 - `num_ctx`: Context window size (tokens)
 - `max_remote_retries`: Maximum remote API retry attempts for network/API errors
 
 **Search Query Agent**:
 - `model`: The LLM used to generate search queries for vector database retrieval
+- `provider`: Backend provider (`ollama`, `vllm`, `lmstudio`, or `openai`)
+- `url`: Base URL for the provider API (required for non-OpenAI providers)
+- `max_tokens`: Maximum tokens in a generated response
 - `num_ctx`: Context window size (tokens)
 - `max_remote_retries`: Maximum remote API retry attempts for network/API errors
 
@@ -672,6 +697,8 @@ package_filters = Mathlib,Batteries,Std,Init,Lean
 - `max_remote_retries`: Maximum remote API retry attempts for network/API errors
 - `max_self_correction_attempts`: Maximum decomposition self-correction attempts
 - `num_ctx`: Context window size (only used when `provider != "openai"`, optional)
+
+*Optional provider-specific settings (commented out in `config.ini`)*: `use_beam_search`, `best_of`, `top_k`, `repetition_penalty`, `length_penalty` for vLLM, and `ttl` for LM Studio.
 
 **Note**: The `api_key` parameter is no longer required in configuration. For OpenAI, set the `OPENAI_API_KEY` environment variable. For other providers, API keys are automatically derived from the `provider` setting.
 
