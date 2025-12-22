@@ -29,13 +29,11 @@ from goedels_poetry.config.llm import (
     PROVER_AGENT_MAX_PASS,
     PROVER_AGENT_MAX_SELF_CORRECTION_ATTEMPTS,
 )
+from goedels_poetry.config.paths import OUTPUT_DIR
 
 # Note: All LLM instances are imported from goedels_poetry.config.llm
 from goedels_poetry.functools import maybe_save
 from goedels_poetry.util.tree import TreeNode
-
-# Global configuration for output directory
-_OUTPUT_DIR = os.environ.get("GOEDELS_POETRY_DIR", os.path.expanduser("~/.goedels_poetry"))
 
 # Configuration constants for proof reconstruction
 # PROOF_BODY_INDENT_SPACES: Number of spaces to indent proof bodies in Lean4 code.
@@ -144,7 +142,7 @@ class GoedelsPoetryState:
         # Create theorem specific output directory
         theorem = theorem_for_metadata
         theorem_hash = self._hash_theorem(theorem)
-        self._output_dir = os.path.join(_OUTPUT_DIR, theorem_hash)
+        self._output_dir = os.path.join(OUTPUT_DIR, theorem_hash)
 
         # Check if directory already exists
         if os.path.exists(self._output_dir):
@@ -255,7 +253,7 @@ class GoedelsPoetryState:
 
         if theorem is not None:
             theorem_hash = GoedelsPoetryState._hash_theorem(theorem)
-            search_directory = os.path.join(_OUTPUT_DIR, theorem_hash)
+            search_directory = os.path.join(OUTPUT_DIR, theorem_hash)
         else:
             search_directory = str(directory)
 
@@ -308,7 +306,7 @@ class GoedelsPoetryState:
             Confirmation message with the path that was cleared
         """
         theorem_hash = cls._hash_theorem(theorem)
-        theorem_dir = os.path.join(_OUTPUT_DIR, theorem_hash)
+        theorem_dir = os.path.join(OUTPUT_DIR, theorem_hash)
 
         if os.path.exists(theorem_dir):
             rmtree(theorem_dir)

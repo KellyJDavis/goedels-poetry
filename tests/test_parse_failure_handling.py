@@ -9,6 +9,8 @@ from __future__ import annotations
 from contextlib import suppress
 from unittest.mock import MagicMock
 
+from langchain_core.messages import AIMessage
+
 from goedels_poetry.agents.formalizer_agent import FormalizerAgentFactory
 from goedels_poetry.agents.informal_theorem_semantics_agent import InformalTheoremSemanticsAgentFactory
 from goedels_poetry.agents.proof_sketcher_agent import ProofSketcherAgentFactory
@@ -311,11 +313,20 @@ class TestProverParseFailure:
 class TestProofSketcherParseFailure:
     """Tests for proof sketcher agent parse failure handling."""
 
-    def test_proof_sketcher_sets_markers_on_parse_failure(self) -> None:
+    def test_proof_sketcher_sets_markers_on_parse_failure(self, monkeypatch) -> None:
         """Test that proof sketcher sets error markers on LLMParsingError."""
-        # Create a mock LLM that returns a response without code blocks
+
+        # Patch Deep Agent creation to return a simple stub that emits a non-code response
+        class StubAgent:
+            def invoke(self, payload):
+                return {"messages": [AIMessage(content="This is just text, no code block")]}
+
+        monkeypatch.setattr(
+            "goedels_poetry.agents.proof_sketcher_agent.create_deep_agent",
+            lambda **kwargs: StubAgent(),
+        )
+
         mock_llm = MagicMock()
-        mock_llm.invoke.return_value.content = "This is just text, no code block"
 
         # Create agent
         agent = ProofSketcherAgentFactory.create_agent(llm=mock_llm)

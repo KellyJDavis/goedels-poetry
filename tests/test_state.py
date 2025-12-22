@@ -297,7 +297,7 @@ def test_list_checkpoints_by_theorem() -> None:
     # Get the default output directory
     from goedels_poetry import state as state_module
 
-    output_dir = state_module._OUTPUT_DIR
+    output_dir = state_module.OUTPUT_DIR
     theorem_dir = os.path.join(output_dir, theorem_hash)
 
     try:
@@ -329,7 +329,7 @@ def test_clear_theorem_directory() -> None:
     theorem_hash = GoedelsPoetryState._hash_theorem(theorem)
     from goedels_poetry import state as state_module
 
-    output_dir = state_module._OUTPUT_DIR
+    output_dir = state_module.OUTPUT_DIR
     theorem_dir = os.path.join(output_dir, theorem_hash)
 
     try:
@@ -429,7 +429,7 @@ def test_load_latest() -> None:
         theorem_hash = GoedelsPoetryState._hash_theorem(theorem)
         from goedels_poetry import state as state_module
 
-        output_dir = state_module._OUTPUT_DIR
+        output_dir = state_module.OUTPUT_DIR
         theorem_dir = os.path.join(output_dir, theorem_hash)
         loaded2 = GoedelsPoetryState.load_latest(directory=theorem_dir)
         assert loaded2 is not None

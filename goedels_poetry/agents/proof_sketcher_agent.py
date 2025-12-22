@@ -1,7 +1,11 @@
+import os
 import re
 from functools import partial
-from typing import cast
+from pathlib import Path
+from typing import Any, cast
 
+from deepagents import create_deep_agent  # type: ignore[import-untyped]
+from deepagents.backends import FilesystemBackend  # type: ignore[import-untyped]
 from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.messages import AIMessage, HumanMessage
 from langgraph.graph import END, START, StateGraph
@@ -17,6 +21,7 @@ from goedels_poetry.agents.util.common import (
     strip_known_preamble,
 )
 from goedels_poetry.agents.util.debug import log_llm_prompt, log_llm_response
+from goedels_poetry.config.paths import OUTPUT_DIR
 
 
 class ProofSketcherAgentFactory:
@@ -56,11 +61,23 @@ def _build_agent(llm: BaseChatModel) -> CompiledStateGraph:
     CompiledStateGraph
         The compiled state graph for the proof sketcher agent.
     """
+    # Prepare a dedicated filesystem backend for the Deep Agent
+    root_dir = os.path.join(OUTPUT_DIR, "proof_sketcher_agent")
+    Path(root_dir).mkdir(parents=True, exist_ok=True)
+    filesystem_backend = FilesystemBackend(root_dir=root_dir, virtual_mode=True)
+
+    # Create the Deep Agent runnable bound to the provided llm
+    deep_agent = create_deep_agent(
+        model=llm,
+        context_schema=DecomposedFormalTheoremStates,
+        backend=filesystem_backend,
+    )
+
     # Create the proof sketcher agent state graph
     graph_builder = StateGraph(DecomposedFormalTheoremStates)
 
-    # Bind the llm argument of _proof_sketcher
-    bound_proof_sketcher = partial(_proof_sketcher, llm)
+    # Bind the Deep Agent into _proof_sketcher
+    bound_proof_sketcher = partial(_proof_sketcher, deep_agent)
 
     # Add the nodes
     graph_builder.add_node("proof_sketcher", bound_proof_sketcher)
@@ -91,14 +108,16 @@ def _map_edge(states: DecomposedFormalTheoremStates) -> list[Send]:
     return [Send("proof_sketcher", state) for state in states["inputs"]]
 
 
-def _proof_sketcher(llm: BaseChatModel, state: DecomposedFormalTheoremState) -> DecomposedFormalTheoremStates:
+def _proof_sketcher(
+    deep_agent: CompiledStateGraph, state: DecomposedFormalTheoremState
+) -> DecomposedFormalTheoremStates:
     """
     Sketch the proof of the formal theorem in the passed DecomposedFormalTheoremState.
 
     Parameters
     ----------
-    llm: BaseChatModel
-        The LLM to use for the proof sketcher agent
+    deep_agent: CompiledStateGraph
+        The Deep Agent runnable that generates the proof sketch content
     state: DecomposedFormalTheoremState
         The decomposed formal theorem state with the formal theorem to have its proof sketched.
 
@@ -128,7 +147,8 @@ def _proof_sketcher(llm: BaseChatModel, state: DecomposedFormalTheoremState) -> 
         state["decomposition_history"] += [HumanMessage(content=prompt)]
 
     # Sketch the proof of the formal theorem
-    response_content = llm.invoke(state["decomposition_history"]).content
+    deep_agent_result: Any = deep_agent.invoke({"messages": state["decomposition_history"]})
+    response_content = _extract_deep_agent_content(deep_agent_result)
 
     # Log debug response
     log_llm_response("DECOMPOSER_AGENT_LLM", str(response_content))
@@ -185,3 +205,15 @@ def _parse_proof_sketcher_response(response: str, expected_preamble: str) -> str
 
     stripped, matched = strip_known_preamble(proof_sketch, expected_preamble)
     return stripped if matched else proof_sketch
+
+
+def _extract_deep_agent_content(result: Any) -> str:
+    """
+    Normalize Deep Agent outputs to a string content payload.
+    """
+    if isinstance(result, dict):
+        messages = result.get("messages")
+        if messages:
+            return getattr(messages[-1], "content", str(messages[-1]))
+        return str(result)
+    return getattr(result, "content", str(result))
