@@ -609,15 +609,17 @@ def combine_theorem_with_proof(theorem_statement: str, proof_body: str) -> str:
     if not proof_body:
         return theorem_statement
 
-    # Try := by sorry first (most common pattern in MOBench files)
-    pattern1 = r":=(\s*)by(\s+)sorry"
+    # Try := by sorry first (most common pattern in MOBench files).
+    # Allow whitespace and comments between `by` and `sorry` so stubs like
+    # `by\n    -- comment\n    sorry` are handled.
+    pattern1 = r":=(?P<pre_by>(?:\s|--[^\n]*\n|/-.*?-/)*?)by(?:(?:\s|--[^\n]*\n|/-.*?-/)*)sorry"
     match1 = re.search(pattern1, theorem_statement, re.DOTALL)
     if match1:
         before = theorem_statement[: match1.start()]
         after = theorem_statement[match1.end() :]
-        whitespace_before_by = match1.group(1)
-        # Preserve whitespace before "by", add newline after "by" for proof body
-        return f"{before}:={whitespace_before_by}by\n{proof_body}{after}"
+        pre_by = match1.group("pre_by")
+        # Preserve any whitespace/comments between := and by, add newline after "by" for proof body
+        return f"{before}:={pre_by}by\n{proof_body}{after}"
 
     # Try := sorry (without "by") - used in compfiles
     # Prefer theorem/example declarations over def/abbrev when multiple := sorry patterns exist
