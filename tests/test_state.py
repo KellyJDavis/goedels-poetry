@@ -1,5 +1,7 @@
 """Tests for goedels_poetry.state module."""
 
+# ruff: noqa: RUF001
+
 import os
 import tempfile
 from contextlib import suppress
@@ -1143,6 +1145,181 @@ def test_reconstruct_complete_proof_proper_indentation() -> None:
             GoedelsPoetryState.clear_theorem_directory(theorem)
 
 
+def test_reconstruct_complete_proof_calc_with_comments_and_indented_child_proof() -> None:
+    """
+    Regression test for partial.log-style failures:
+
+    - Parent sketch has comments between `:=` and `by`, and between `by` and `sorry`
+    - Child proof is already indented and contains nested `have` + `calc`
+    - Reconstruction must dedent+reindent safely (no layout break) and must not strip `have` binders
+    """
+    import uuid
+    from typing import cast
+
+    from goedels_poetry.agents.state import DecomposedFormalTheoremState, FormalTheoremProofState
+    from goedels_poetry.agents.util.common import DEFAULT_IMPORTS
+    from goedels_poetry.state import GoedelsPoetryStateManager
+    from goedels_poetry.util.tree import TreeNode
+
+    theorem = with_default_preamble(f"theorem test_reconstruct_calc_comments_{uuid.uuid4()} : (1 : ℕ) = 1")
+
+    with suppress(Exception):
+        GoedelsPoetryState.clear_theorem_directory(theorem)
+
+    try:
+        state = GoedelsPoetryState(formal_theorem=theorem)
+
+        sketch = (
+            f"{theorem} := by\n"
+            "  have hv_subst : (1 : ℕ) = 1 :=\n"
+            "    -- comment between ':=' and 'by'\n"
+            "    by\n"
+            "      -- comment between 'by' and 'sorry'\n"
+            "      sorry\n"
+            "  exact hv_subst\n"
+        )
+
+        decomposed: DecomposedFormalTheoremState = {
+            "parent": None,
+            "children": [],
+            "depth": 0,
+            "formal_theorem": theorem,
+            "preamble": DEFAULT_IMPORTS,
+            "proof_sketch": sketch,
+            "syntactic": True,
+            "errors": None,
+            "ast": None,
+            "self_correction_attempts": 1,
+            "decomposition_history": [],
+        }
+
+        # Child proof is a tactic script (starts with `have`, not a lemma/theorem decl),
+        # and is already indented to simulate prover output copied from a nested block.
+        child_formal_proof = (
+            "      have step₁ : (1 : ℕ) = 1 := by\n"
+            "        rfl\n"
+            "      have step₂ : (1 : ℕ) = 1 := by\n"
+            "        calc\n"
+            "          (1 : ℕ) = 1 := by rfl\n"
+            "      exact step₂"
+        )
+
+        child: FormalTheoremProofState = {
+            "parent": cast(TreeNode, decomposed),
+            "depth": 1,
+            "formal_theorem": "lemma hv_subst : (1 : ℕ) = 1",
+            "preamble": DEFAULT_IMPORTS,
+            "syntactic": True,
+            "formal_proof": child_formal_proof,
+            "proved": True,
+            "errors": None,
+            "ast": None,
+            "self_correction_attempts": 1,
+            "proof_history": [],
+            "pass_attempts": 0,
+        }
+
+        decomposed["children"].append(cast(TreeNode, child))
+        state.formal_theorem_proof = cast(TreeNode, decomposed)
+
+        manager = GoedelsPoetryStateManager(state)
+        result = manager.reconstruct_complete_proof()
+
+        # `hv_subst` sorry should be replaced even with intervening comments/newlines.
+        assert "have hv_subst : (1 : ℕ) = 1 :=" in result
+        # Allow the word "sorry" to appear in comments, but not as an actual tactic placeholder.
+        for line in result.split("\n"):
+            assert line.strip() != "sorry"
+
+        # Child proof must keep its `have` binders (no dangling `exact step₂` / missing `step₁`).
+        assert "\n    have step₁ : (1 : ℕ) = 1 := by" in result
+        assert "exact step₂" in result
+    finally:
+        with suppress(Exception):
+            GoedelsPoetryState.clear_theorem_directory(theorem)
+
+
+def test_reconstruct_complete_proof_normalizes_misindented_trailing_apply() -> None:
+    """
+    Regression test for partial.log-style inlined child proof bodies:
+
+    - Child proof defines `have h_main : goal := by ...`
+    - Child proof ends with a *misindented* `apply h_main` (common LLM failure)
+    - Reconstruction should normalize indentation and turn the trailing `apply h_main` into
+      `exact h_main` so the parent goal closes.
+    """
+    import uuid
+    from typing import cast
+
+    from goedels_poetry.agents.state import DecomposedFormalTheoremState, FormalTheoremProofState
+    from goedels_poetry.state import GoedelsPoetryStateManager
+    from goedels_poetry.util.tree import TreeNode
+
+    theorem_sig = f"theorem test_reconstruct_apply_normalize_{uuid.uuid4().hex} : True"
+    theorem = with_default_preamble(theorem_sig)
+
+    with suppress(Exception):
+        GoedelsPoetryState.clear_theorem_directory(theorem)
+
+    try:
+        state = GoedelsPoetryState(formal_theorem=theorem)
+
+        sketch = f"""{theorem_sig} := by
+  have hv_subst : True := by sorry
+  exact hv_subst"""
+
+        parent: DecomposedFormalTheoremState = {
+            "parent": None,
+            "children": [],
+            "depth": 0,
+            "formal_theorem": theorem,
+            "preamble": DEFAULT_IMPORTS,
+            "proof_sketch": sketch,
+            "syntactic": True,
+            "errors": None,
+            "ast": None,
+            "self_correction_attempts": 1,
+            "decomposition_history": [],
+        }
+
+        # Note the misindentation:
+        # - `have h_main` is at indent 0
+        # - inner proof is at indent 4
+        # - trailing `apply h_main` is at indent 2 (invalid intermediate dedent level)
+        # This mirrors the pattern in partial.log that causes "expected command".
+        child_formal_proof = "have h_main : True := by\n    trivial\n  apply h_main\n"
+
+        child: FormalTheoremProofState = {
+            "parent": cast(TreeNode, parent),
+            "depth": 1,
+            "formal_theorem": "lemma hv_subst : True",
+            "preamble": DEFAULT_IMPORTS,
+            "syntactic": True,
+            "formal_proof": child_formal_proof,
+            "proved": True,
+            "errors": None,
+            "ast": None,
+            "self_correction_attempts": 1,
+            "proof_history": [],
+            "pass_attempts": 0,
+        }
+
+        parent["children"].append(cast(TreeNode, child))
+        state.formal_theorem_proof = cast(TreeNode, parent)
+        manager = GoedelsPoetryStateManager(state)
+
+        result = manager.reconstruct_complete_proof()
+
+        # The inlined proof should end with `exact h_main`, not `apply h_main`.
+        assert "exact h_main" in result
+        assert "apply h_main" not in result
+        # And the hv_subst hole should no longer contain sorry.
+        assert "have hv_subst : True := by sorry" not in result
+    finally:
+        with suppress(Exception):
+            GoedelsPoetryState.clear_theorem_directory(theorem)
+
+
 def test_reconstruct_complete_proof_nested_decomposition() -> None:
     """Test reconstruct_complete_proof with nested decomposed states."""
     import uuid
@@ -1266,7 +1443,7 @@ def test_reconstruct_complete_proof_with_dependencies_in_signature() -> None:
         sketch = f"""{theorem} := by
   have cube_mod9 : ∀ (a : ℤ), (a^3) % 9 ∈ {{0, 1, 8}} := by sorry
   have sum_not_3 : ∀ (s1 s2 : ℤ), s1 ∈ {{0, 1, 8}} → s2 ∈ {{0, 1, 8}} → (s1 + s2) % 9 ≠ 3 := by sorry
-  sorry"""  # noqa: RUF001
+  sorry"""
 
         decomposed = DecomposedFormalTheoremState(
             parent=None,
@@ -1286,10 +1463,10 @@ def test_reconstruct_complete_proof_with_dependencies_in_signature() -> None:
         child1 = FormalTheoremProofState(
             parent=cast(TreeNode, decomposed),
             depth=1,
-            formal_theorem="lemma cube_mod9 : ∀ (a : ℤ), (a^3) % 9 ∈ {0, 1, 8}",  # noqa: RUF001
+            formal_theorem="lemma cube_mod9 : ∀ (a : ℤ), (a^3) % 9 ∈ {0, 1, 8}",
             preamble=DEFAULT_IMPORTS,
             syntactic=True,
-            formal_proof="lemma cube_mod9 : ∀ (a : ℤ), (a^3) % 9 ∈ {0, 1, 8} := by\n  intro a\n  omega",  # noqa: RUF001
+            formal_proof="lemma cube_mod9 : ∀ (a : ℤ), (a^3) % 9 ∈ {0, 1, 8} := by\n  intro a\n  omega",
             proved=True,
             errors=None,
             ast=None,
@@ -1302,10 +1479,10 @@ def test_reconstruct_complete_proof_with_dependencies_in_signature() -> None:
         child2 = FormalTheoremProofState(
             parent=cast(TreeNode, decomposed),
             depth=1,
-            formal_theorem="lemma sum_not_3 (cube_mod9 : ∀ (a : ℤ), (a^3) % 9 ∈ {0, 1, 8}) : ∀ (s1 s2 : ℤ), s1 ∈ {0, 1, 8} → s2 ∈ {0, 1, 8} → (s1 + s2) % 9 ≠ 3",  # noqa: RUF001
+            formal_theorem="lemma sum_not_3 (cube_mod9 : ∀ (a : ℤ), (a^3) % 9 ∈ {0, 1, 8}) : ∀ (s1 s2 : ℤ), s1 ∈ {0, 1, 8} → s2 ∈ {0, 1, 8} → (s1 + s2) % 9 ≠ 3",
             preamble=DEFAULT_IMPORTS,
             syntactic=True,
-            formal_proof="lemma sum_not_3 (cube_mod9 : ∀ (a : ℤ), (a^3) % 9 ∈ {0, 1, 8}) : ∀ (s1 s2 : ℤ), s1 ∈ {0, 1, 8} → s2 ∈ {0, 1, 8} → (s1 + s2) % 9 ≠ 3 := by\n  intro s1 s2\n  omega",  # noqa: RUF001
+            formal_proof="lemma sum_not_3 (cube_mod9 : ∀ (a : ℤ), (a^3) % 9 ∈ {0, 1, 8}) : ∀ (s1 s2 : ℤ), s1 ∈ {0, 1, 8} → s2 ∈ {0, 1, 8} → (s1 + s2) % 9 ≠ 3 := by\n  intro s1 s2\n  omega",
             proved=True,
             errors=None,
             ast=None,
@@ -1318,7 +1495,7 @@ def test_reconstruct_complete_proof_with_dependencies_in_signature() -> None:
         child3 = FormalTheoremProofState(
             parent=cast(TreeNode, decomposed),
             depth=1,
-            formal_theorem="theorem main_body (cube_mod9 : ∀ (a : ℤ), (a^3) % 9 ∈ {0, 1, 8}) (sum_not_3 : ∀ (s1 s2 : ℤ), s1 ∈ {0, 1, 8} → s2 ∈ {0, 1, 8} → (s1 + s2) % 9 ≠ 3) : P",  # noqa: RUF001
+            formal_theorem="theorem main_body (cube_mod9 : ∀ (a : ℤ), (a^3) % 9 ∈ {0, 1, 8}) (sum_not_3 : ∀ (s1 s2 : ℤ), s1 ∈ {0, 1, 8} → s2 ∈ {0, 1, 8} → (s1 + s2) % 9 ≠ 3) : P",
             preamble=DEFAULT_IMPORTS,
             syntactic=True,
             formal_proof="theorem main_body (cube_mod9 : ...) (sum_not_3 : ...) : P := by\n  apply sum_not_3\n  omega",
@@ -2361,7 +2538,7 @@ def test_reconstruct_complete_proof_with_let_statement() -> None:
         sketch = f"""{theorem_sig} := by
   let n : ℕ := 5
   have h : n > 0 := by sorry
-  exact h"""  # noqa: RUF001
+  exact h"""
 
         decomposed = DecomposedFormalTheoremState(
             parent=None,
@@ -2381,10 +2558,10 @@ def test_reconstruct_complete_proof_with_let_statement() -> None:
         child = FormalTheoremProofState(
             parent=cast(TreeNode, decomposed),
             depth=1,
-            formal_theorem="lemma h (n : ℕ) : n > 0",  # noqa: RUF001
+            formal_theorem="lemma h (n : ℕ) : n > 0",
             preamble=DEFAULT_IMPORTS,
             syntactic=True,
-            formal_proof="lemma h (n : ℕ) : n > 0 := by\n  omega",  # noqa: RUF001
+            formal_proof="lemma h (n : ℕ) : n > 0 := by\n  omega",
             proved=True,
             errors=None,
             ast=None,
@@ -2400,7 +2577,7 @@ def test_reconstruct_complete_proof_with_let_statement() -> None:
         result = manager.reconstruct_complete_proof()
 
         assert result.startswith(DEFAULT_IMPORTS)
-        assert "let n : ℕ := 5" in result  # noqa: RUF001
+        assert "let n : ℕ := 5" in result
         assert "have h : n > 0 := by" in result
         assert "omega" in result
         result_no_imports = result[len(DEFAULT_IMPORTS) :]
@@ -2515,7 +2692,7 @@ def test_reconstruct_complete_proof_with_let_and_have_nested() -> None:
             proof_sketch=f"""{theorem_sig} := by
   let n : ℕ := 10
   have helper : n > 5 := by sorry
-  exact helper""",  # noqa: RUF001
+  exact helper""",
             syntactic=True,
             errors=None,
             ast=None,
@@ -2528,12 +2705,12 @@ def test_reconstruct_complete_proof_with_let_and_have_nested() -> None:
             parent=cast(TreeNode, root),
             children=[],
             depth=1,
-            formal_theorem="lemma helper (n : ℕ) : n > 5",  # noqa: RUF001
+            formal_theorem="lemma helper (n : ℕ) : n > 5",
             preamble=DEFAULT_IMPORTS,
             proof_sketch="""lemma helper (n : ℕ) : n > 5 := by
   let m : ℕ := n + 1
   have h : m > 5 := by sorry
-  exact h""",  # noqa: RUF001
+  exact h""",
             syntactic=True,
             errors=None,
             ast=None,
@@ -2545,10 +2722,10 @@ def test_reconstruct_complete_proof_with_let_and_have_nested() -> None:
         grandchild = FormalTheoremProofState(
             parent=cast(TreeNode, child_decomposed),
             depth=2,
-            formal_theorem="lemma h (n : ℕ) (m : ℕ) : m > 5",  # noqa: RUF001
+            formal_theorem="lemma h (n : ℕ) (m : ℕ) : m > 5",
             preamble=DEFAULT_IMPORTS,
             syntactic=True,
-            formal_proof="lemma h (n : ℕ) (m : ℕ) : m > 5 := by\n  omega",  # noqa: RUF001
+            formal_proof="lemma h (n : ℕ) (m : ℕ) : m > 5 := by\n  omega",
             proved=True,
             errors=None,
             ast=None,
@@ -2565,9 +2742,9 @@ def test_reconstruct_complete_proof_with_let_and_have_nested() -> None:
         result = manager.reconstruct_complete_proof()
 
         assert result.startswith(DEFAULT_IMPORTS)
-        assert "let n : ℕ := 10" in result  # noqa: RUF001
+        assert "let n : ℕ := 10" in result
         assert "have helper : n > 5 := by" in result
-        assert "let m : ℕ := n + 1" in result  # noqa: RUF001
+        assert "let m : ℕ := n + 1" in result
         assert "have h : m > 5 := by" in result
         assert "omega" in result
         result_no_imports = result[len(DEFAULT_IMPORTS) :]
@@ -2607,7 +2784,7 @@ def test_reconstruct_complete_proof_mixed_bindings_deep_nested() -> None:
             proof_sketch=f"""{theorem_sig} := by
   let x : ℕ := 5
   have h1 : Q := by sorry
-  exact h1""",  # noqa: RUF001
+  exact h1""",
             syntactic=True,
             errors=None,
             ast=None,
@@ -2620,12 +2797,12 @@ def test_reconstruct_complete_proof_mixed_bindings_deep_nested() -> None:
             parent=cast(TreeNode, root),
             children=[],
             depth=1,
-            formal_theorem="lemma h1 (x : ℕ) : Q",  # noqa: RUF001
+            formal_theorem="lemma h1 (x : ℕ) : Q",
             preamble=DEFAULT_IMPORTS,
             proof_sketch="""lemma h1 (x : ℕ) : Q := by
   obtain ⟨y, hy⟩ : ∃ y, R y := by sorry
   have h2 : S := by sorry
-  exact h2""",  # noqa: RUF001
+  exact h2""",
             syntactic=True,
             errors=None,
             ast=None,
@@ -2638,12 +2815,12 @@ def test_reconstruct_complete_proof_mixed_bindings_deep_nested() -> None:
             parent=cast(TreeNode, level1),
             children=[],
             depth=2,
-            formal_theorem="lemma h2 (x : ℕ) (y : T) (hy : R y) : S",  # noqa: RUF001
+            formal_theorem="lemma h2 (x : ℕ) (y : T) (hy : R y) : S",
             preamble=DEFAULT_IMPORTS,
             proof_sketch="""lemma h2 (x : ℕ) (y : T) (hy : R y) : S := by
   let z : ℕ := x + y
   have h3 : T := by sorry
-  exact h3""",  # noqa: RUF001
+  exact h3""",
             syntactic=True,
             errors=None,
             ast=None,
@@ -2655,10 +2832,10 @@ def test_reconstruct_complete_proof_mixed_bindings_deep_nested() -> None:
         leaf = FormalTheoremProofState(
             parent=cast(TreeNode, level2),
             depth=3,
-            formal_theorem="lemma h3 (x : ℕ) (y : T) (hy : R y) (z : ℕ) : T",  # noqa: RUF001
+            formal_theorem="lemma h3 (x : ℕ) (y : T) (hy : R y) (z : ℕ) : T",
             preamble=DEFAULT_IMPORTS,
             syntactic=True,
-            formal_proof="lemma h3 (x : ℕ) (y : T) (hy : R y) (z : ℕ) : T := by\n  trivial",  # noqa: RUF001
+            formal_proof="lemma h3 (x : ℕ) (y : T) (hy : R y) (z : ℕ) : T := by\n  trivial",
             proved=True,
             errors=None,
             ast=None,
@@ -2676,11 +2853,11 @@ def test_reconstruct_complete_proof_mixed_bindings_deep_nested() -> None:
         result = manager.reconstruct_complete_proof()
 
         assert result.startswith(DEFAULT_IMPORTS)
-        assert "let x : ℕ := 5" in result  # noqa: RUF001
+        assert "let x : ℕ := 5" in result
         assert "have h1 : Q := by" in result
         assert "obtain ⟨y, hy⟩" in result
         assert "have h2 : S := by" in result
-        assert "let z : ℕ := x + y" in result  # noqa: RUF001
+        assert "let z : ℕ := x + y" in result
         assert "have h3 : T := by" in result
         assert "trivial" in result
         result_no_imports = result[len(DEFAULT_IMPORTS) :]
@@ -2717,7 +2894,7 @@ def test_reconstruct_complete_proof_non_ascii_with_let_obtain() -> None:
   let α : ℕ := 1
   obtain ⟨β, hβ⟩ : ∃ β, Q β := by sorry
   have γ : R := by sorry
-  exact γ"""  # noqa: RUF001
+  exact γ"""
 
         decomposed = DecomposedFormalTheoremState(
             parent=None,
@@ -2736,10 +2913,10 @@ def test_reconstruct_complete_proof_non_ascii_with_let_obtain() -> None:
         child = FormalTheoremProofState(
             parent=cast(TreeNode, decomposed),
             depth=1,
-            formal_theorem="lemma γ (α : ℕ) (β : T) (hβ : Q β) : R",  # noqa: RUF001
+            formal_theorem="lemma γ (α : ℕ) (β : T) (hβ : Q β) : R",
             preamble=DEFAULT_IMPORTS,
             syntactic=True,
-            formal_proof="lemma γ (α : ℕ) (β : T) (hβ : Q β) : R := by\n  exact hβ",  # noqa: RUF001
+            formal_proof="lemma γ (α : ℕ) (β : T) (hβ : Q β) : R := by\n  exact hβ",
             proved=True,
             errors=None,
             ast=None,
@@ -2755,12 +2932,12 @@ def test_reconstruct_complete_proof_non_ascii_with_let_obtain() -> None:
         result = manager.reconstruct_complete_proof()
 
         assert result.startswith(DEFAULT_IMPORTS)
-        assert "let α : ℕ := 1" in result  # noqa: RUF001
+        assert "let α : ℕ := 1" in result
         assert "obtain ⟨β, hβ⟩" in result
-        assert "have γ : R := by" in result  # noqa: RUF001
+        assert "have γ : R := by" in result
         assert "exact hβ" in result
         result_no_imports = result[len(DEFAULT_IMPORTS) :]
-        assert "have γ : R := by sorry" not in result_no_imports  # noqa: RUF001
+        assert "have γ : R := by sorry" not in result_no_imports
 
     finally:
         with suppress(Exception):
@@ -3235,6 +3412,330 @@ def test_reconstruct_complete_proof_edge_case_very_deep_nesting() -> None:
         assert "rfl" in result
         result_no_imports = result[len(DEFAULT_IMPORTS) :]
         assert "sorry" not in result_no_imports
+
+    finally:
+        with suppress(Exception):
+            GoedelsPoetryState.clear_theorem_directory(theorem)
+
+
+# ============================================================================
+# Tests for proof reconstruction fixes (handling comments between := by and sorry)
+# ============================================================================
+
+
+def test_replace_sorry_for_have_with_comment() -> None:
+    """Test that _replace_sorry_for_have correctly handles comments between := by and sorry."""
+    import uuid
+
+    from goedels_poetry.state import GoedelsPoetryStateManager
+
+    theorem = with_default_preamble(f"theorem test_comment_{uuid.uuid4()} : True")
+
+    with suppress(Exception):
+        GoedelsPoetryState.clear_theorem_directory(theorem)
+
+    try:
+        state = GoedelsPoetryState(formal_theorem=theorem)
+        manager = GoedelsPoetryStateManager(state)
+
+        # Test case: have statement with comment between := by and sorry
+        sketch = """theorem test : True := by
+  have hv_rewrite : v = (1 / 3 : ℝ) * (30 * (13 / 2 : ℝ)) := by
+    -- from `v = 1/3 * (b*h)` and `b=30`, `h=13/2`
+    sorry
+  sorry"""
+
+        child_proof_body = """calc
+    v = 1 / 3 * (b * h) := h₁
+    _ = 1 / 3 * (30 * (13 / 2 : ℝ)) := by rw [h₂, h₃]"""
+
+        result = manager._replace_sorry_for_have(sketch, "hv_rewrite", child_proof_body)
+
+        # Should have replaced the sorry in hv_rewrite
+        assert "sorry" in result  # Main body sorry should remain
+        # Count sorries - should have exactly one (the main body sorry)
+        assert result.count("sorry") == 1
+        # Should contain the proof body
+        assert "calc" in result
+        assert "v = 1 / 3 * (b * h) := h₁" in result
+        assert "rw [h₂, h₃]" in result
+        # Should preserve the comment
+        assert "-- from `v = 1/3 * (b*h)`" in result
+
+    finally:
+        with suppress(Exception):
+            GoedelsPoetryState.clear_theorem_directory(theorem)
+
+
+def test_replace_sorry_for_have_with_multiple_comments() -> None:
+    """Test that _replace_sorry_for_have handles multiple comment lines between := by and sorry."""
+    import uuid
+
+    from goedels_poetry.state import GoedelsPoetryStateManager
+
+    theorem = with_default_preamble(f"theorem test_multi_comment_{uuid.uuid4()} : True")
+
+    with suppress(Exception):
+        GoedelsPoetryState.clear_theorem_directory(theorem)
+
+    try:
+        state = GoedelsPoetryState(formal_theorem=theorem)
+        manager = GoedelsPoetryStateManager(state)
+
+        sketch = """theorem test : True := by
+  have helper : Type := by
+    -- First comment
+    -- Second comment
+    -- Third comment
+    sorry
+  sorry"""
+
+        child_proof_body = "constructor"
+
+        result = manager._replace_sorry_for_have(sketch, "helper", child_proof_body)
+
+        assert result.count("sorry") == 1  # Only main body sorry remains
+        assert "constructor" in result
+        assert "-- First comment" in result
+        assert "-- Second comment" in result
+        assert "-- Third comment" in result
+
+    finally:
+        with suppress(Exception):
+            GoedelsPoetryState.clear_theorem_directory(theorem)
+
+
+def test_replace_sorry_for_have_with_comment_between_assign_and_by() -> None:
+    """Test that _replace_sorry_for_have handles comments between := and by."""
+    import uuid
+
+    from goedels_poetry.state import GoedelsPoetryStateManager
+
+    theorem = with_default_preamble(f"theorem test_assign_by_comment_{uuid.uuid4()} : True")
+
+    with suppress(Exception):
+        GoedelsPoetryState.clear_theorem_directory(theorem)
+
+    try:
+        state = GoedelsPoetryState(formal_theorem=theorem)
+        manager = GoedelsPoetryStateManager(state)
+
+        # Test case: have statement with comment between := and by
+        sketch = """theorem test : True := by
+  have helper : Type :=
+    -- comment between := and by
+    by
+      sorry
+  sorry"""
+
+        child_proof_body = "constructor"
+
+        result = manager._replace_sorry_for_have(sketch, "helper", child_proof_body)
+
+        assert result.count("sorry") == 1  # Only main body sorry remains
+        assert "constructor" in result
+        assert "-- comment between := and by" in result
+
+    finally:
+        with suppress(Exception):
+            GoedelsPoetryState.clear_theorem_directory(theorem)
+
+
+def test_replace_sorry_for_have_exact_partial_log_case() -> None:
+    """Test the exact case from partial.log where reconstruction failed."""
+    from typing import cast
+
+    from goedels_poetry.agents.state import DecomposedFormalTheoremState, FormalTheoremProofState
+    from goedels_poetry.agents.util.common import DEFAULT_IMPORTS
+    from goedels_poetry.state import GoedelsPoetryStateManager
+    from goedels_poetry.util.tree import TreeNode
+
+    theorem_sig = "theorem mathd_algebra_478 (b h v : ℝ) (h₀ : 0 < b ∧ 0 < h ∧ 0 < v) (h₁ : v = 1 / 3 * (b * h)) (h₂ : b = 30) (h₃ : h = 13 / 2) : v = 65"
+    theorem = with_default_preamble(theorem_sig)
+
+    with suppress(Exception):
+        GoedelsPoetryState.clear_theorem_directory(theorem)
+
+    try:
+        state = GoedelsPoetryState(formal_theorem=theorem)
+
+        # This is the exact sketch from partial.log
+        sketch = f"""{theorem_sig} := by
+  -- Reduce `v` to a concrete expression by rewriting with the given equalities.
+  have hv_rewrite : v = (1 / 3 : ℝ) * (30 * (13 / 2 : ℝ)) := by
+    -- from `v = 1/3 * (b*h)` and `b=30`, `h=13/2`
+    sorry
+
+  -- Pure arithmetic evaluation of the concrete expression.
+  have hcalc : ((1 / 3 : ℝ) * (30 * (13 / 2 : ℝ))) = (65 : ℝ) := by
+    -- `norm_num` should solve this directly.
+    sorry
+
+  -- Conclude by chaining the equalities.
+  calc
+    v = (1 / 3 : ℝ) * (30 * (13 / 2 : ℝ)) := hv_rewrite
+    _ = 65 := hcalc"""
+
+        decomposed = DecomposedFormalTheoremState(
+            parent=None,
+            children=[],
+            depth=0,
+            formal_theorem=theorem,
+            preamble=DEFAULT_IMPORTS,
+            proof_sketch=sketch,
+            syntactic=True,
+            errors=None,
+            ast=None,
+            self_correction_attempts=1,
+            proof_history=[],
+        )
+
+        # Create child proof for hv_rewrite (from partial.log)
+        child_hv_rewrite = FormalTheoremProofState(
+            parent=cast(TreeNode, decomposed),
+            depth=1,
+            formal_theorem="lemma hv_rewrite (b h v : ℝ) (h₀ : 0 < b ∧ 0 < h ∧ 0 < v) (h₁ : v = 1 / 3 * (b * h)) (h₂ : b = 30) (h₃ : h = 13 / 2) : v = (1 / 3 : ℝ) * (30 * (13 / 2 : ℝ))",
+            preamble=DEFAULT_IMPORTS,
+            syntactic=True,
+            formal_proof="""have h₄ : v = (1 / 3 : ℝ) * (30 * (13 / 2 : ℝ)) := by
+  calc
+    v = 1 / 3 * (b * h) := h₁
+    _ = 1 / 3 * (30 * (13 / 2 : ℝ)) := by rw [h₂, h₃]
+exact h₄""",
+            proved=True,
+            errors=None,
+            ast=None,
+            self_correction_attempts=1,
+            proof_history=[],
+            pass_attempts=0,
+        )
+
+        # Create child proof for hcalc (from partial.log)
+        child_hcalc = FormalTheoremProofState(
+            parent=cast(TreeNode, decomposed),
+            depth=1,
+            formal_theorem="lemma hcalc (b h v : ℝ) (h₀ : 0 < b ∧ 0 < h ∧ 0 < v) (h₁ : v = 1 / 3 * (b * h)) (h₂ : b = 30) (h₃ : h = 13 / 2) (hv_rewrite : v = (1 / 3 : ℝ) * (30 * (13 / 2 : ℝ))) : ((1 / 3 : ℝ) * (30 * (13 / 2 : ℝ))) = (65 : ℝ)",
+            preamble=DEFAULT_IMPORTS,
+            syntactic=True,
+            formal_proof="""have h₄ : (30 : ℝ) * (13 / 2 : ℝ) = 195 := by norm_num
+have h₅ : (1 / 3 : ℝ) * (195 : ℝ) = 65 := by norm_num
+calc
+  ((1 / 3 : ℝ) * (30 * (13 / 2 : ℝ))) = (1 / 3 : ℝ) * (195 : ℝ) := by rw [h₄]
+  _ = 65 := by rw [h₅]""",
+            proved=True,
+            errors=None,
+            ast=None,
+            self_correction_attempts=1,
+            proof_history=[],
+            pass_attempts=0,
+        )
+
+        decomposed["children"].extend([cast(TreeNode, child_hv_rewrite), cast(TreeNode, child_hcalc)])
+        state.formal_theorem_proof = cast(TreeNode, decomposed)
+        manager = GoedelsPoetryStateManager(state)
+
+        result = manager.reconstruct_complete_proof()
+
+        # Should contain DEFAULT_IMPORTS
+        assert result.startswith(DEFAULT_IMPORTS)
+
+        # Should contain both have statements
+        assert "have hv_rewrite :" in result
+        assert "have hcalc :" in result
+
+        # Should contain the proof bodies
+        assert "calc" in result
+        assert "v = 1 / 3 * (b * h) := h₁" in result
+        assert "rw [h₂, h₃]" in result
+        assert "norm_num" in result
+        assert "rw [h₄]" in result
+        assert "rw [h₅]" in result
+
+        # Should preserve comments
+        assert "-- from `v = 1/3 * (b*h)`" in result
+        assert "-- `norm_num` should solve this directly." in result
+
+        # Should NOT contain any sorry
+        result_no_imports = result[len(DEFAULT_IMPORTS) :]
+        assert "sorry" not in result_no_imports, f"Found 'sorry' in reconstructed proof:\n{result_no_imports}"
+
+    finally:
+        with suppress(Exception):
+            GoedelsPoetryState.clear_theorem_directory(theorem)
+
+
+def test_extract_tactics_after_by_with_full_lemma() -> None:
+    """Test that _extract_tactics_after_by correctly handles full lemma statements."""
+    import uuid
+
+    from goedels_poetry.state import GoedelsPoetryStateManager
+
+    theorem = with_default_preamble(f"theorem test_extract_{uuid.uuid4()} : True")
+
+    with suppress(Exception):
+        GoedelsPoetryState.clear_theorem_directory(theorem)
+
+    try:
+        state = GoedelsPoetryState(formal_theorem=theorem)
+        manager = GoedelsPoetryStateManager(state)
+
+        # Test case 1: Normal tactics (should work as before)
+        tactics_only = "calc\n  v = 1 / 3 * (b * h) := h₁\n  _ = 1 / 3 * (30 * (13 / 2 : ℝ)) := by rw [h₂, h₃]"
+        result1 = manager._extract_tactics_after_by(tactics_only)
+        assert result1 == tactics_only
+
+        # Test case 2: Full lemma statement (should extract tactics)
+        full_lemma = """lemma helper : Type := by
+  constructor
+  exact trivial"""
+        result2 = manager._extract_tactics_after_by(full_lemma)
+        assert "constructor" in result2
+        assert "exact trivial" in result2
+        assert "lemma helper" not in result2
+
+        # Test case 3: Proof without := by (should return sorry if it looks like a lemma)
+        lemma_without_by = "lemma helper : Type := sorry"
+        result3 = manager._extract_tactics_after_by(lemma_without_by)
+        assert result3 == "sorry"
+
+        # Test case 4: Just tactics without := by (should return as-is)
+        just_tactics = "constructor\nexact trivial"
+        result4 = manager._extract_tactics_after_by(just_tactics)
+        assert result4 == just_tactics
+
+    finally:
+        with suppress(Exception):
+            GoedelsPoetryState.clear_theorem_directory(theorem)
+
+
+def test_extract_tactics_after_by_nested_lemma() -> None:
+    """Test that _extract_tactics_after_by handles nested lemma statements correctly."""
+    import uuid
+
+    from goedels_poetry.state import GoedelsPoetryStateManager
+
+    theorem = with_default_preamble(f"theorem test_nested_{uuid.uuid4()} : True")
+
+    with suppress(Exception):
+        GoedelsPoetryState.clear_theorem_directory(theorem)
+
+    try:
+        state = GoedelsPoetryState(formal_theorem=theorem)
+        manager = GoedelsPoetryStateManager(state)
+
+        # Test case: Proof that contains a nested lemma statement
+        nested_lemma = """have h₄ : v = (1 / 3 : ℝ) * (30 * (13 / 2 : ℝ)) := by
+  calc
+    v = 1 / 3 * (b * h) := h₁
+    _ = 1 / 3 * (30 * (13 / 2 : ℝ)) := by rw [h₂, h₃]
+exact h₄"""
+
+        result = manager._extract_tactics_after_by(nested_lemma)
+        # This is already a tactic script (starts with `have`), so we must NOT strip the `have` binder.
+        # Stripping after the first `:= by` would produce a dangling `exact h₄` and break reconstruction.
+        assert "have h₄" in result
+        assert "calc" in result
+        assert "exact h₄" in result
 
     finally:
         with suppress(Exception):
