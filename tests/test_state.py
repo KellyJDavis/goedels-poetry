@@ -1239,6 +1239,87 @@ def test_reconstruct_complete_proof_calc_with_comments_and_indented_child_proof(
             GoedelsPoetryState.clear_theorem_directory(theorem)
 
 
+def test_reconstruct_complete_proof_normalizes_misindented_trailing_apply() -> None:
+    """
+    Regression test for partial.log-style inlined child proof bodies:
+
+    - Child proof defines `have h_main : goal := by ...`
+    - Child proof ends with a *misindented* `apply h_main` (common LLM failure)
+    - Reconstruction should normalize indentation and turn the trailing `apply h_main` into
+      `exact h_main` so the parent goal closes.
+    """
+    import uuid
+    from typing import cast
+
+    from goedels_poetry.agents.state import DecomposedFormalTheoremState, FormalTheoremProofState
+    from goedels_poetry.state import GoedelsPoetryStateManager
+    from goedels_poetry.util.tree import TreeNode
+
+    theorem_sig = f"theorem test_reconstruct_apply_normalize_{uuid.uuid4().hex} : True"
+    theorem = with_default_preamble(theorem_sig)
+
+    with suppress(Exception):
+        GoedelsPoetryState.clear_theorem_directory(theorem)
+
+    try:
+        state = GoedelsPoetryState(formal_theorem=theorem)
+
+        sketch = f"""{theorem_sig} := by
+  have hv_subst : True := by sorry
+  exact hv_subst"""
+
+        parent: DecomposedFormalTheoremState = {
+            "parent": None,
+            "children": [],
+            "depth": 0,
+            "formal_theorem": theorem,
+            "preamble": DEFAULT_IMPORTS,
+            "proof_sketch": sketch,
+            "syntactic": True,
+            "errors": None,
+            "ast": None,
+            "self_correction_attempts": 1,
+            "decomposition_history": [],
+        }
+
+        # Note the misindentation:
+        # - `have h_main` is at indent 0
+        # - inner proof is at indent 4
+        # - trailing `apply h_main` is at indent 2 (invalid intermediate dedent level)
+        # This mirrors the pattern in partial.log that causes "expected command".
+        child_formal_proof = "have h_main : True := by\n    trivial\n  apply h_main\n"
+
+        child: FormalTheoremProofState = {
+            "parent": cast(TreeNode, parent),
+            "depth": 1,
+            "formal_theorem": "lemma hv_subst : True",
+            "preamble": DEFAULT_IMPORTS,
+            "syntactic": True,
+            "formal_proof": child_formal_proof,
+            "proved": True,
+            "errors": None,
+            "ast": None,
+            "self_correction_attempts": 1,
+            "proof_history": [],
+            "pass_attempts": 0,
+        }
+
+        parent["children"].append(cast(TreeNode, child))
+        state.formal_theorem_proof = cast(TreeNode, parent)
+        manager = GoedelsPoetryStateManager(state)
+
+        result = manager.reconstruct_complete_proof()
+
+        # The inlined proof should end with `exact h_main`, not `apply h_main`.
+        assert "exact h_main" in result
+        assert "apply h_main" not in result
+        # And the hv_subst hole should no longer contain sorry.
+        assert "have hv_subst : True := by sorry" not in result
+    finally:
+        with suppress(Exception):
+            GoedelsPoetryState.clear_theorem_directory(theorem)
+
+
 def test_reconstruct_complete_proof_nested_decomposition() -> None:
     """Test reconstruct_complete_proof with nested decomposed states."""
     import uuid

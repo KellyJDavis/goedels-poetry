@@ -1649,6 +1649,92 @@ class GoedelsPoetryStateManager:
                 dedented.append(ln)
         return "\n".join(dedented)
 
+    def _snap_proof_indentation_levels(self, text: str) -> str:
+        """
+        Normalize indentation transitions using a simple indent stack.
+
+        When indentation decreases, only allow dedenting to a previously-seen indentation
+        level; otherwise, snap to the nearest enclosing (previous) indentation level.
+        This avoids producing intermediate indentation levels like 2 when the script
+        only used 0 and 4, which can break Lean's layout-sensitive parsing.
+        """
+        lines = text.split("\n")
+        normalized_lines: list[str] = []
+        indent_stack: list[int] = [0]
+
+        for raw in lines:
+            if not raw.strip():
+                normalized_lines.append(raw)
+                continue
+
+            indent = len(raw) - len(raw.lstrip(" "))
+            content = raw.lstrip(" ")
+
+            current = indent_stack[-1]
+            if indent > current:
+                indent_stack.append(indent)
+                normalized_lines.append(raw)
+                continue
+
+            if indent == current:
+                normalized_lines.append(raw)
+                continue
+
+            while len(indent_stack) > 1 and indent < indent_stack[-1]:
+                indent_stack.pop()
+
+            snapped = indent_stack[-1]
+            if indent != snapped:
+                normalized_lines.append((" " * snapped) + content)
+            else:
+                normalized_lines.append(raw)
+
+        return "\n".join(normalized_lines)
+
+    def _rewrite_trailing_apply_of_have_to_exact(self, text: str) -> str:
+        """
+        If the last non-empty line is `apply <name>` and the script previously defines
+        `have <name> : ...`, rewrite it to `exact <name>`.
+        """
+        lines = text.split("\n")
+        last_idx = -1
+        for i in range(len(lines) - 1, -1, -1):
+            if lines[i].strip():
+                last_idx = i
+                break
+        if last_idx == -1:
+            return text
+
+        m = re.match(r"^(\s*)apply\s+([^\s]+)\s*$", lines[last_idx])
+        if not m:
+            return text
+
+        base_indent, name = m.group(1), m.group(2)
+        if not re.search(rf"\bhave\s+{re.escape(name)}\s*:", text):
+            return text
+
+        lines[last_idx] = f"{base_indent}exact {name}"
+        return "\n".join(lines)
+
+    def _normalize_child_proof_body(self, proof_body: str) -> str:
+        """
+        Normalize a child proof body to be safe for textual inlining.
+
+        This handles two common failure modes seen in partial logs:
+        1) Mis-indentation where a line dedents to an indentation level that never occurred before
+           (e.g., top-level 0, nested 4, then a line at 2). Lean is layout-sensitive, and this can
+           produce "expected command" errors.
+        2) Prover scripts that build `have h_main : goal := by ...` and then end with
+           `apply h_main` (which often fails to close the goal). Inlining is more reliable when the
+           script ends with `exact h_main`.
+        """
+        # First remove any common indentation (helps when the entire proof is shifted right).
+        text = self._dedent_proof_body(proof_body)
+        # Then snap indentation transitions to valid previously-seen indentation levels.
+        text = self._snap_proof_indentation_levels(text)
+        # Finally, rewrite trailing `apply <haveName>` into `exact <haveName>` when applicable.
+        return self._rewrite_trailing_apply_of_have_to_exact(text)
+
     def _skip_leading_trivia(self, text: str) -> str:
         """
         Skip leading empty lines and single-line comments in the given text.
@@ -1854,7 +1940,7 @@ class GoedelsPoetryStateManager:
         # Normalize indentation of the child proof body before re-indenting into the parent's hole.
         # This prevents layout bugs where `have`/`calc` blocks get pushed too far right and become
         # syntactically nested under `calc` steps (see partial.log).
-        normalized_body = self._dedent_proof_body(child_proof_body)
+        normalized_body = self._normalize_child_proof_body(child_proof_body)
         indented_proof = self._indent_proof_body(normalized_body, proof_indent)
 
         # Replace sorry with the indented proof
@@ -1971,7 +2057,7 @@ class GoedelsPoetryStateManager:
         indent_str = " " * base_indent
 
         # Normalize indentation of the child proof body before matching the sorry's indentation.
-        normalized_body = self._dedent_proof_body(child_proof_body)
+        normalized_body = self._normalize_child_proof_body(child_proof_body)
         indented_proof = self._indent_proof_body(normalized_body, indent_str)
 
         # Replace the sorry line with the indented proof
