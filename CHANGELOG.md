@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.3] - 2025-12-23
+
+### Fixed
+- Proof reconstruction now tolerates comments between `:=` and `by` and between `by` and `sorry`, ensuring placeholder sorries are removed before submission.
+- AST parser now extracts all theorem binders even when `byTactic`/`tacticSeq` nodes appear in type expressions before `:=`, preventing missing hypotheses in subgoal extraction.
+
+### Tests
+- Added regression coverage for combining theorem stubs that include comments around `sorry` to prevent reintroducing incomplete proofs.
+- Added extensive AST parser regression tests covering binder extraction edge cases (e.g., `byTactic` in types, multiple/nested binder lists, no-binder theorems).
+
 ## [1.1.2] - 2025-12-19
 
 ### Documentation
