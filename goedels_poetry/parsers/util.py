@@ -1202,10 +1202,26 @@ def __extract_theorem_binders(theorem_node: dict, goal_var_types: dict[str, str]
     args = theorem_node.get("args", [])
     # Typically: [keyword, declId, signature, colonToken, type, :=, proof]
     # We want to process up to but not including the proof
+    # The key fix: only stop when we've seen ":=" and then encounter a proof body
+    # Don't stop at byTactic/tacticSeq that appear in the type expression or elsewhere
+    seen_assign = False
     for _i, arg in enumerate(args):
-        # Stop when we hit the proof body (by tactic)
-        if isinstance(arg, dict) and arg.get("kind") in {"Lean.Parser.Term.byTactic", "Lean.Parser.Tactic.tacticSeq"}:
-            break
+        # Check if this is the ":=" token
+        if isinstance(arg, dict) and arg.get("val") == ":=":
+            seen_assign = True
+            # Still process ":=" itself (though it won't contain binders)
+            extract_from_node(arg)
+            continue
+
+        # Only stop at proof body nodes if we've already seen ":="
+        # This prevents stopping at byTactic/tacticSeq that appear in type expressions
+        if seen_assign and isinstance(arg, dict):
+            kind = arg.get("kind", "")
+            if kind in {"Lean.Parser.Term.byTactic", "Lean.Parser.Tactic.tacticSeq"}:
+                # This is the actual proof body, stop here
+                break
+
+        # Process this argument
         extract_from_node(arg)
 
     return binders

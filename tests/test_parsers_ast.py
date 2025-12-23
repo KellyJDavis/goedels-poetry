@@ -4985,3 +4985,743 @@ def test_ast_get_named_subgoal_code_set_with_hypothesis_mixed_bindings() -> None
     assert "hS" in result, f"Missing hS hypothesis. Result: {result}"
     assert "n" in result  # Let binding
     assert "hS :" in result or "(hS :" in result
+
+
+def test_ast_get_named_subgoal_code_hw_log_eq_12_example() -> None:
+    """Test the specific user-reported bug: hw_log_eq_12 with many binders."""
+    # This is the exact structure from the user's example
+    ast_dict = {
+        "kind": "Lean.Parser.Command.lemma",
+        "args": [
+            {"val": "lemma", "info": {"leading": "", "trailing": " "}},
+            {
+                "kind": "Lean.Parser.Command.declId",
+                "args": [{"val": "hw_log_eq_12", "info": {"leading": "", "trailing": " "}}],
+            },
+            {
+                "kind": "Lean.Parser.Term.bracketedBinderList",
+                "args": [
+                    {
+                        "kind": "Lean.Parser.Term.explicitBinder",
+                        "args": [
+                            {"val": "(", "info": {"leading": " ", "trailing": ""}},
+                            {
+                                "kind": "Lean.binderIdent",
+                                "args": [{"val": "x", "info": {"leading": "", "trailing": ""}}],
+                            },
+                            {
+                                "kind": "Lean.binderIdent",
+                                "args": [{"val": "y", "info": {"leading": " ", "trailing": ""}}],
+                            },
+                            {
+                                "kind": "Lean.binderIdent",
+                                "args": [{"val": "z", "info": {"leading": " ", "trailing": ""}}],
+                            },
+                            {
+                                "kind": "Lean.binderIdent",
+                                "args": [{"val": "w", "info": {"leading": " ", "trailing": ""}}],
+                            },
+                            {"val": ":", "info": {"leading": " ", "trailing": " "}},
+                            {"val": "ℕ", "info": {"leading": " ", "trailing": " "}},  # noqa: RUF001
+                            {"val": ")", "info": {"leading": "", "trailing": " "}},
+                        ],
+                    },
+                    {
+                        "kind": "Lean.Parser.Term.explicitBinder",
+                        "args": [
+                            {"val": "(", "info": {"leading": " ", "trailing": ""}},
+                            {
+                                "kind": "Lean.binderIdent",
+                                "args": [{"val": "ht", "info": {"leading": "", "trailing": ""}}],
+                            },
+                            {"val": ":", "info": {"leading": " ", "trailing": " "}},
+                            {"val": "1", "info": {"leading": " ", "trailing": " "}},
+                            {"val": "<", "info": {"leading": " ", "trailing": " "}},
+                            {"val": "x", "info": {"leading": " ", "trailing": " "}},
+                            {"val": "∧", "info": {"leading": " ", "trailing": " "}},
+                            {"val": "1", "info": {"leading": " ", "trailing": " "}},
+                            {"val": "<", "info": {"leading": " ", "trailing": " "}},
+                            {"val": "y", "info": {"leading": " ", "trailing": " "}},
+                            {"val": "∧", "info": {"leading": " ", "trailing": " "}},
+                            {"val": "1", "info": {"leading": " ", "trailing": " "}},
+                            {"val": "<", "info": {"leading": " ", "trailing": " "}},
+                            {"val": "z", "info": {"leading": "", "trailing": " "}},
+                            {"val": ")", "info": {"leading": "", "trailing": " "}},
+                        ],
+                    },
+                    {
+                        "kind": "Lean.Parser.Term.explicitBinder",
+                        "args": [
+                            {"val": "(", "info": {"leading": " ", "trailing": ""}},
+                            {
+                                "kind": "Lean.binderIdent",
+                                "args": [{"val": "hw", "info": {"leading": "", "trailing": ""}}],
+                            },
+                            {"val": ":", "info": {"leading": " ", "trailing": " "}},
+                            {"val": "0", "info": {"leading": " ", "trailing": " "}},
+                            {"val": "≤", "info": {"leading": " ", "trailing": " "}},
+                            {"val": "w", "info": {"leading": " ", "trailing": " "}},
+                            {"val": ")", "info": {"leading": "", "trailing": " "}},
+                        ],
+                    },
+                    {
+                        "kind": "Lean.Parser.Term.explicitBinder",
+                        "args": [
+                            {"val": "(", "info": {"leading": " ", "trailing": ""}},
+                            {
+                                "kind": "Lean.binderIdent",
+                                "args": [{"val": "h0", "info": {"leading": "", "trailing": ""}}],
+                            },
+                            {"val": ":", "info": {"leading": " ", "trailing": " "}},
+                            {"val": "Real.log", "info": {"leading": " ", "trailing": " "}},
+                            {"val": "w", "info": {"leading": " ", "trailing": " "}},
+                            {"val": "/", "info": {"leading": " ", "trailing": " "}},
+                            {"val": "Real.log", "info": {"leading": " ", "trailing": " "}},
+                            {"val": "x", "info": {"leading": " ", "trailing": " "}},
+                            {"val": "=", "info": {"leading": " ", "trailing": " "}},
+                            {"val": "24", "info": {"leading": " ", "trailing": " "}},
+                            {"val": ")", "info": {"leading": "", "trailing": " "}},
+                        ],
+                    },
+                    {
+                        "kind": "Lean.Parser.Term.explicitBinder",
+                        "args": [
+                            {"val": "(", "info": {"leading": " ", "trailing": ""}},
+                            {
+                                "kind": "Lean.binderIdent",
+                                "args": [{"val": "h1", "info": {"leading": "", "trailing": ""}}],
+                            },
+                            {"val": ":", "info": {"leading": " ", "trailing": " "}},
+                            {"val": "Real.log", "info": {"leading": " ", "trailing": " "}},
+                            {"val": "w", "info": {"leading": " ", "trailing": " "}},
+                            {"val": "/", "info": {"leading": " ", "trailing": " "}},
+                            {"val": "Real.log", "info": {"leading": " ", "trailing": " "}},
+                            {"val": "y", "info": {"leading": " ", "trailing": " "}},
+                            {"val": "=", "info": {"leading": " ", "trailing": " "}},
+                            {"val": "40", "info": {"leading": " ", "trailing": " "}},
+                            {"val": ")", "info": {"leading": "", "trailing": " "}},
+                        ],
+                    },
+                    {
+                        "kind": "Lean.Parser.Term.explicitBinder",
+                        "args": [
+                            {"val": "(", "info": {"leading": " ", "trailing": ""}},
+                            {
+                                "kind": "Lean.binderIdent",
+                                "args": [{"val": "h2", "info": {"leading": "", "trailing": ""}}],
+                            },
+                            {"val": ":", "info": {"leading": " ", "trailing": " "}},
+                            {"val": "Real.log", "info": {"leading": " ", "trailing": " "}},
+                            {"val": "w", "info": {"leading": " ", "trailing": " "}},
+                            {"val": "/", "info": {"leading": " ", "trailing": " "}},
+                            {"val": "Real.log", "info": {"leading": " ", "trailing": " "}},
+                            {"val": "(", "info": {"leading": " ", "trailing": ""}},
+                            {"val": "x", "info": {"leading": "", "trailing": " "}},
+                            {"val": "*", "info": {"leading": " ", "trailing": " "}},
+                            {"val": "y", "info": {"leading": " ", "trailing": " "}},
+                            {"val": "*", "info": {"leading": " ", "trailing": " "}},
+                            {"val": "z", "info": {"leading": " ", "trailing": ""}},
+                            {"val": ")", "info": {"leading": "", "trailing": " "}},
+                            {"val": "=", "info": {"leading": " ", "trailing": " "}},
+                            {"val": "12", "info": {"leading": " ", "trailing": " "}},
+                            {"val": ")", "info": {"leading": "", "trailing": " "}},
+                        ],
+                    },
+                ],
+            },
+            {"val": ":", "info": {"leading": " ", "trailing": " "}},
+            {"val": "Real.log", "info": {"leading": " ", "trailing": " "}},
+            {"val": "(", "info": {"leading": " ", "trailing": ""}},
+            {"val": "w", "info": {"leading": "", "trailing": " "}},
+            {"val": ":", "info": {"leading": " ", "trailing": " "}},
+            {"val": "ℝ", "info": {"leading": " ", "trailing": ""}},  # noqa: RUF001
+            {"val": ")", "info": {"leading": " ", "trailing": " "}},
+            {"val": "=", "info": {"leading": " ", "trailing": " "}},
+            {"val": "(", "info": {"leading": " ", "trailing": ""}},
+            {"val": "12", "info": {"leading": "", "trailing": " "}},
+            {"val": ":", "info": {"leading": " ", "trailing": " "}},
+            {"val": "ℝ", "info": {"leading": " ", "trailing": ""}},  # noqa: RUF001
+            {"val": ")", "info": {"leading": " ", "trailing": " "}},
+            {"val": "*", "info": {"leading": " ", "trailing": " "}},
+            {"val": "Real.log", "info": {"leading": " ", "trailing": " "}},
+            {"val": "(", "info": {"leading": " ", "trailing": ""}},
+            {"val": "(", "info": {"leading": "", "trailing": ""}},
+            {"val": "x", "info": {"leading": "", "trailing": " "}},
+            {"val": "*", "info": {"leading": " ", "trailing": " "}},
+            {"val": "y", "info": {"leading": " ", "trailing": " "}},
+            {"val": "*", "info": {"leading": " ", "trailing": " "}},
+            {"val": "z", "info": {"leading": " ", "trailing": ""}},
+            {"val": ":", "info": {"leading": " ", "trailing": " "}},
+            {"val": "ℕ", "info": {"leading": " ", "trailing": ""}},  # noqa: RUF001
+            {"val": ")", "info": {"leading": "", "trailing": " "}},
+            {"val": ":", "info": {"leading": " ", "trailing": " "}},
+            {"val": "ℝ", "info": {"leading": " ", "trailing": ""}},  # noqa: RUF001
+            {"val": ")", "info": {"leading": "", "trailing": " "}},
+            {"val": ":=", "info": {"leading": " ", "trailing": " "}},
+            {
+                "kind": "Lean.Parser.Term.byTactic",
+                "args": [
+                    {"val": "by", "info": {"leading": "", "trailing": "\n  "}},
+                    {
+                        "kind": "Lean.Parser.Tactic.tacticSeq",
+                        "args": [
+                            {
+                                "kind": "Lean.Parser.Tactic.tacticHave_",
+                                "args": [
+                                    {"val": "have", "info": {"leading": "", "trailing": " "}},
+                                    {
+                                        "kind": "Lean.Parser.Term.haveDecl",
+                                        "args": [
+                                            {
+                                                "kind": "Lean.Parser.Term.haveIdDecl",
+                                                "args": [
+                                                    {
+                                                        "kind": "Lean.Parser.Term.haveId",
+                                                        "args": [
+                                                            {"val": "h2'", "info": {"leading": "", "trailing": " "}}
+                                                        ],
+                                                    }
+                                                ],
+                                            },
+                                            {"val": ":", "info": {"leading": "", "trailing": " "}},
+                                            {"val": "Real.log", "info": {"leading": " ", "trailing": " "}},
+                                            {"val": "(", "info": {"leading": " ", "trailing": ""}},
+                                            {"val": "w", "info": {"leading": "", "trailing": " "}},
+                                            {"val": ":", "info": {"leading": " ", "trailing": " "}},
+                                            {"val": "ℝ", "info": {"leading": " ", "trailing": ""}},  # noqa: RUF001
+                                            {"val": ")", "info": {"leading": " ", "trailing": " "}},
+                                            {"val": "/", "info": {"leading": " ", "trailing": " "}},
+                                            {"val": "Real.log", "info": {"leading": " ", "trailing": " "}},
+                                            {"val": "(", "info": {"leading": " ", "trailing": ""}},
+                                            {"val": "(", "info": {"leading": "", "trailing": ""}},
+                                            {"val": "x", "info": {"leading": "", "trailing": " "}},
+                                            {"val": "*", "info": {"leading": " ", "trailing": " "}},
+                                            {"val": "y", "info": {"leading": " ", "trailing": " "}},
+                                            {"val": "*", "info": {"leading": " ", "trailing": " "}},
+                                            {"val": "z", "info": {"leading": " ", "trailing": ""}},
+                                            {"val": ":", "info": {"leading": " ", "trailing": " "}},
+                                            {"val": "ℕ", "info": {"leading": " ", "trailing": ""}},  # noqa: RUF001
+                                            {"val": ")", "info": {"leading": "", "trailing": " "}},
+                                            {"val": ":", "info": {"leading": " ", "trailing": " "}},
+                                            {"val": "ℝ", "info": {"leading": " ", "trailing": ""}},  # noqa: RUF001
+                                            {"val": ")", "info": {"leading": " ", "trailing": " "}},
+                                            {"val": "=", "info": {"leading": " ", "trailing": " "}},
+                                            {"val": "(", "info": {"leading": " ", "trailing": ""}},
+                                            {"val": "12", "info": {"leading": "", "trailing": " "}},
+                                            {"val": ":", "info": {"leading": " ", "trailing": " "}},
+                                            {"val": "ℝ", "info": {"leading": " ", "trailing": ""}},  # noqa: RUF001
+                                            {"val": ")", "info": {"leading": "", "trailing": " "}},
+                                        ],
+                                    },
+                                    {"val": ":=", "info": {"leading": " ", "trailing": " "}},
+                                    {
+                                        "kind": "Lean.Parser.Term.byTactic",
+                                        "args": [
+                                            {"val": "by", "info": {"leading": "", "trailing": " "}},
+                                            {
+                                                "kind": "Lean.Parser.Tactic.tacticSeq",
+                                                "args": [
+                                                    {
+                                                        "kind": "Lean.Parser.Tactic.tacticSorry",
+                                                        "args": [
+                                                            {"val": "sorry", "info": {"leading": "", "trailing": ""}}
+                                                        ],
+                                                    }
+                                                ],
+                                            },
+                                        ],
+                                    },
+                                ],
+                            }
+                        ],
+                    },
+                ],
+            },
+        ],
+    }
+
+    sorries = [
+        {
+            "pos": {"line": 10, "column": 4},
+            "endPos": {"line": 10, "column": 9},
+            "goal": "x y z w : ℕ\nht : 1 < x ∧ 1 < y ∧ 1 < z\nhw : 0 ≤ w\nh0 : Real.log w / Real.log x = 24\nh1 : Real.log w / Real.log y = 40\nh2 : Real.log w / Real.log (x * y * z) = 12\n⊢ Real.log (w : ℝ) / Real.log ((x * y * z : ℕ) : ℝ) = (12 : ℝ)",  # noqa: RUF001
+            "proofState": 1,
+        }
+    ]
+
+    ast = AST(ast_dict, sorries)
+    result = ast.get_named_subgoal_code("h2'")
+
+    # The result should include ALL theorem binders
+    assert "lemma" in result
+    assert "h2'" in result
+    # Check that all variables are present
+    assert "x" in result
+    assert "y" in result
+    assert "z" in result
+    assert "w" in result
+    # Check that all hypotheses are present
+    assert "ht" in result
+    assert "hw" in result
+    assert "h0" in result
+    assert "h1" in result
+    assert "h2" in result
+    # Check that types are present
+    assert "ℕ" in result  # noqa: RUF001
+    assert "ℝ" in result  # noqa: RUF001
+    # The subgoal should be valid Lean code
+    assert ":=" in result
+    assert "sorry" in result
+
+
+def test_ast_get_named_subgoal_code_with_bytactic_in_type() -> None:
+    """Test that binders are extracted even when byTactic appears in the type expression."""
+    # This tests the fix: byTactic in type should not stop extraction
+    ast_dict = {
+        "kind": "Lean.Parser.Command.lemma",
+        "args": [
+            {"val": "lemma", "info": {"leading": "", "trailing": " "}},
+            {
+                "kind": "Lean.Parser.Command.declId",
+                "args": [{"val": "test_lemma", "info": {"leading": "", "trailing": " "}}],
+            },
+            {
+                "kind": "Lean.Parser.Term.bracketedBinderList",
+                "args": [
+                    {
+                        "kind": "Lean.Parser.Term.explicitBinder",
+                        "args": [
+                            {"val": "(", "info": {"leading": " ", "trailing": ""}},
+                            {
+                                "kind": "Lean.binderIdent",
+                                "args": [{"val": "x", "info": {"leading": "", "trailing": ""}}],
+                            },
+                            {"val": ":", "info": {"leading": " ", "trailing": " "}},
+                            {"val": "ℕ", "info": {"leading": " ", "trailing": " "}},  # noqa: RUF001
+                            {"val": ")", "info": {"leading": "", "trailing": " "}},
+                        ],
+                    },
+                ],
+            },
+            {"val": ":", "info": {"leading": " ", "trailing": " "}},
+            # Type expression that contains byTactic (should not stop extraction)
+            {
+                "kind": "Lean.Parser.Term.app",
+                "args": [
+                    {"val": "P", "info": {"leading": "", "trailing": " "}},
+                    {
+                        "kind": "Lean.Parser.Term.byTactic",
+                        "args": [
+                            {"val": "by", "info": {"leading": "", "trailing": " "}},
+                            {
+                                "kind": "Lean.Parser.Tactic.tacticSeq",
+                                "args": [
+                                    {
+                                        "kind": "Lean.Parser.Tactic.decide",
+                                        "args": [{"val": "decide", "info": {"leading": "", "trailing": ""}}],
+                                    }
+                                ],
+                            },
+                        ],
+                    },
+                ],
+            },
+            {"val": ":=", "info": {"leading": " ", "trailing": " "}},
+            {
+                "kind": "Lean.Parser.Term.byTactic",
+                "args": [
+                    {"val": "by", "info": {"leading": "", "trailing": "\n  "}},
+                    {
+                        "kind": "Lean.Parser.Tactic.tacticSeq",
+                        "args": [
+                            {
+                                "kind": "Lean.Parser.Tactic.tacticHave_",
+                                "args": [
+                                    {"val": "have", "info": {"leading": "", "trailing": " "}},
+                                    {
+                                        "kind": "Lean.Parser.Term.haveDecl",
+                                        "args": [
+                                            {
+                                                "kind": "Lean.Parser.Term.haveIdDecl",
+                                                "args": [
+                                                    {
+                                                        "kind": "Lean.Parser.Term.haveId",
+                                                        "args": [
+                                                            {"val": "h1", "info": {"leading": "", "trailing": " "}}
+                                                        ],
+                                                    }
+                                                ],
+                                            },
+                                            {"val": ":", "info": {"leading": "", "trailing": " "}},
+                                            {"val": "Prop", "info": {"leading": "", "trailing": " "}},
+                                        ],
+                                    },
+                                    {"val": ":=", "info": {"leading": " ", "trailing": " "}},
+                                    {
+                                        "kind": "Lean.Parser.Term.byTactic",
+                                        "args": [
+                                            {"val": "by", "info": {"leading": "", "trailing": " "}},
+                                            {
+                                                "kind": "Lean.Parser.Tactic.tacticSeq",
+                                                "args": [
+                                                    {
+                                                        "kind": "Lean.Parser.Tactic.tacticSorry",
+                                                        "args": [
+                                                            {"val": "sorry", "info": {"leading": "", "trailing": ""}}
+                                                        ],
+                                                    }
+                                                ],
+                                            },
+                                        ],
+                                    },
+                                ],
+                            }
+                        ],
+                    },
+                ],
+            },
+        ],
+    }
+
+    sorries = [
+        {
+            "pos": {"line": 3, "column": 4},
+            "endPos": {"line": 3, "column": 9},
+            "goal": "x : ℕ\n⊢ Prop",  # noqa: RUF001
+            "proofState": 1,
+        }
+    ]
+
+    ast = AST(ast_dict, sorries)
+    result = ast.get_named_subgoal_code("h1")
+
+    # Should include the binder x even though byTactic appears in type
+    assert "lemma" in result
+    assert "h1" in result
+    assert "x" in result
+    assert "ℕ" in result  # noqa: RUF001
+
+
+def test_ast_get_named_subgoal_code_no_binders() -> None:
+    """Test extraction when theorem has no binders."""
+    ast_dict = {
+        "kind": "Lean.Parser.Command.lemma",
+        "args": [
+            {"val": "lemma", "info": {"leading": "", "trailing": " "}},
+            {
+                "kind": "Lean.Parser.Command.declId",
+                "args": [{"val": "test_lemma", "info": {"leading": "", "trailing": " "}}],
+            },
+            {"val": ":", "info": {"leading": " ", "trailing": " "}},
+            {"val": "Prop", "info": {"leading": "", "trailing": " "}},
+            {"val": ":=", "info": {"leading": " ", "trailing": " "}},
+            {
+                "kind": "Lean.Parser.Term.byTactic",
+                "args": [
+                    {"val": "by", "info": {"leading": "", "trailing": "\n  "}},
+                    {
+                        "kind": "Lean.Parser.Tactic.tacticSeq",
+                        "args": [
+                            {
+                                "kind": "Lean.Parser.Tactic.tacticHave_",
+                                "args": [
+                                    {"val": "have", "info": {"leading": "", "trailing": " "}},
+                                    {
+                                        "kind": "Lean.Parser.Term.haveDecl",
+                                        "args": [
+                                            {
+                                                "kind": "Lean.Parser.Term.haveIdDecl",
+                                                "args": [
+                                                    {
+                                                        "kind": "Lean.Parser.Term.haveId",
+                                                        "args": [
+                                                            {"val": "h1", "info": {"leading": "", "trailing": " "}}
+                                                        ],
+                                                    }
+                                                ],
+                                            },
+                                            {"val": ":", "info": {"leading": "", "trailing": " "}},
+                                            {"val": "Prop", "info": {"leading": "", "trailing": " "}},
+                                        ],
+                                    },
+                                    {"val": ":=", "info": {"leading": " ", "trailing": " "}},
+                                    {
+                                        "kind": "Lean.Parser.Term.byTactic",
+                                        "args": [
+                                            {"val": "by", "info": {"leading": "", "trailing": " "}},
+                                            {
+                                                "kind": "Lean.Parser.Tactic.tacticSeq",
+                                                "args": [
+                                                    {
+                                                        "kind": "Lean.Parser.Tactic.tacticSorry",
+                                                        "args": [
+                                                            {"val": "sorry", "info": {"leading": "", "trailing": ""}}
+                                                        ],
+                                                    }
+                                                ],
+                                            },
+                                        ],
+                                    },
+                                ],
+                            }
+                        ],
+                    },
+                ],
+            },
+        ],
+    }
+
+    sorries = [
+        {
+            "pos": {"line": 2, "column": 4},
+            "endPos": {"line": 2, "column": 9},
+            "goal": "⊢ Prop",
+            "proofState": 1,
+        }
+    ]
+
+    ast = AST(ast_dict, sorries)
+    result = ast.get_named_subgoal_code("h1")
+
+    # Should work even with no binders
+    assert "lemma" in result
+    assert "h1" in result
+    assert ":=" in result
+    assert "sorry" in result
+
+
+def test_ast_get_named_subgoal_code_multiple_binder_lists() -> None:
+    """Test extraction when theorem has multiple bracketedBinderList nodes (edge case)."""
+    # Some Lean parsers might produce multiple binder lists
+    ast_dict = {
+        "kind": "Lean.Parser.Command.lemma",
+        "args": [
+            {"val": "lemma", "info": {"leading": "", "trailing": " "}},
+            {
+                "kind": "Lean.Parser.Command.declId",
+                "args": [{"val": "test_lemma", "info": {"leading": "", "trailing": " "}}],
+            },
+            {
+                "kind": "Lean.Parser.Term.bracketedBinderList",
+                "args": [
+                    {
+                        "kind": "Lean.Parser.Term.explicitBinder",
+                        "args": [
+                            {"val": "(", "info": {"leading": " ", "trailing": ""}},
+                            {
+                                "kind": "Lean.binderIdent",
+                                "args": [{"val": "x", "info": {"leading": "", "trailing": ""}}],
+                            },
+                            {"val": ":", "info": {"leading": " ", "trailing": " "}},
+                            {"val": "ℕ", "info": {"leading": " ", "trailing": " "}},  # noqa: RUF001
+                            {"val": ")", "info": {"leading": "", "trailing": " "}},
+                        ],
+                    },
+                ],
+            },
+            {
+                "kind": "Lean.Parser.Term.bracketedBinderList",
+                "args": [
+                    {
+                        "kind": "Lean.Parser.Term.explicitBinder",
+                        "args": [
+                            {"val": "(", "info": {"leading": " ", "trailing": ""}},
+                            {
+                                "kind": "Lean.binderIdent",
+                                "args": [{"val": "y", "info": {"leading": "", "trailing": ""}}],
+                            },
+                            {"val": ":", "info": {"leading": " ", "trailing": " "}},
+                            {"val": "ℕ", "info": {"leading": " ", "trailing": " "}},  # noqa: RUF001
+                            {"val": ")", "info": {"leading": "", "trailing": " "}},
+                        ],
+                    },
+                ],
+            },
+            {"val": ":", "info": {"leading": " ", "trailing": " "}},
+            {"val": "Prop", "info": {"leading": "", "trailing": " "}},
+            {"val": ":=", "info": {"leading": " ", "trailing": " "}},
+            {
+                "kind": "Lean.Parser.Term.byTactic",
+                "args": [
+                    {"val": "by", "info": {"leading": "", "trailing": "\n  "}},
+                    {
+                        "kind": "Lean.Parser.Tactic.tacticSeq",
+                        "args": [
+                            {
+                                "kind": "Lean.Parser.Tactic.tacticHave_",
+                                "args": [
+                                    {"val": "have", "info": {"leading": "", "trailing": " "}},
+                                    {
+                                        "kind": "Lean.Parser.Term.haveDecl",
+                                        "args": [
+                                            {
+                                                "kind": "Lean.Parser.Term.haveIdDecl",
+                                                "args": [
+                                                    {
+                                                        "kind": "Lean.Parser.Term.haveId",
+                                                        "args": [
+                                                            {"val": "h1", "info": {"leading": "", "trailing": " "}}
+                                                        ],
+                                                    }
+                                                ],
+                                            },
+                                            {"val": ":", "info": {"leading": "", "trailing": " "}},
+                                            {"val": "Prop", "info": {"leading": "", "trailing": " "}},
+                                        ],
+                                    },
+                                    {"val": ":=", "info": {"leading": " ", "trailing": " "}},
+                                    {
+                                        "kind": "Lean.Parser.Term.byTactic",
+                                        "args": [
+                                            {"val": "by", "info": {"leading": "", "trailing": " "}},
+                                            {
+                                                "kind": "Lean.Parser.Tactic.tacticSeq",
+                                                "args": [
+                                                    {
+                                                        "kind": "Lean.Parser.Tactic.tacticSorry",
+                                                        "args": [
+                                                            {"val": "sorry", "info": {"leading": "", "trailing": ""}}
+                                                        ],
+                                                    }
+                                                ],
+                                            },
+                                        ],
+                                    },
+                                ],
+                            }
+                        ],
+                    },
+                ],
+            },
+        ],
+    }
+
+    sorries = [
+        {
+            "pos": {"line": 3, "column": 4},
+            "endPos": {"line": 3, "column": 9},
+            "goal": "x : ℕ\ny : ℕ\n⊢ Prop",  # noqa: RUF001
+            "proofState": 1,
+        }
+    ]
+
+    ast = AST(ast_dict, sorries)
+    result = ast.get_named_subgoal_code("h1")
+
+    # Should include binders from both binder lists
+    assert "lemma" in result
+    assert "h1" in result
+    assert "x" in result
+    assert "y" in result
+    assert "ℕ" in result  # noqa: RUF001
+
+
+def test_ast_get_named_subgoal_code_nested_binders() -> None:
+    """Test extraction when binders are nested in complex structures."""
+    ast_dict = {
+        "kind": "Lean.Parser.Command.lemma",
+        "args": [
+            {"val": "lemma", "info": {"leading": "", "trailing": " "}},
+            {
+                "kind": "Lean.Parser.Command.declId",
+                "args": [{"val": "test_lemma", "info": {"leading": "", "trailing": " "}}],
+            },
+            {
+                "kind": "Lean.Parser.Term.app",
+                "args": [
+                    {
+                        "kind": "Lean.Parser.Term.bracketedBinderList",
+                        "args": [
+                            {
+                                "kind": "Lean.Parser.Term.explicitBinder",
+                                "args": [
+                                    {"val": "(", "info": {"leading": " ", "trailing": ""}},
+                                    {
+                                        "kind": "Lean.binderIdent",
+                                        "args": [{"val": "x", "info": {"leading": "", "trailing": ""}}],
+                                    },
+                                    {"val": ":", "info": {"leading": " ", "trailing": " "}},
+                                    {"val": "ℕ", "info": {"leading": " ", "trailing": " "}},  # noqa: RUF001
+                                    {"val": ")", "info": {"leading": "", "trailing": " "}},
+                                ],
+                            },
+                        ],
+                    },
+                ],
+            },
+            {"val": ":", "info": {"leading": " ", "trailing": " "}},
+            {"val": "Prop", "info": {"leading": "", "trailing": " "}},
+            {"val": ":=", "info": {"leading": " ", "trailing": " "}},
+            {
+                "kind": "Lean.Parser.Term.byTactic",
+                "args": [
+                    {"val": "by", "info": {"leading": "", "trailing": "\n  "}},
+                    {
+                        "kind": "Lean.Parser.Tactic.tacticSeq",
+                        "args": [
+                            {
+                                "kind": "Lean.Parser.Tactic.tacticHave_",
+                                "args": [
+                                    {"val": "have", "info": {"leading": "", "trailing": " "}},
+                                    {
+                                        "kind": "Lean.Parser.Term.haveDecl",
+                                        "args": [
+                                            {
+                                                "kind": "Lean.Parser.Term.haveIdDecl",
+                                                "args": [
+                                                    {
+                                                        "kind": "Lean.Parser.Term.haveId",
+                                                        "args": [
+                                                            {"val": "h1", "info": {"leading": "", "trailing": " "}}
+                                                        ],
+                                                    }
+                                                ],
+                                            },
+                                            {"val": ":", "info": {"leading": "", "trailing": " "}},
+                                            {"val": "Prop", "info": {"leading": "", "trailing": " "}},
+                                        ],
+                                    },
+                                    {"val": ":=", "info": {"leading": " ", "trailing": " "}},
+                                    {
+                                        "kind": "Lean.Parser.Term.byTactic",
+                                        "args": [
+                                            {"val": "by", "info": {"leading": "", "trailing": " "}},
+                                            {
+                                                "kind": "Lean.Parser.Tactic.tacticSeq",
+                                                "args": [
+                                                    {
+                                                        "kind": "Lean.Parser.Tactic.tacticSorry",
+                                                        "args": [
+                                                            {"val": "sorry", "info": {"leading": "", "trailing": ""}}
+                                                        ],
+                                                    }
+                                                ],
+                                            },
+                                        ],
+                                    },
+                                ],
+                            }
+                        ],
+                    },
+                ],
+            },
+        ],
+    }
+
+    sorries = [
+        {
+            "pos": {"line": 3, "column": 4},
+            "endPos": {"line": 3, "column": 9},
+            "goal": "x : ℕ\n⊢ Prop",  # noqa: RUF001
+            "proofState": 1,
+        }
+    ]
+
+    ast = AST(ast_dict, sorries)
+    result = ast.get_named_subgoal_code("h1")
+
+    # Should find nested binders through recursive traversal
+    assert "lemma" in result
+    assert "h1" in result
+    assert "x" in result
+    assert "ℕ" in result  # noqa: RUF001
