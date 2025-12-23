@@ -1571,9 +1571,14 @@ class GoedelsPoetryStateManager:
         str
             The tactic sequence (indented appropriately)
         """
-        # Check if this looks like a full lemma/theorem statement starting with lemma/theorem/have
-        # If so, extract tactics from it. Otherwise, treat as pure tactics.
-        starts_with_decl = re.search(r"^\s*(lemma|theorem|have)\s+", proof, re.MULTILINE)
+        # Check if this looks like a full lemma/theorem statement.
+        #
+        # IMPORTANT: Do NOT treat a leading `have` as a top-level declaration here.
+        # In many prover outputs (and inlining scenarios), the "proof" we receive is already a
+        # tactic script that starts with `have ... := by ...` and ends with `exact ...`.
+        # Stripping tactics after the first `:= by` would remove the binder and leave dangling
+        # references like `exact h_main` (this was observed in partial.log).
+        starts_with_decl = re.search(r"^\s*(lemma|theorem)\s+", proof, re.MULTILINE)
 
         if starts_with_decl:
             # This is a full lemma/theorem statement, find the first := by and extract from there
@@ -1609,6 +1614,40 @@ class GoedelsPoetryStateManager:
         # Has := by but doesn't start with declaration - this is tactics that contain := by
         # Return as-is (it's already just tactics)
         return proof.strip()
+
+    def _dedent_proof_body(self, proof_body: str) -> str:
+        """
+        Dedent a proof body by removing the common leading indentation from non-empty lines.
+
+        This is critical for Lean4 layout-sensitive constructs like `calc`, `match`, `cases`, etc.
+        Child proofs frequently arrive already-indented (e.g. copied from inside a lemma or have),
+        and re-indenting them naively can push lines too far right, changing parse structure.
+        """
+        lines = proof_body.split("\n")
+        indents: list[int] = []
+        for ln in lines:
+            if not ln.strip():
+                continue
+            count = 0
+            for ch in ln:
+                if ch == " ":
+                    count += 1
+                else:
+                    break
+            indents.append(count)
+        if not indents:
+            return proof_body
+        min_indent = min(indents)
+        if min_indent <= 0:
+            return proof_body
+        prefix = " " * min_indent
+        dedented: list[str] = []
+        for ln in lines:
+            if ln.strip():
+                dedented.append(ln[min_indent:] if ln.startswith(prefix) else ln.lstrip(" "))
+            else:
+                dedented.append(ln)
+        return "\n".join(dedented)
 
     def _skip_leading_trivia(self, text: str) -> str:
         """
@@ -1693,8 +1732,31 @@ class GoedelsPoetryStateManager:
             # Note: The parent sketch still has the original signature without extra parameters
             return self._replace_sorry_for_have(parent_sketch, have_name, child_proof_body)
         else:
-            # This name doesn't appear as a "have" statement, so it's the main body
-            return self._replace_main_body_sorry(parent_sketch, child_proof_body)
+            # This name doesn't appear as a "have" statement.
+            #
+            # Only treat this as "main body" for the dedicated synthetic node `main_body`.
+            # Falling back for arbitrary names is brittle and can splice proofs into the wrong `sorry`.
+            if have_name == "main_body":
+                return self._replace_main_body_sorry(parent_sketch, child_proof_body)
+
+            # Heuristic fallback: if the parent has a standalone main-body `sorry`, inline there.
+            # This preserves support for decompositions where the final child corresponds to the
+            # main goal, but its formal_theorem name is not present as a `have` in the sketch
+            # (e.g. deep nesting tests that end in a leaf lemma).
+            candidate = self._replace_main_body_sorry(parent_sketch, child_proof_body)
+            if candidate != parent_sketch:
+                logger.debug(
+                    "Reconstruction inlined child '%s' into a standalone main-body sorry (no matching `have`).",
+                    have_name,
+                )
+                return candidate
+
+            logger.warning(
+                "Reconstruction could not find matching `have %s` in parent sketch and no standalone main-body sorry; "
+                "leaving sketch unchanged.",
+                have_name,
+            )
+            return parent_sketch
 
     def _extract_have_name(self, formal_theorem: str) -> str:
         """
@@ -1789,8 +1851,11 @@ class GoedelsPoetryStateManager:
         # Add spaces for the indentation of the proof body
         proof_indent = " " * (base_indent + PROOF_BODY_INDENT_SPACES)
 
-        # Indent the child proof body
-        indented_proof = self._indent_proof_body(child_proof_body, proof_indent)
+        # Normalize indentation of the child proof body before re-indenting into the parent's hole.
+        # This prevents layout bugs where `have`/`calc` blocks get pushed too far right and become
+        # syntactically nested under `calc` steps (see partial.log).
+        normalized_body = self._dedent_proof_body(child_proof_body)
+        indented_proof = self._indent_proof_body(normalized_body, proof_indent)
 
         # Replace sorry with the indented proof
         result = re.sub(pattern, rf"\1\n{indented_proof}", parent_sketch, count=1, flags=re.DOTALL)
@@ -1822,17 +1887,26 @@ class GoedelsPoetryStateManager:
             prev_line = lines[prev_idx]
 
             # Pattern: "have <name> : <type> := <whitespace/newline> by <whitespace/newline> sorry"
-            # Note: Lean4 identifiers can include apostrophes
-            if re.search(r"\bhave\s+[\w']+\s*:", prev_line):
+            # Lean identifiers can be unicode (e.g. h₁), so capture a token-like chunk.
+            if re.search(r"\bhave\s+[^\s:(]+\s*:", prev_line):
                 # Found a have statement - now check if our sorry is part of its proof body
                 have_indent = len(prev_line) - len(prev_line.lstrip())
 
-                # Check lines between the have and our sorry for ":= by" pattern
+                # Check lines between the have and our sorry for a ":= ... by" pattern.
+                # Allow comments between `:=` and `by` (common in sketches), otherwise we may
+                # misclassify a have-sorry as a standalone sorry and replace the wrong hole.
                 between_text = "\n".join(lines[prev_idx:sorry_idx])
 
-                # If there's a ":= by" pattern in the lines from have to (but not including) sorry,
+                # If there's a ":= ... by" pattern in the lines from have to (but not including) sorry,
                 # and our sorry is indented MORE than the have line, it's part of the have
-                if re.search(r":=\s*by", between_text, re.MULTILINE | re.DOTALL) and sorry_indent > have_indent:
+                if (
+                    re.search(
+                        r":=(?:\s|--[^\n]*\n|/-.*?-/)*by",
+                        between_text,
+                        re.MULTILINE | re.DOTALL,
+                    )
+                    and sorry_indent > have_indent
+                ):
                     return True
 
             # If we hit an empty line, stop looking back
@@ -1896,8 +1970,9 @@ class GoedelsPoetryStateManager:
         base_indent = len(sorry_line) - len(sorry_line.lstrip())
         indent_str = " " * base_indent
 
-        # Indent the child proof body to match the sorry's indentation
-        indented_proof = self._indent_proof_body(child_proof_body, indent_str)
+        # Normalize indentation of the child proof body before matching the sorry's indentation.
+        normalized_body = self._dedent_proof_body(child_proof_body)
+        indented_proof = self._indent_proof_body(normalized_body, indent_str)
 
         # Replace the sorry line with the indented proof
         lines[last_sorry_idx] = indented_proof
