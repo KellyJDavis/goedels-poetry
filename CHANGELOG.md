@@ -5,6 +5,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.4] - 2025-12-23
+
+### Fixed
+- Proof reconstruction now correctly handles comments between `:=` and `by` and between `by` and `sorry` in have statements, preventing `sorry` statements from remaining in final proofs when child proofs are inlined.
+- Proof reconstruction improved to treat proofs starting with `have` as tactic scripts (don't strip `:= by`), preventing dangling `exact h_*` statements.
+- Proof reconstruction now dedents child proof bodies before re-indenting to preserve Lean layout requirements (e.g., in `calc` statements).
+- Proof reconstruction robustified: normalized child proof bodies by snapping dedents to previously-seen indentation levels to avoid Lean layout/"expected command" failures.
+- Proof reconstruction now rewrites trailing `apply <haveName>` to `exact <haveName>` when the proof defines `have <haveName> : …`, ensuring goals close reliably.
+- Fixed `_extract_tactics_after_by()` to correctly distinguish between full lemma/theorem statements and pure tactics that may contain `:= by` in the middle (e.g., in calc statements).
+
+### Tests
+- Added comprehensive regression test coverage for proof reconstruction edge cases including comments around `sorry`, multiple comment lines, and misindented `apply h_main` scenarios.
+- Added tests for `_extract_tactics_after_by()` edge cases covering nested lemma statements and tactics containing `:= by` patterns.
+
 ## [1.1.3] - 2025-12-23
 
 ### Fixed
@@ -268,6 +282,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Typer for CLI
 - Rich for beautiful terminal output
 
+[1.1.4]: https://github.com/KellyJDavis/goedels-poetry/releases/tag/v1.1.4
+[1.1.3]: https://github.com/KellyJDavis/goedels-poetry/releases/tag/v1.1.3
 [1.1.2]: https://github.com/KellyJDavis/goedels-poetry/releases/tag/v1.1.2
 [1.1.1]: https://github.com/KellyJDavis/goedels-poetry/releases/tag/v1.1.1
 [1.1.0]: https://github.com/KellyJDavis/goedels-poetry/releases/tag/v1.1.0
