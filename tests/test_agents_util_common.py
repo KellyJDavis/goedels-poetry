@@ -475,3 +475,28 @@ theorem test : True := by sorry"""
     assert "theorem test : True := by" in result
     assert "trivial" in result
     assert "sorry" not in result
+
+
+def test_combine_theorem_with_proof_with_comment_before_sorry() -> None:
+    """Test combining when comment appears between by and sorry."""
+    theorem = """theorem test : True := by
+    -- A comment to test parsing
+    sorry"""
+    proof_body = "  trivial"
+    result = combine_theorem_with_proof(theorem, proof_body)
+    assert "sorry" not in result
+    assert result == "theorem test : True := by\n  trivial"
+
+
+def test_combine_theorem_with_proof_comment_between_colon_eq_and_by() -> None:
+    """Test combining when comment appears after := and before by."""
+    theorem = """theorem test : True :=
+  -- comment between := and by
+  by
+  sorry"""
+    proof_body = "  trivial"
+    result = combine_theorem_with_proof(theorem, proof_body)
+    assert "sorry" not in result
+    # Preserve comment block while inserting proof after `by`
+    assert "comment between := and by" in result
+    assert result.endswith("by\n  trivial")
