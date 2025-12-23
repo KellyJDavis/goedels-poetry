@@ -3239,3 +3239,326 @@ def test_reconstruct_complete_proof_edge_case_very_deep_nesting() -> None:
     finally:
         with suppress(Exception):
             GoedelsPoetryState.clear_theorem_directory(theorem)
+
+
+# ============================================================================
+# Tests for proof reconstruction fixes (handling comments between := by and sorry)
+# ============================================================================
+
+
+def test_replace_sorry_for_have_with_comment() -> None:
+    """Test that _replace_sorry_for_have correctly handles comments between := by and sorry."""
+    import uuid
+
+    from goedels_poetry.state import GoedelsPoetryStateManager
+
+    theorem = with_default_preamble(f"theorem test_comment_{uuid.uuid4()} : True")
+
+    with suppress(Exception):
+        GoedelsPoetryState.clear_theorem_directory(theorem)
+
+    try:
+        state = GoedelsPoetryState(formal_theorem=theorem)
+        manager = GoedelsPoetryStateManager(state)
+
+        # Test case: have statement with comment between := by and sorry
+        sketch = """theorem test : True := by
+  have hv_rewrite : v = (1 / 3 : ℝ) * (30 * (13 / 2 : ℝ)) := by
+    -- from `v = 1/3 * (b*h)` and `b=30`, `h=13/2`
+    sorry
+  sorry"""  # noqa: RUF001
+
+        child_proof_body = """calc
+    v = 1 / 3 * (b * h) := h₁
+    _ = 1 / 3 * (30 * (13 / 2 : ℝ)) := by rw [h₂, h₃]"""  # noqa: RUF001
+
+        result = manager._replace_sorry_for_have(sketch, "hv_rewrite", child_proof_body)
+
+        # Should have replaced the sorry in hv_rewrite
+        assert "sorry" in result  # Main body sorry should remain
+        # Count sorries - should have exactly one (the main body sorry)
+        assert result.count("sorry") == 1
+        # Should contain the proof body
+        assert "calc" in result
+        assert "v = 1 / 3 * (b * h) := h₁" in result
+        assert "rw [h₂, h₃]" in result
+        # Should preserve the comment
+        assert "-- from `v = 1/3 * (b*h)`" in result
+
+    finally:
+        with suppress(Exception):
+            GoedelsPoetryState.clear_theorem_directory(theorem)
+
+
+def test_replace_sorry_for_have_with_multiple_comments() -> None:
+    """Test that _replace_sorry_for_have handles multiple comment lines between := by and sorry."""
+    import uuid
+
+    from goedels_poetry.state import GoedelsPoetryStateManager
+
+    theorem = with_default_preamble(f"theorem test_multi_comment_{uuid.uuid4()} : True")
+
+    with suppress(Exception):
+        GoedelsPoetryState.clear_theorem_directory(theorem)
+
+    try:
+        state = GoedelsPoetryState(formal_theorem=theorem)
+        manager = GoedelsPoetryStateManager(state)
+
+        sketch = """theorem test : True := by
+  have helper : Type := by
+    -- First comment
+    -- Second comment
+    -- Third comment
+    sorry
+  sorry"""
+
+        child_proof_body = "constructor"
+
+        result = manager._replace_sorry_for_have(sketch, "helper", child_proof_body)
+
+        assert result.count("sorry") == 1  # Only main body sorry remains
+        assert "constructor" in result
+        assert "-- First comment" in result
+        assert "-- Second comment" in result
+        assert "-- Third comment" in result
+
+    finally:
+        with suppress(Exception):
+            GoedelsPoetryState.clear_theorem_directory(theorem)
+
+
+def test_replace_sorry_for_have_with_comment_between_assign_and_by() -> None:
+    """Test that _replace_sorry_for_have handles comments between := and by."""
+    import uuid
+
+    from goedels_poetry.state import GoedelsPoetryStateManager
+
+    theorem = with_default_preamble(f"theorem test_assign_by_comment_{uuid.uuid4()} : True")
+
+    with suppress(Exception):
+        GoedelsPoetryState.clear_theorem_directory(theorem)
+
+    try:
+        state = GoedelsPoetryState(formal_theorem=theorem)
+        manager = GoedelsPoetryStateManager(state)
+
+        # Test case: have statement with comment between := and by
+        sketch = """theorem test : True := by
+  have helper : Type :=
+    -- comment between := and by
+    by
+      sorry
+  sorry"""
+
+        child_proof_body = "constructor"
+
+        result = manager._replace_sorry_for_have(sketch, "helper", child_proof_body)
+
+        assert result.count("sorry") == 1  # Only main body sorry remains
+        assert "constructor" in result
+        assert "-- comment between := and by" in result
+
+    finally:
+        with suppress(Exception):
+            GoedelsPoetryState.clear_theorem_directory(theorem)
+
+
+def test_replace_sorry_for_have_exact_partial_log_case() -> None:
+    """Test the exact case from partial.log where reconstruction failed."""
+    from typing import cast
+
+    from goedels_poetry.agents.state import DecomposedFormalTheoremState, FormalTheoremProofState
+    from goedels_poetry.agents.util.common import DEFAULT_IMPORTS
+    from goedels_poetry.state import GoedelsPoetryStateManager
+    from goedels_poetry.util.tree import TreeNode
+
+    theorem_sig = "theorem mathd_algebra_478 (b h v : ℝ) (h₀ : 0 < b ∧ 0 < h ∧ 0 < v) (h₁ : v = 1 / 3 * (b * h)) (h₂ : b = 30) (h₃ : h = 13 / 2) : v = 65"  # noqa: RUF001
+    theorem = with_default_preamble(theorem_sig)
+
+    with suppress(Exception):
+        GoedelsPoetryState.clear_theorem_directory(theorem)
+
+    try:
+        state = GoedelsPoetryState(formal_theorem=theorem)
+
+        # This is the exact sketch from partial.log
+        sketch = f"""{theorem_sig} := by
+  -- Reduce `v` to a concrete expression by rewriting with the given equalities.
+  have hv_rewrite : v = (1 / 3 : ℝ) * (30 * (13 / 2 : ℝ)) := by
+    -- from `v = 1/3 * (b*h)` and `b=30`, `h=13/2`
+    sorry
+
+  -- Pure arithmetic evaluation of the concrete expression.
+  have hcalc : ((1 / 3 : ℝ) * (30 * (13 / 2 : ℝ))) = (65 : ℝ) := by
+    -- `norm_num` should solve this directly.
+    sorry
+
+  -- Conclude by chaining the equalities.
+  calc
+    v = (1 / 3 : ℝ) * (30 * (13 / 2 : ℝ)) := hv_rewrite
+    _ = 65 := hcalc"""  # noqa: RUF001
+
+        decomposed = DecomposedFormalTheoremState(
+            parent=None,
+            children=[],
+            depth=0,
+            formal_theorem=theorem,
+            preamble=DEFAULT_IMPORTS,
+            proof_sketch=sketch,
+            syntactic=True,
+            errors=None,
+            ast=None,
+            self_correction_attempts=1,
+            proof_history=[],
+        )
+
+        # Create child proof for hv_rewrite (from partial.log)
+        child_hv_rewrite = FormalTheoremProofState(
+            parent=cast(TreeNode, decomposed),
+            depth=1,
+            formal_theorem="lemma hv_rewrite (b h v : ℝ) (h₀ : 0 < b ∧ 0 < h ∧ 0 < v) (h₁ : v = 1 / 3 * (b * h)) (h₂ : b = 30) (h₃ : h = 13 / 2) : v = (1 / 3 : ℝ) * (30 * (13 / 2 : ℝ))",  # noqa: RUF001
+            preamble=DEFAULT_IMPORTS,
+            syntactic=True,
+            formal_proof="""have h₄ : v = (1 / 3 : ℝ) * (30 * (13 / 2 : ℝ)) := by
+  calc
+    v = 1 / 3 * (b * h) := h₁
+    _ = 1 / 3 * (30 * (13 / 2 : ℝ)) := by rw [h₂, h₃]
+exact h₄""",  # noqa: RUF001
+            proved=True,
+            errors=None,
+            ast=None,
+            self_correction_attempts=1,
+            proof_history=[],
+            pass_attempts=0,
+        )
+
+        # Create child proof for hcalc (from partial.log)
+        child_hcalc = FormalTheoremProofState(
+            parent=cast(TreeNode, decomposed),
+            depth=1,
+            formal_theorem="lemma hcalc (b h v : ℝ) (h₀ : 0 < b ∧ 0 < h ∧ 0 < v) (h₁ : v = 1 / 3 * (b * h)) (h₂ : b = 30) (h₃ : h = 13 / 2) (hv_rewrite : v = (1 / 3 : ℝ) * (30 * (13 / 2 : ℝ))) : ((1 / 3 : ℝ) * (30 * (13 / 2 : ℝ))) = (65 : ℝ)",  # noqa: RUF001
+            preamble=DEFAULT_IMPORTS,
+            syntactic=True,
+            formal_proof="""have h₄ : (30 : ℝ) * (13 / 2 : ℝ) = 195 := by norm_num
+have h₅ : (1 / 3 : ℝ) * (195 : ℝ) = 65 := by norm_num
+calc
+  ((1 / 3 : ℝ) * (30 * (13 / 2 : ℝ))) = (1 / 3 : ℝ) * (195 : ℝ) := by rw [h₄]
+  _ = 65 := by rw [h₅]""",  # noqa: RUF001
+            proved=True,
+            errors=None,
+            ast=None,
+            self_correction_attempts=1,
+            proof_history=[],
+            pass_attempts=0,
+        )
+
+        decomposed["children"].extend([cast(TreeNode, child_hv_rewrite), cast(TreeNode, child_hcalc)])
+        state.formal_theorem_proof = cast(TreeNode, decomposed)
+        manager = GoedelsPoetryStateManager(state)
+
+        result = manager.reconstruct_complete_proof()
+
+        # Should contain DEFAULT_IMPORTS
+        assert result.startswith(DEFAULT_IMPORTS)
+
+        # Should contain both have statements
+        assert "have hv_rewrite :" in result
+        assert "have hcalc :" in result
+
+        # Should contain the proof bodies
+        assert "calc" in result
+        assert "v = 1 / 3 * (b * h) := h₁" in result
+        assert "rw [h₂, h₃]" in result
+        assert "norm_num" in result
+        assert "rw [h₄]" in result
+        assert "rw [h₅]" in result
+
+        # Should preserve comments
+        assert "-- from `v = 1/3 * (b*h)`" in result
+        assert "-- `norm_num` should solve this directly." in result
+
+        # Should NOT contain any sorry
+        result_no_imports = result[len(DEFAULT_IMPORTS) :]
+        assert "sorry" not in result_no_imports, f"Found 'sorry' in reconstructed proof:\n{result_no_imports}"
+
+    finally:
+        with suppress(Exception):
+            GoedelsPoetryState.clear_theorem_directory(theorem)
+
+
+def test_extract_tactics_after_by_with_full_lemma() -> None:
+    """Test that _extract_tactics_after_by correctly handles full lemma statements."""
+    import uuid
+
+    from goedels_poetry.state import GoedelsPoetryStateManager
+
+    theorem = with_default_preamble(f"theorem test_extract_{uuid.uuid4()} : True")
+
+    with suppress(Exception):
+        GoedelsPoetryState.clear_theorem_directory(theorem)
+
+    try:
+        state = GoedelsPoetryState(formal_theorem=theorem)
+        manager = GoedelsPoetryStateManager(state)
+
+        # Test case 1: Normal tactics (should work as before)
+        tactics_only = "calc\n  v = 1 / 3 * (b * h) := h₁\n  _ = 1 / 3 * (30 * (13 / 2 : ℝ)) := by rw [h₂, h₃]"  # noqa: RUF001
+        result1 = manager._extract_tactics_after_by(tactics_only)
+        assert result1 == tactics_only
+
+        # Test case 2: Full lemma statement (should extract tactics)
+        full_lemma = """lemma helper : Type := by
+  constructor
+  exact trivial"""
+        result2 = manager._extract_tactics_after_by(full_lemma)
+        assert "constructor" in result2
+        assert "exact trivial" in result2
+        assert "lemma helper" not in result2
+
+        # Test case 3: Proof without := by (should return sorry if it looks like a lemma)
+        lemma_without_by = "lemma helper : Type := sorry"
+        result3 = manager._extract_tactics_after_by(lemma_without_by)
+        assert result3 == "sorry"
+
+        # Test case 4: Just tactics without := by (should return as-is)
+        just_tactics = "constructor\nexact trivial"
+        result4 = manager._extract_tactics_after_by(just_tactics)
+        assert result4 == just_tactics
+
+    finally:
+        with suppress(Exception):
+            GoedelsPoetryState.clear_theorem_directory(theorem)
+
+
+def test_extract_tactics_after_by_nested_lemma() -> None:
+    """Test that _extract_tactics_after_by handles nested lemma statements correctly."""
+    import uuid
+
+    from goedels_poetry.state import GoedelsPoetryStateManager
+
+    theorem = with_default_preamble(f"theorem test_nested_{uuid.uuid4()} : True")
+
+    with suppress(Exception):
+        GoedelsPoetryState.clear_theorem_directory(theorem)
+
+    try:
+        state = GoedelsPoetryState(formal_theorem=theorem)
+        manager = GoedelsPoetryStateManager(state)
+
+        # Test case: Proof that contains a nested lemma statement
+        nested_lemma = """have h₄ : v = (1 / 3 : ℝ) * (30 * (13 / 2 : ℝ)) := by
+  calc
+    v = 1 / 3 * (b * h) := h₁
+    _ = 1 / 3 * (30 * (13 / 2 : ℝ)) := by rw [h₂, h₃]
+exact h₄"""  # noqa: RUF001
+
+        result = manager._extract_tactics_after_by(nested_lemma)
+        # Should extract just the tactics, not the have statement
+        assert "have h₄" not in result
+        assert "calc" in result
+        assert "exact h₄" in result
+
+    finally:
+        with suppress(Exception):
+            GoedelsPoetryState.clear_theorem_directory(theorem)

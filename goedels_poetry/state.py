@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import os
 import pickle
 import re
@@ -33,6 +34,8 @@ from goedels_poetry.config.llm import (
 # Note: All LLM instances are imported from goedels_poetry.config.llm
 from goedels_poetry.functools import maybe_save
 from goedels_poetry.util.tree import TreeNode
+
+logger = logging.getLogger(__name__)
 
 # Global configuration for output directory
 _OUTPUT_DIR = os.environ.get("GOEDELS_POETRY_DIR", os.path.expanduser("~/.goedels_poetry"))
@@ -1568,17 +1571,44 @@ class GoedelsPoetryStateManager:
         str
             The tactic sequence (indented appropriately)
         """
-        # Match ':=' followed by any whitespace (including newlines), then 'by'
-        # This handles all variations: ':= by', ':=by', ':=  by', ':=\nby', etc.
-        match = re.search(r":=\s*by", proof)
+        # Check if this looks like a full lemma/theorem statement starting with lemma/theorem/have
+        # If so, extract tactics from it. Otherwise, treat as pure tactics.
+        starts_with_decl = re.search(r"^\s*(lemma|theorem|have)\s+", proof, re.MULTILINE)
 
+        if starts_with_decl:
+            # This is a full lemma/theorem statement, find the first := by and extract from there
+            match = re.search(r":=\s*by", proof)
+            if match is None:
+                # Has declaration but no := by, return sorry
+                logger.warning(
+                    "_extract_tactics_after_by received a lemma/theorem statement without ':= by'. "
+                    "Returning 'sorry' as fallback."
+                )
+                return "sorry"
+            # Extract everything after the first := by
+            tactics = proof[match.end() :].strip()
+
+            # Check if tactics contain another lemma/theorem (nested)
+            if re.search(r"^\s*(lemma|theorem)\s+", tactics, re.MULTILINE):
+                # Nested lemma, extract from it
+                inner_match = re.search(r":=\s*by", tactics)
+                if inner_match:
+                    tactics = tactics[inner_match.end() :].strip()
+                else:
+                    logger.error("Could not extract tactics from nested lemma/theorem. Returning 'sorry'.")
+                    return "sorry"
+
+            return tactics
+
+        # Not a full declaration, check if it has := by pattern (might be tactics with nested := by)
+        match = re.search(r":=\s*by", proof)
         if match is None:
-            # Can't find ':= by' pattern, return the whole proof
+            # No := by pattern, return the whole proof (pure tactics)
             return proof.strip()
 
-        # Extract everything after 'by'
-        tactics = proof[match.end() :].strip()
-        return tactics
+        # Has := by but doesn't start with declaration - this is tactics that contain := by
+        # Return as-is (it's already just tactics)
+        return proof.strip()
 
     def _skip_leading_trivia(self, text: str) -> str:
         """
@@ -1721,14 +1751,31 @@ class GoedelsPoetryStateManager:
         str
             The modified sketch with sorry replaced
         """
-        # Pattern to match: "have <name> : ... := by sorry" in the parent's original text
+        # Pattern to match: "have <name> : ... := <whitespace/comments> by <whitespace/comments> sorry" in the parent's original text
         # The parent sketch has the original signature without extra parameters
-        pattern = rf"(have\s+{re.escape(have_name)}\s*:.*?:=\s*by\s*)sorry"
+        # Allow for comments (-- ...) and whitespace between := and by, and between by and sorry
+        # This handles cases like:
+        #   have h : Type :=
+        #     -- comment
+        #     by sorry
+        pattern = rf"(have\s+{re.escape(have_name)}\s*:.*?:=(?:\s|--[^\n]*\n|/-.*?-/)*?by(?:\s|--[^\n]*)*)sorry"
 
         # Find the match to determine indentation
         match = re.search(pattern, parent_sketch, re.DOTALL)
         if not match:
-            # Pattern not found, return unchanged
+            # Pattern not found, log for debugging
+            logger.warning(
+                f"Failed to match pattern for have statement '{have_name}'. "
+                "The have statement may have an unexpected format or the pattern needs adjustment."
+            )
+            logger.debug(f"Pattern used: {pattern}")
+            # Show a snippet of the parent sketch around where the have should be
+            have_pattern_search = rf"have\s+{re.escape(have_name)}\s*:"
+            have_match = re.search(have_pattern_search, parent_sketch)
+            if have_match:
+                start = max(0, have_match.start() - 100)
+                end = min(len(parent_sketch), have_match.end() + 200)
+                logger.debug(f"Parent sketch snippet around '{have_name}':\n{parent_sketch[start:end]}")
             return parent_sketch
 
         # Determine the indentation level of the have statement
