@@ -1063,6 +1063,76 @@ def test_reconstruct_complete_proof_with_main_body() -> None:
             GoedelsPoetryState.clear_theorem_directory(theorem)
 
 
+def test_reconstruct_complete_proof_with_anonymous_have() -> None:
+    """Reconstruction should inline proofs into anonymous `have : ... := by sorry` holes."""
+    import uuid
+    from typing import cast
+
+    from goedels_poetry.agents.state import DecomposedFormalTheoremState, FormalTheoremProofState
+    from goedels_poetry.agents.util.common import DEFAULT_IMPORTS
+    from goedels_poetry.state import GoedelsPoetryStateManager
+    from goedels_poetry.util.tree import TreeNode
+
+    decl = f"test_anon_have_{uuid.uuid4().hex}"
+    theorem_sig = f"theorem {decl} : P"
+    theorem = with_default_preamble(theorem_sig)
+
+    with suppress(Exception):
+        GoedelsPoetryState.clear_theorem_directory(theorem)
+
+    try:
+        state = GoedelsPoetryState(formal_theorem=theorem)
+
+        sketch = f"""{theorem_sig} := by
+  have : False := by
+    sorry
+  exact this.elim"""
+
+        decomposed = DecomposedFormalTheoremState(
+            parent=None,
+            children=[],
+            depth=0,
+            formal_theorem=theorem,
+            preamble=DEFAULT_IMPORTS,
+            proof_sketch=sketch,
+            syntactic=True,
+            errors=None,
+            ast=None,
+            self_correction_attempts=1,
+            proof_history=[],
+        )
+
+        # Child corresponds to the first anonymous have inside this theorem.
+        child = FormalTheoremProofState(
+            parent=cast(TreeNode, decomposed),
+            depth=1,
+            formal_theorem=f"lemma gp_anon_have__{decl}__1 : False := by sorry",
+            preamble=DEFAULT_IMPORTS,
+            syntactic=True,
+            formal_proof=f"lemma gp_anon_have__{decl}__1 : False := by\n  trivial",
+            proved=True,
+            errors=None,
+            ast=None,
+            self_correction_attempts=1,
+            proof_history=[],
+            pass_attempts=0,
+        )
+
+        decomposed["children"].append(cast(TreeNode, child))
+        state.formal_theorem_proof = cast(TreeNode, decomposed)
+        manager = GoedelsPoetryStateManager(state)
+
+        result = manager.reconstruct_complete_proof()
+
+        assert "have : False := by" in result
+        assert "trivial" in result
+        assert "exact this.elim" in result
+        assert "sorry" not in result
+    finally:
+        with suppress(Exception):
+            GoedelsPoetryState.clear_theorem_directory(theorem)
+
+
 def test_reconstruct_complete_proof_proper_indentation() -> None:
     """Test that proof reconstruction maintains proper indentation."""
     import uuid

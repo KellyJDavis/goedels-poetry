@@ -51,6 +51,10 @@ _OUTPUT_DIR = os.environ.get("GOEDELS_POETRY_DIR", os.path.expanduser("~/.goedel
 #     exact h
 PROOF_BODY_INDENT_SPACES = 2
 
+# Synthetic anonymous-have naming (must match `goedels_poetry.parsers.util`).
+# Format: gp_anon_have__<theorem_name>__<idx>
+_ANON_HAVE_NAME_RE = re.compile(r"^gp_anon_have__(?P<decl>.+)__(?P<idx>\d+)$")
+
 MISSING_FORMAL_PREAMBLE_MSG = "Formal theorems must include a Lean preamble/header (imports, options, etc.)."
 
 
@@ -1825,6 +1829,21 @@ class GoedelsPoetryStateManager:
             if have_name == "main_body":
                 return self._replace_main_body_sorry(parent_sketch, child_proof_body)
 
+            # Synthetic anonymous-have support:
+            # If the child lemma corresponds to an anonymous `have : ... := by sorry` block,
+            # inline into the Nth anonymous-have hole instead of falling back to main body.
+            m_anon = _ANON_HAVE_NAME_RE.match(have_name)
+            if m_anon:
+                try:
+                    idx = int(m_anon.group("idx"))
+                except ValueError:
+                    idx = -1
+                if idx > 0:
+                    candidate = self._replace_sorry_for_anonymous_have(parent_sketch, idx, child_proof_body)
+                    if candidate != parent_sketch:
+                        logger.debug("Reconstruction inlined child '%s' into anonymous have #%d.", have_name, idx)
+                        return candidate
+
             # Heuristic fallback: if the parent has a standalone main-body `sorry`, inline there.
             # This preserves support for decompositions where the final child corresponds to the
             # main goal, but its formal_theorem name is not present as a `have` in the sketch
@@ -1843,6 +1862,42 @@ class GoedelsPoetryStateManager:
                 have_name,
             )
             return parent_sketch
+
+    def _replace_sorry_for_anonymous_have(self, parent_sketch: str, anon_idx: int, child_proof_body: str) -> str:
+        """
+        Replace the `sorry` inside the Nth anonymous have statement:
+
+          have : P := by
+            ...
+            sorry
+
+        This is needed when decomposition extracts an anonymous `have` as a synthetic subgoal
+        (e.g. `gp_anon_have__<decl>__1`) and later reconstruction needs to inline its proof.
+        """
+        if anon_idx <= 0:
+            return parent_sketch
+
+        # Match an anonymous have (no name between `have` and `:`) and capture the prefix up to `by`.
+        # Use non-greedy `.*?` to avoid spanning across later haves.
+        pattern = re.compile(
+            r"(?ms)"
+            r"(^([ \t]*)have\s*:\s*.*?:=(?:\s|--[^\n]*\n|/-.*?-/)*?by(?:\s|--[^\n]*\n|/-.*?-/)*?)"
+            r"sorry\b"
+        )
+
+        matches = list(pattern.finditer(parent_sketch))
+        if anon_idx > len(matches):
+            return parent_sketch
+
+        match = matches[anon_idx - 1]
+        base_indent = match.group(2) or ""
+        proof_indent = " " * (len(base_indent) + PROOF_BODY_INDENT_SPACES)
+
+        normalized_body = self._normalize_child_proof_body(child_proof_body)
+        indented_proof = self._indent_proof_body(normalized_body, proof_indent)
+
+        replacement = f"{match.group(1)}\n{indented_proof}"
+        return parent_sketch[: match.start()] + replacement + parent_sketch[match.end() :]
 
     def _extract_have_name(self, formal_theorem: str) -> str:
         """
