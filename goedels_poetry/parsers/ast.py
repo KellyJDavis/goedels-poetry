@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import bisect
 from typing import Any
 
 from goedels_poetry.parsers.util import (
@@ -148,8 +149,40 @@ class AST:
         - The special marker `"<main body>"` for a standalone main-body sorry.
         """
         holes = _get_sorry_holes_by_name(self._ast)
-        # Translate to body-relative offsets using `body_start`.
+
+        # Kimina/ast_export positions are byte offsets in UTF-8, while Python string slicing is
+        # codepoint-based. For sketches containing unicode identifiers (e.g. `h₁`), byte offsets
+        # differ from character indices. Convert byte offsets -> character indices using the
+        # stored source text.
+        source = self._source_text
         translated: dict[str, list[tuple[int, int]]] = {}
+
+        if source is None:
+            # Fallback: assume offsets are already character indices.
+            for name, spans in holes.items():
+                translated[name] = [(start - self._body_start, end - self._body_start) for start, end in spans]
+            return translated
+
+        byte_prefix: list[int] = [0]
+        for ch in source:
+            byte_prefix.append(byte_prefix[-1] + len(ch.encode("utf-8")))
+
+        def byte_to_char_index(byte_off: int) -> int:
+            # Find i such that byte_prefix[i] <= byte_off < byte_prefix[i+1]
+            # Using bisect_right gives the insertion point after any exact match.
+            i = bisect.bisect_right(byte_prefix, byte_off) - 1
+            if i < 0:
+                return 0
+            if i > len(source):
+                return len(source)
+            return i
+
         for name, spans in holes.items():
-            translated[name] = [(start - self._body_start, end - self._body_start) for start, end in spans]
+            out_spans: list[tuple[int, int]] = []
+            for start_b, end_b in spans:
+                start_c = byte_to_char_index(start_b)
+                end_c = byte_to_char_index(end_b)
+                out_spans.append((start_c - self._body_start, end_c - self._body_start))
+            translated[name] = out_spans
+
         return translated

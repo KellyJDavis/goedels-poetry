@@ -1804,6 +1804,125 @@ class GoedelsPoetryStateManager:
             logger.debug("Reconstruction normalized an over-indented closing tactic following a comment.")
         return "\n".join(lines)
 
+    def _snap_self_reference_closers_to_have_indent(self, text: str) -> str:
+        """
+        Another common LLM formatting error during inlining:
+
+          have h_main : P := by
+            ...
+            exact h_main
+
+        If `exact h_main` is indented under the `have` line, Lean treats it as part of the inner
+        `by` block (where `h_main` is not yet in scope), leading to unsolved goals / layout errors.
+
+        We conservatively snap any self-referencing closing tactics (`exact/apply/simpa using`) back
+        to the indentation level of the corresponding `have` declaration.
+        """
+        have_re = re.compile(r"^(\s*)have\s+([^\s:(]+)\s*:")
+        close_re_tpl = r"^\s*(?:exact|apply)\s+{name}\b|^\s*simpa\s+using\s+{name}\b"
+
+        lines = text.split("\n")
+        have_indents: dict[str, int] = {}
+        for ln in lines:
+            m = have_re.match(ln)
+            if m:
+                have_indents[m.group(2)] = len(m.group(1))
+
+        if not have_indents:
+            return text
+
+        changed = False
+        for i, ln in enumerate(lines):
+            if not ln.strip():
+                continue
+            stripped = ln.lstrip(" ")
+            indent = len(ln) - len(stripped)
+            for name, have_indent in have_indents.items():
+                if indent <= have_indent:
+                    continue
+                close_re = re.compile(close_re_tpl.format(name=re.escape(name)))
+                if close_re.match(stripped):
+                    lines[i] = (" " * have_indent) + stripped
+                    changed = True
+                    break
+
+        if changed:
+            logger.debug("Reconstruction snapped a self-referencing closer back to its `have` indentation.")
+        return "\n".join(lines)
+
+    def _dedent_last_closer_out_of_inner_have_by(self, text: str) -> str:
+        """
+        Handle a common layout pitfall in nested `have ... := by` blocks.
+
+        LLMs often emit a child proof of the form:
+
+          have h_main : P := by
+            simpa using h₁
+            rfl
+
+        where the final line (`rfl` here) is intended to close the *outer* goal, but is indented as
+        if it were still inside the inner `by` block. This can produce "no goals to be solved" or
+        leave the outer goal unsolved after inlining.
+
+        We conservatively dedent the *last non-empty line* if:
+        - it is indented under a `have ... := by` line, and
+        - it matches a small goal-closing tactic set, and
+        - it immediately follows another goal-closing tactic line at the same inner indentation.
+
+        This is only applied for offset-based insertion paths.
+        """
+        lines = text.split("\n")
+        last_nonempty = -1
+        for i in range(len(lines) - 1, -1, -1):
+            if lines[i].strip():
+                last_nonempty = i
+                break
+        if last_nonempty == -1:
+            return text
+
+        have_by_re = re.compile(r"^(\s*)have\s+[^\s:(]+\s*:.*?:=(?:\s|--[^\n]*|/-.*?-/)*by\b")
+        closer_re = re.compile(r"^(exact|apply|simpa|simp|assumption|trivial|rfl|decide)\b")
+
+        current_have_indent: int | None = None
+        inner_indent: int | None = None
+        prev_nonempty_idx: int | None = None
+        prev_nonempty_indent: int | None = None
+
+        for i, ln in enumerate(lines):
+            if not ln.strip():
+                continue
+            stripped = ln.lstrip(" ")
+            indent = len(ln) - len(stripped)
+
+            m_have = have_by_re.match(ln)
+            if m_have:
+                current_have_indent = len(m_have.group(1))
+                inner_indent = current_have_indent + PROOF_BODY_INDENT_SPACES
+
+            # If we've dedented back out, drop the current have context.
+            if current_have_indent is not None and indent <= current_have_indent and not m_have:
+                current_have_indent = None
+                inner_indent = None
+
+            if (
+                i == last_nonempty
+                and current_have_indent is not None
+                and inner_indent is not None
+                and indent == inner_indent
+                and closer_re.match(stripped)
+                and prev_nonempty_idx is not None
+                and prev_nonempty_indent == inner_indent
+                and closer_re.match(lines[prev_nonempty_idx].lstrip(" "))
+            ):
+                lines[i] = (" " * current_have_indent) + stripped
+                logger.debug("Reconstruction dedented final closing tactic out of inner `have ... := by` block.")
+                return "\n".join(lines)
+
+            prev_nonempty_idx = i
+            prev_nonempty_indent = indent
+
+        return text
+
     def _rewrite_trailing_apply_of_have_to_exact(self, text: str) -> str:
         """
         If the last non-empty line is `apply <name>` and the script previously defines
@@ -1851,6 +1970,8 @@ class GoedelsPoetryStateManager:
         # Additional normalization is only used for offset-based insertion (AST-guided) paths.
         if offset_insertion:
             text = self._fix_dangling_closing_tactics_after_comments(text)
+            text = self._snap_self_reference_closers_to_have_indent(text)
+            text = self._dedent_last_closer_out_of_inner_have_by(text)
         return text
 
     def _skip_leading_trivia(self, text: str) -> str:
