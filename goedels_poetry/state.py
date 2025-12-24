@@ -1773,7 +1773,14 @@ class GoedelsPoetryStateManager:
         This method is intentionally conservative and is only applied for offset-based insertion
         paths where we know the exact hole indentation.
         """
-        closing_tactic_re = re.compile(r"^(exact|apply|simp|rw|linarith|omega|aesop|decide)\b")
+        # Minimal "safe" set of closing tactics to snap when they appear after a comment and are
+        # over-indented. These are common one-line goal-closing tactics in prover outputs.
+        #
+        # Keep this intentionally small to avoid accidentally changing semantics of genuinely
+        # nested tactic blocks.
+        closing_tactic_re = re.compile(
+            r"^(exact|apply|simpa|simp|assumption|trivial|rfl|decide|aesop|omega|linarith|nlinarith|ring_nf|norm_num)\b"
+        )
         lines = text.split("\n")
         changed = False
         prev_nonempty: str | None = None
