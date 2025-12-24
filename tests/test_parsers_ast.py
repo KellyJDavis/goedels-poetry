@@ -97,6 +97,151 @@ def test_ast_get_unproven_subgoal_names_with_have() -> None:
     assert "h1" in result
 
 
+def test_ast_get_unproven_subgoal_names_with_anonymous_have() -> None:
+    """Anonymous `have : ... := by sorry` should be extracted as a synthetic named subgoal."""
+    ast_dict = {
+        "kind": "Lean.Parser.Command.theorem",
+        "args": [
+            {"val": "theorem"},
+            {"kind": "Lean.Parser.Command.declId", "args": [{"val": "test_theorem"}]},
+            {
+                "kind": "Lean.Parser.Tactic.tacticSeq",
+                "args": [
+                    {
+                        "kind": "Lean.Parser.Tactic.tacticHave_",
+                        "args": [
+                            {"val": "have"},
+                            {
+                                "kind": "Lean.Parser.Term.haveDecl",
+                                "args": [
+                                    {"val": ":"},
+                                    {"val": "False"},
+                                ],
+                            },
+                            {
+                                "kind": "Lean.Parser.Tactic.tacticSeq",
+                                "args": [{"kind": "Lean.Parser.Tactic.tacticSorry", "args": [{"val": "sorry"}]}],
+                            },
+                        ],
+                    }
+                ],
+            },
+        ],
+    }
+    ast = AST(ast_dict)
+    result = ast.get_unproven_subgoal_names()
+
+    assert "gp_anon_have__test_theorem__1" in result
+    assert "<main body>" not in result
+
+
+def test_ast_get_named_subgoal_code_for_anonymous_have() -> None:
+    """Synthetic anonymous-have subgoal names should be resolvable via get_named_subgoal_code()."""
+    ast_dict = {
+        "kind": "Lean.Parser.Command.theorem",
+        "args": [
+            {"val": "theorem", "info": {"leading": "", "trailing": " "}},
+            {
+                "kind": "Lean.Parser.Command.declId",
+                "args": [{"val": "test_theorem", "info": {"leading": "", "trailing": " "}}],
+            },
+            {"val": ":=", "info": {"leading": " ", "trailing": " "}},
+            {
+                "kind": "Lean.Parser.Term.byTactic",
+                "args": [
+                    {"val": "by", "info": {"leading": "", "trailing": "\n  "}},
+                    {
+                        "kind": "Lean.Parser.Tactic.tacticSeq",
+                        "args": [
+                            {
+                                "kind": "Lean.Parser.Tactic.tacticHave_",
+                                "args": [
+                                    {"val": "have", "info": {"leading": "", "trailing": " "}},
+                                    {
+                                        "kind": "Lean.Parser.Term.haveDecl",
+                                        "args": [
+                                            {"val": ":", "info": {"leading": "", "trailing": " "}},
+                                            {"val": "False", "info": {"leading": "", "trailing": " "}},
+                                        ],
+                                    },
+                                    {"val": ":=", "info": {"leading": " ", "trailing": " "}},
+                                    {
+                                        "kind": "Lean.Parser.Term.byTactic",
+                                        "args": [
+                                            {"val": "by", "info": {"leading": "", "trailing": " "}},
+                                            {
+                                                "kind": "Lean.Parser.Tactic.tacticSeq",
+                                                "args": [
+                                                    {
+                                                        "kind": "Lean.Parser.Tactic.tacticSorry",
+                                                        "args": [
+                                                            {"val": "sorry", "info": {"leading": "", "trailing": ""}}
+                                                        ],
+                                                    }
+                                                ],
+                                            },
+                                        ],
+                                    },
+                                ],
+                            }
+                        ],
+                    },
+                ],
+            },
+        ],
+    }
+
+    ast = AST(ast_dict)
+    code = ast.get_named_subgoal_code("gp_anon_have__test_theorem__1")
+
+    assert "lemma" in code
+    assert "gp_anon_have__test_theorem__1" in code
+    assert "False" in code
+
+
+def test_ast_anonymous_have_numbering_is_stable_with_multiple() -> None:
+    """Multiple anonymous haves should get stable, sequential synthetic names within a theorem."""
+    ast_dict = {
+        "kind": "Lean.Parser.Command.theorem",
+        "args": [
+            {"val": "theorem"},
+            {"kind": "Lean.Parser.Command.declId", "args": [{"val": "test_theorem"}]},
+            {
+                "kind": "Lean.Parser.Tactic.tacticSeq",
+                "args": [
+                    {
+                        "kind": "Lean.Parser.Tactic.tacticHave_",
+                        "args": [
+                            {"val": "have"},
+                            {"kind": "Lean.Parser.Term.haveDecl", "args": [{"val": ":"}, {"val": "False"}]},
+                            {
+                                "kind": "Lean.Parser.Tactic.tacticSeq",
+                                "args": [{"kind": "Lean.Parser.Tactic.tacticSorry", "args": [{"val": "sorry"}]}],
+                            },
+                        ],
+                    },
+                    {
+                        "kind": "Lean.Parser.Tactic.tacticHave_",
+                        "args": [
+                            {"val": "have"},
+                            {"kind": "Lean.Parser.Term.haveDecl", "args": [{"val": ":"}, {"val": "True"}]},
+                            {
+                                "kind": "Lean.Parser.Tactic.tacticSeq",
+                                "args": [{"kind": "Lean.Parser.Tactic.tacticSorry", "args": [{"val": "sorry"}]}],
+                            },
+                        ],
+                    },
+                ],
+            },
+        ],
+    }
+    ast = AST(ast_dict)
+    names = ast.get_unproven_subgoal_names()
+
+    assert "gp_anon_have__test_theorem__1" in names
+    assert "gp_anon_have__test_theorem__2" in names
+
+
 def test_ast_get_named_subgoal_ast_not_found() -> None:
     """Test getting named subgoal AST when name doesn't exist."""
     ast_dict = {

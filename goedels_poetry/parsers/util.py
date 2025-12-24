@@ -5,6 +5,68 @@ from typing import Any
 
 Node = dict[str, Any] | list[Any]
 
+__ANON_HAVE_NAME_PREFIX = "gp_anon_have__"
+
+
+def __sanitize_lean_ident_fragment(s: str) -> str:
+    """
+    Best-effort sanitizer to keep synthetic identifiers readable and safe.
+
+    Lean identifiers can be unicode-rich, but for synthetic names we keep to a conservative
+    subset to avoid surprising tokenization issues in downstream text processing.
+    """
+    if not isinstance(s, str) or not s:
+        return "unknown"
+    # Keep ASCII letters/digits/underscore; replace everything else with '_'
+    return "".join(ch if (ch.isascii() and (ch.isalnum() or ch == "_")) else "_" for ch in s)
+
+
+def __collect_anonymous_haves(ast: Node) -> tuple[dict[int, str], dict[str, dict[str, Any]]]:
+    """
+    Collect anonymous `have : ... := ...` tactic nodes and assign stable synthetic names.
+
+    Naming scheme (1-based index per enclosing theorem/lemma/def):
+      gp_anon_have__<theorem_name>__<idx>
+
+    Returns
+    -------
+    (by_id, by_name):
+      - by_id: maps `id(node)` to synthetic name
+      - by_name: maps synthetic name to the original dict node
+    """
+    by_id: dict[int, str] = {}
+    by_name: dict[str, dict[str, Any]] = {}
+    counters: dict[str, int] = {}
+
+    def rec(n: Any, current_decl: str | None) -> None:
+        if isinstance(n, dict):
+            k = n.get("kind", "")
+            # Track enclosing decl name for stable per-declaration numbering
+            if k in {"Lean.Parser.Command.theorem", "Lean.Parser.Command.lemma", "Lean.Parser.Command.def"}:
+                decl = _extract_decl_id_name(n) or "unknown_decl"
+                current_decl = __sanitize_lean_ident_fragment(decl)
+                counters.setdefault(current_decl, 0)
+
+            if k == "Lean.Parser.Tactic.tacticHave_":
+                have_name = _extract_have_id_name(n)
+                if not have_name:
+                    decl_key = current_decl or "unknown_decl"
+                    counters.setdefault(decl_key, 0)
+                    counters[decl_key] += 1
+                    synthetic = f"{__ANON_HAVE_NAME_PREFIX}{decl_key}__{counters[decl_key]}"
+                    by_id[id(n)] = synthetic
+                    # Only record the first occurrence if somehow duplicated (defensive)
+                    by_name.setdefault(synthetic, n)
+
+            for v in n.values():
+                rec(v, current_decl)
+        elif isinstance(n, list):
+            for it in n:
+                rec(it, current_decl)
+
+    rec(ast, None)
+    return by_id, by_name
+
 
 # ---------------------------
 # AST structure validation
@@ -252,17 +314,35 @@ def _record_sorry(node: dict[str, Any], context: dict[str, str | None], results:
 
 
 def _get_unproven_subgoal_names(
-    node: Node, context: dict[str, str | None], results: dict[str | None, list[str]]
+    node: Node,
+    context: dict[str, str | None],
+    results: dict[str | None, list[str]],
+    anon_have_by_id: dict[int, str] | None = None,
 ) -> None:
+    # Initialize anonymous-have mapping once at the root call and thread it through recursion.
+    if anon_have_by_id is None:
+        anon_have_by_id, _anon_by_name = __collect_anonymous_haves(node)
+
     if isinstance(node, dict):
         context = _context_after_decl(node, context)
-        context = _context_after_have(node, context)
+        # Update context for have statements; if the have is anonymous, attach its synthetic name.
+        if node.get("kind") == "Lean.Parser.Tactic.tacticHave_":
+            have_name = _extract_have_id_name(node)
+            if have_name:
+                context = {**context, "have": have_name}
+            else:
+                synthetic = anon_have_by_id.get(id(node)) if anon_have_by_id is not None else None
+                if synthetic:
+                    context = {**context, "have": synthetic}
+        else:
+            context = _context_after_have(node, context)
+
         _record_sorry(node, context, results)
         for _key, val in node.items():
-            _get_unproven_subgoal_names(val, dict(context), results)
+            _get_unproven_subgoal_names(val, dict(context), results, anon_have_by_id)
     elif isinstance(node, list):
         for item in node:
-            _get_unproven_subgoal_names(item, dict(context), results)
+            _get_unproven_subgoal_names(item, dict(context), results, anon_have_by_id)
 
 
 def _get_named_subgoal_ast(node: Node, target_name: str) -> dict[str, Any] | None:  # noqa: C901
@@ -288,6 +368,13 @@ def _get_named_subgoal_ast(node: Node, target_name: str) -> dict[str, Any] | Non
         return None
 
     if isinstance(node, dict):
+        # Synthetic anonymous-have name support
+        if isinstance(target_name, str) and target_name.startswith(__ANON_HAVE_NAME_PREFIX):
+            _anon_by_id, anon_by_name = __collect_anonymous_haves(node)
+            found = anon_by_name.get(target_name)
+            if found is not None:
+                return found
+
         kind = node.get("kind")
 
         # Theorem or lemma
@@ -1115,7 +1202,9 @@ def __contains_target_name(node: Node, target_name: str, name_map: dict[str, dic
     return False
 
 
-def __find_enclosing_theorem(ast: Node, target_name: str) -> dict | None:  # noqa: C901
+def __find_enclosing_theorem(  # noqa: C901
+    ast: Node, target_name: str, anon_have_by_id: dict[int, str] | None = None
+) -> dict | None:
     """
     Find the theorem/lemma that encloses the given target (typically a have statement).
     Returns the theorem/lemma node if found, None otherwise.
@@ -1137,6 +1226,10 @@ def __find_enclosing_theorem(ast: Node, target_name: str) -> dict | None:  # noq
                 have_name = _extract_have_id_name(node)
                 if have_name == target_name:
                     return True
+                if (not have_name) and anon_have_by_id is not None:
+                    synthetic = anon_have_by_id.get(id(node))
+                    if synthetic == target_name:
+                        return True
             # Recurse into children
             for v in node.values():
                 if contains_target(v):
@@ -1228,7 +1321,7 @@ def __extract_theorem_binders(theorem_node: dict, goal_var_types: dict[str, str]
 
 
 def __find_earlier_bindings(  # noqa: C901
-    theorem_node: dict, target_name: str, name_map: dict[str, dict]
+    theorem_node: dict, target_name: str, name_map: dict[str, dict], anon_have_by_id: dict[int, str] | None = None
 ) -> list[tuple[str, str, dict]]:
     """
     Find all bindings (have, let, obtain, set, suffices, choose, generalize, match, etc.) that appear textually before the target
@@ -1263,6 +1356,15 @@ def __find_earlier_bindings(  # noqa: C901
                     else:
                         # This is an earlier have, collect it
                         earlier_bindings.append((have_name, "have", node))
+                else:
+                    # Anonymous have: only use it as a stopping point if it's the target.
+                    # Do NOT treat it as a named earlier binding (it isn't referable by a stable name
+                    # in the original sketch without introducing additional rewriting).
+                    if anon_have_by_id is not None:
+                        synthetic = anon_have_by_id.get(id(node))
+                        if synthetic == target_name:
+                            target_found = True
+                            return
 
             # Check if this is a let binding
             # Let can appear as: let name := value or let name : type := value
@@ -2225,7 +2327,11 @@ def _get_named_subgoal_rewritten_ast(  # noqa: C901
             if not isinstance(sorry, dict):
                 raise TypeError(f"sorries[{i}] must be a dict")  # noqa: TRY003
 
+    anon_have_by_id, anon_have_by_name = __collect_anonymous_haves(ast)
     name_map = __collect_named_decls(ast)
+    # Add synthetic anonymous-have names so the rest of the pipeline can treat them like normal named subgoals.
+    for k, v in anon_have_by_name.items():
+        name_map.setdefault(k, v)
     if target_name not in name_map:
         raise KeyError(f"target '{target_name}' not found in AST")  # noqa: TRY003
     target = deepcopy(name_map[target_name])
@@ -2257,7 +2363,7 @@ def _get_named_subgoal_rewritten_ast(  # noqa: C901
         goal_var_types = target_sorry_types if target_sorry_types else all_types
 
     # Find enclosing theorem/lemma and extract its parameters/hypotheses
-    enclosing_theorem = __find_enclosing_theorem(ast, target_name)
+    enclosing_theorem = __find_enclosing_theorem(ast, target_name, anon_have_by_id)
     theorem_binders: list[dict] = []
     if enclosing_theorem is not None:
         theorem_binders = __extract_theorem_binders(enclosing_theorem, goal_var_types)
@@ -2265,7 +2371,7 @@ def _get_named_subgoal_rewritten_ast(  # noqa: C901
     # Find earlier bindings (have, let, obtain) that appear textually before the target
     earlier_bindings: list[tuple[str, str, dict]] = []
     if enclosing_theorem is not None:
-        earlier_bindings = __find_earlier_bindings(enclosing_theorem, target_name, name_map)
+        earlier_bindings = __find_earlier_bindings(enclosing_theorem, target_name, name_map, anon_have_by_id)
 
     deps = __find_dependencies(target, name_map)
     binders: list[dict] = []
