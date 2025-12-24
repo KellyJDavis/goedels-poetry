@@ -1,6 +1,6 @@
 [project]
 name = "goedels-poetry"
-version = "1.1.4"
+version = "1.1.5"
 description = "A recursive, reflective POETRY algorithm variant using Goedel-Prover-V2"
 authors = [{ name = "Kelly J Davis", email = "kdavis@alum.mit.edu" }]
 readme = "README.md"

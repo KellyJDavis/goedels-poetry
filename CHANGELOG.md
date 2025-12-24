@@ -5,6 +5,15 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.5] - 2025-12-24
+
+### Fixed
+- Proof reconstruction now handles anonymous have statements (`have : ... := by sorry`) by assigning stable synthetic names (`gp_anon_have__<decl>__<idx>`) to enable proper subgoal extraction and proof inlining.
+- AST traversal, lookup, and rewriting now resolve synthetic subgoal names end-to-end, allowing anonymous have statements to be treated as named subgoals throughout the proof pipeline.
+
+### Tests
+- Added comprehensive unit tests for anonymous have statement handling including synthetic name generation, code extraction, determinism across multiple anonymous haves, and proof reconstruction with anonymous have subgoals.
+
 ## [1.1.4] - 2025-12-23
 
 ### Fixed
@@ -282,6 +291,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Typer for CLI
 - Rich for beautiful terminal output
 
+[1.1.5]: https://github.com/KellyJDavis/goedels-poetry/releases/tag/v1.1.5
 [1.1.4]: https://github.com/KellyJDavis/goedels-poetry/releases/tag/v1.1.4
 [1.1.3]: https://github.com/KellyJDavis/goedels-poetry/releases/tag/v1.1.3
 [1.1.2]: https://github.com/KellyJDavis/goedels-poetry/releases/tag/v1.1.2
