@@ -103,6 +103,9 @@ class GoedelsPoetryState:
                 self_correction_attempts=0,
                 proof_history=[],
                 pass_attempts=0,
+                hole_name=None,
+                hole_start=None,
+                hole_end=None,
             )
             self.formal_theorem_proof = cast(TreeNode, initial_formal_state)
             theorem_for_metadata = combine_preamble_and_body(preamble, body)
@@ -558,6 +561,9 @@ class GoedelsPoetryStateManager:
                 self_correction_attempts=0,
                 proof_history=[],
                 pass_attempts=0,
+                hole_name=None,
+                hole_start=None,
+                hole_end=None,
             )
             # Queue theorem_to_prove to be proven
             self._state.proof_prove_queue += [theorem_to_prove]
@@ -1473,6 +1479,99 @@ class GoedelsPoetryStateManager:
         proof_without_preamble = self._reconstruct_node_proof(self._state.formal_theorem_proof)
         return combine_preamble_and_body(preamble, proof_without_preamble)
 
+    def _reconstruct_leaf_node_proof(self, formal_proof_state: FormalTheoremProofState) -> str:
+        """
+        Reconstruct proof text for a leaf `FormalTheoremProofState`.
+        """
+        if formal_proof_state["formal_proof"] is not None:
+            proof_text = str(formal_proof_state["formal_proof"])
+            # If this is the root leaf (no parent), ensure the output includes the theorem header.
+            # Avoid regex: if it already starts with the theorem signature, return as-is.
+            if formal_proof_state["parent"] is None:
+                theorem_decl_full = str(formal_proof_state["formal_theorem"]).strip()
+                theorem_sig = self._strip_decl_assignment(theorem_decl_full)
+                # Skip leading empty lines and single-line comments to avoid redundant wrapping
+                leading_skipped = self._skip_leading_trivia(proof_text)
+                if leading_skipped.startswith(theorem_sig):
+                    return proof_text
+                # Otherwise treat stored proof as tactics and wrap once.
+                indent = " " * PROOF_BODY_INDENT_SPACES
+                indented_body = self._indent_proof_body(proof_text, indent)
+                return f"{theorem_sig} := by\n{indented_body}"
+            # Non-root leaves are always tactic bodies used for inlining; return as-is.
+            return proof_text
+        # No proof yet, return the theorem with sorry
+        return f"{formal_proof_state['formal_theorem']} := by sorry\n"
+
+    def _apply_offset_replacements(self, sketch: str, children: list[TreeNode]) -> tuple[str, list[TreeNode]]:
+        """
+        Apply offset-based replacements for children that have hole metadata.
+
+        Returns (updated_sketch, legacy_children) where legacy_children are those without valid offsets.
+        """
+        replacements: list[tuple[int, int, str]] = []
+        legacy_children: list[TreeNode] = []
+
+        for child in children:
+            child_proof_body = self._extract_proof_body(child)
+
+            if isinstance(child, dict) and "hole_start" in child and "hole_end" in child:
+                hole_start = cast(int | None, child.get("hole_start"))
+                hole_end = cast(int | None, child.get("hole_end"))
+                if (
+                    isinstance(hole_start, int)
+                    and isinstance(hole_end, int)
+                    and 0 <= hole_start < hole_end <= len(sketch)
+                ):
+                    # Determine indentation prefix on the line containing the hole.
+                    line_start = sketch.rfind("\n", 0, hole_start) + 1
+                    indent_prefix = sketch[line_start:hole_start]
+
+                    normalized_body = self._normalize_child_proof_body(child_proof_body, offset_insertion=True)
+                    body_lines = normalized_body.split("\n")
+                    if not body_lines:
+                        body_lines = ["sorry"]
+
+                    # Indent every line after the first to match the parent's hole indentation.
+                    rebuilt_lines: list[str] = []
+                    for i, ln in enumerate(body_lines):
+                        if i == 0:
+                            rebuilt_lines.append(ln)
+                        else:
+                            rebuilt_lines.append(f"{indent_prefix}{ln}" if ln.strip() else ln)
+
+                    replacement_text = "\n".join(rebuilt_lines)
+                    replacements.append((hole_start, hole_end, replacement_text))
+                    continue
+
+            legacy_children.append(child)
+
+        if replacements:
+            replacements.sort(key=lambda t: t[0], reverse=True)
+            for start, end, rep in replacements:
+                sketch = sketch[:start] + rep + sketch[end:]
+
+        return sketch, legacy_children
+
+    def _reconstruct_decomposed_node_proof(self, decomposed_state: DecomposedFormalTheoremState) -> str:
+        """
+        Reconstruct proof text for an internal `DecomposedFormalTheoremState` by filling holes.
+        """
+        if decomposed_state["proof_sketch"] is None:
+            return f"{decomposed_state['formal_theorem']} := by sorry\n"
+
+        sketch = str(decomposed_state["proof_sketch"])
+
+        # Prefer filling holes by absolute offsets recorded during decomposition (hole_start/hole_end).
+        sketch, legacy_children = self._apply_offset_replacements(sketch, decomposed_state["children"])
+
+        # Legacy fallback: name-based inlining for any children missing hole metadata.
+        for child in legacy_children:
+            child_proof_body = self._extract_proof_body(child)
+            sketch = self._inline_child_proof(sketch, child, child_proof_body)
+
+        return sketch
+
     def _reconstruct_node_proof(self, node: TreeNode) -> str:
         """
         Recursively reconstructs the proof for a given node in the proof tree.
@@ -1487,47 +1586,13 @@ class GoedelsPoetryStateManager:
         str
             The proof text for this node and all its children (without preamble)
         """
-        # Check if this is a FormalTheoremProofState (leaf node)
+        # Leaf node
         if isinstance(node, dict) and "formal_proof" in node and "children" not in node:
-            formal_proof_state = cast(FormalTheoremProofState, node)
-            if formal_proof_state["formal_proof"] is not None:
-                proof_text = str(formal_proof_state["formal_proof"])
-                # If this is the root leaf (no parent), ensure the output includes the theorem header.
-                # Avoid regex: if it already starts with the theorem signature, return as-is.
-                if formal_proof_state["parent"] is None:
-                    theorem_decl_full = str(formal_proof_state["formal_theorem"]).strip()
-                    theorem_sig = self._strip_decl_assignment(theorem_decl_full)
-                    # Skip leading empty lines and single-line comments to avoid redundant wrapping
-                    leading_skipped = self._skip_leading_trivia(proof_text)
-                    if leading_skipped.startswith(theorem_sig):
-                        return proof_text
-                    # Otherwise treat stored proof as tactics and wrap once.
-                    indent = " " * PROOF_BODY_INDENT_SPACES
-                    indented_body = self._indent_proof_body(proof_text, indent)
-                    return f"{theorem_sig} := by\n{indented_body}"
-                # Non-root leaves are always tactic bodies used for inlining; return as-is.
-                return proof_text
-            else:
-                # No proof yet, return the theorem with sorry
-                return f"{formal_proof_state['formal_theorem']} := by sorry\n"
+            return self._reconstruct_leaf_node_proof(cast(FormalTheoremProofState, node))
 
-        # Check if this is a DecomposedFormalTheoremState (internal node)
+        # Internal node
         if isinstance(node, dict) and "children" in node:
-            decomposed_state = cast(DecomposedFormalTheoremState, node)
-
-            if decomposed_state["proof_sketch"] is None:
-                # Fallback if no sketch
-                return f"{decomposed_state['formal_theorem']} := by sorry\n"
-
-            # Start with the parent's proof sketch
-            sketch = str(decomposed_state["proof_sketch"])
-
-            # For each child, inline its proof into the parent's sketch
-            for child in decomposed_state["children"]:
-                child_proof_body = self._extract_proof_body(child)
-                sketch = self._inline_child_proof(sketch, child, child_proof_body)
-
-            return sketch
+            return self._reconstruct_decomposed_node_proof(cast(DecomposedFormalTheoremState, node))
 
         # Fallback for unexpected node types
         return "-- Unable to reconstruct proof for this node\n"
@@ -1695,6 +1760,43 @@ class GoedelsPoetryStateManager:
 
         return "\n".join(normalized_lines)
 
+    def _fix_dangling_closing_tactics_after_comments(self, text: str) -> str:
+        """
+        Fix a common LLM formatting issue in tactic scripts:
+
+          -- some comment
+            exact h
+
+        where the closing tactic is over-indented relative to the surrounding block. This can
+        break Lean's layout-sensitive parsing after reconstruction.
+
+        This method is intentionally conservative and is only applied for offset-based insertion
+        paths where we know the exact hole indentation.
+        """
+        closing_tactic_re = re.compile(r"^(exact|apply|simp|rw|linarith|omega|aesop|decide)\b")
+        lines = text.split("\n")
+        changed = False
+        prev_nonempty: str | None = None
+        for i, ln in enumerate(lines):
+            if not ln.strip():
+                continue
+            stripped = ln.lstrip(" ")
+            indent = len(ln) - len(stripped)
+            if (
+                prev_nonempty is not None
+                and prev_nonempty.strip().startswith("--")
+                and closing_tactic_re.match(stripped)
+                and indent > 0
+            ):
+                # Snap to column 0 within the child proof body; the caller will indent it to the hole.
+                lines[i] = stripped
+                changed = True
+            prev_nonempty = ln
+
+        if changed:
+            logger.debug("Reconstruction normalized an over-indented closing tactic following a comment.")
+        return "\n".join(lines)
+
     def _rewrite_trailing_apply_of_have_to_exact(self, text: str) -> str:
         """
         If the last non-empty line is `apply <name>` and the script previously defines
@@ -1720,7 +1822,7 @@ class GoedelsPoetryStateManager:
         lines[last_idx] = f"{base_indent}exact {name}"
         return "\n".join(lines)
 
-    def _normalize_child_proof_body(self, proof_body: str) -> str:
+    def _normalize_child_proof_body(self, proof_body: str, *, offset_insertion: bool = False) -> str:
         """
         Normalize a child proof body to be safe for textual inlining.
 
@@ -1737,7 +1839,12 @@ class GoedelsPoetryStateManager:
         # Then snap indentation transitions to valid previously-seen indentation levels.
         text = self._snap_proof_indentation_levels(text)
         # Finally, rewrite trailing `apply <haveName>` into `exact <haveName>` when applicable.
-        return self._rewrite_trailing_apply_of_have_to_exact(text)
+        text = self._rewrite_trailing_apply_of_have_to_exact(text)
+
+        # Additional normalization is only used for offset-based insertion (AST-guided) paths.
+        if offset_insertion:
+            text = self._fix_dangling_closing_tactics_after_comments(text)
+        return text
 
     def _skip_leading_trivia(self, text: str) -> str:
         """

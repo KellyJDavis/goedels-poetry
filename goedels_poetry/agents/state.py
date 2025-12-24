@@ -64,6 +64,30 @@ class FormalTheoremProofState(TypedDict):
     proof_history: Required[Annotated[list[AnyMessage],add]]
         The history of messages sent and received from the LLMs
     pass_attempts: Required[int]  # The number of times the self-correction loop has been executed
+    hole_name: Required[str | None]
+        The name of the `sorry` hole in the *parent sketch* that this proof is intended to fill.
+
+        This is set when a `FormalTheoremProofState` is created as a child of a
+        `DecomposedFormalTheoremState` during sketch decomposition. It typically matches a
+        `have`-identifier (e.g. `hv'`, `hcalc`) or a synthetic anonymous-have name such as
+        `gp_anon_have__<decl>__<idx>`.
+
+        For root proofs (no parent sketch) and for legacy/unknown cases, this is `None`.
+    hole_start: Required[int | None]
+        Character offset (0-based) into the parent sketch **body string** (i.e. `proof_sketch`)
+        indicating the start of the `sorry` token that should be replaced during reconstruction.
+
+        These offsets are computed from the Kimina/`ast_export` token positions and translated into
+        the body-only coordinate system used by stored sketches.
+
+        For root proofs (no parent sketch) and for legacy/unknown cases, this is `None`.
+    hole_end: Required[int | None]
+        Character offset (0-based) into the parent sketch **body string** (i.e. `proof_sketch`)
+        indicating the end of the `sorry` token that should be replaced during reconstruction.
+
+        This is exclusive (Python slicing semantics): the `sorry` span is `proof_sketch[hole_start:hole_end]`.
+
+        For root proofs (no parent sketch) and for legacy/unknown cases, this is `None`.
     """
 
     parent: Required[TreeNode | None]
@@ -78,6 +102,9 @@ class FormalTheoremProofState(TypedDict):
     self_correction_attempts: Required[int]
     proof_history: Required[Annotated[list[AnyMessage], add]]  # TODO: Correct annotation?
     pass_attempts: Required[int]  # The number of times the self-correction loop has been executed
+    hole_name: Required[str | None]
+    hole_start: Required[int | None]
+    hole_end: Required[int | None]
 
 
 class FormalTheoremProofStates(TypedDict):

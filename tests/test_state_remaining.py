@@ -77,6 +77,9 @@ def test_reconstruct_complete_proof_nested_with_non_ascii_names() -> None:
             self_correction_attempts=1,
             proof_history=[],
             pass_attempts=0,
+            hole_name=None,
+            hole_start=None,
+            hole_end=None,
         )
 
         child_decomposed["children"].append(cast(TreeNode, grandchild))

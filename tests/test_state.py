@@ -72,6 +72,9 @@ def test_reconstruct_includes_root_signature_no_decomposition() -> None:
             self_correction_attempts=1,
             proof_history=[],
             pass_attempts=0,
+            hole_name=None,
+            hole_start=None,
+            hole_end=None,
         )
         state.formal_theorem_proof = leaf
         manager = GoedelsPoetryStateManager(state)
