@@ -18,7 +18,7 @@ check: ## Run code quality tools.
 .PHONY: test
 test: ## Test the code with pytest (excludes integration tests)
 	@echo "🚀 Testing code: Running pytest"
-	@uv run python -m pytest --ignore=tests/test_kimina_agents.py --cov --cov-config=pyproject.toml --cov-report=xml
+	@uv run python -m pytest --ignore=tests/test_kimina_agents.py --ignore=tests/test_reconstruction_kimina_generated.py --cov --cov-config=pyproject.toml --cov-report=xml
 
 .PHONY: test-integration
 test-integration: ## Run integration tests (requires a RUNNING Kimina Lean server)
@@ -35,7 +35,7 @@ test-integration: ## Run integration tests (requires a RUNNING Kimina Lean serve
 	@echo "Or set a custom server URL:"
 	@echo "  export KIMINA_SERVER_URL=http://localhost:9000"
 	@echo ""
-	@uv run python -m pytest tests/test_kimina_agents.py -v --cov --cov-config=pyproject.toml --cov-append --cov-report=xml
+	@uv run python -m pytest tests/test_kimina_agents.py tests/test_reconstruction_kimina_generated.py -v --cov --cov-config=pyproject.toml --cov-append --cov-report=xml
 
 .PHONY: test-all
 test-all: ## Run all tests including integration tests
