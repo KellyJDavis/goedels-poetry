@@ -1,10 +1,10 @@
 import asyncio
 from functools import partial
+from typing import Any
 
 from langgraph.graph import END, START, StateGraph
 from langgraph.graph.state import CompiledStateGraph
 from langgraph.types import Send
-from lean_explore.api.client import Client  # type: ignore[import-untyped]
 
 from goedels_poetry.agents.state import (
     APISearchResponseTypedDict,
@@ -12,6 +12,25 @@ from goedels_poetry.agents.state import (
     DecomposedFormalTheoremStates,
 )
 from goedels_poetry.agents.util.debug import log_vectordb_response
+
+try:
+    # Optional dependency: `lean_explore` is only required when actually querying a LeanExplore server.
+    # Tests patch/mock this client, so we keep the import lazy-friendly.
+    from lean_explore.api.client import Client as _LeanExploreClient  # type: ignore[import-untyped]
+except ModuleNotFoundError:  # pragma: no cover - environment-dependent optional import
+    _LeanExploreClient = None
+
+Client: Any = _LeanExploreClient
+
+
+class LeanExploreDependencyMissing(ModuleNotFoundError):
+    """Raised when vector DB querying is attempted without the optional `lean_explore` dependency installed."""
+
+    def __init__(self) -> None:
+        super().__init__(
+            "Optional dependency `lean_explore` is not installed. "
+            "Install it to enable vector DB queries against a LeanExplore server."
+        )
 
 
 class VectorDBAgentFactory:
@@ -119,6 +138,9 @@ def _query_vectordb(
     if not state["search_queries"]:
         state["search_results"] = []
         return {"outputs": [state]}  # type: ignore[typeddict-item]
+
+    if Client is None:
+        raise LeanExploreDependencyMissing()
 
     # Create a client to access the Lean Explore Server
     client = Client(base_url=server_url)

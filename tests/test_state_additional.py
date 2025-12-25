@@ -10,6 +10,19 @@ def with_default_preamble(body: str) -> str:
     return combine_preamble_and_body(DEFAULT_IMPORTS, body)
 
 
+def _annotate_hole_offsets(node: dict, sketch: str, *, hole_name: str, anchor: str) -> None:
+    """
+    Attach hole metadata to a manually-constructed proof-tree node for offset-based reconstruction tests.
+    """
+    base = sketch.index(anchor)
+    i = sketch.find("sorry", base)
+    if i == -1:
+        raise ValueError("No `sorry` token found after anchor")  # noqa: TRY003
+    node["hole_name"] = hole_name
+    node["hole_start"] = i
+    node["hole_end"] = i + len("sorry")
+
+
 def test_reconstruct_complete_proof_deep_nested_decomposition_4_levels() -> None:
     """Test reconstruct_complete_proof with 4 levels of nested DecomposedFormalTheoremState."""
     import uuid
@@ -62,6 +75,7 @@ def test_reconstruct_complete_proof_deep_nested_decomposition_4_levels() -> None
             self_correction_attempts=1,
             decomposition_history=[],
         )
+        _annotate_hole_offsets(level1, str(root["proof_sketch"]), hole_name="a", anchor="have a")
 
         # Level 2
         level2 = DecomposedFormalTheoremState(
@@ -79,6 +93,7 @@ def test_reconstruct_complete_proof_deep_nested_decomposition_4_levels() -> None
             self_correction_attempts=1,
             decomposition_history=[],
         )
+        _annotate_hole_offsets(level2, str(level1["proof_sketch"]), hole_name="b", anchor="have b")
 
         # Level 3
         level3 = DecomposedFormalTheoremState(
@@ -96,6 +111,7 @@ def test_reconstruct_complete_proof_deep_nested_decomposition_4_levels() -> None
             self_correction_attempts=1,
             decomposition_history=[],
         )
+        _annotate_hole_offsets(level3, str(level2["proof_sketch"]), hole_name="c", anchor="have c")
 
         # Level 4: Leaf
         leaf = FormalTheoremProofState(
@@ -112,6 +128,7 @@ def test_reconstruct_complete_proof_deep_nested_decomposition_4_levels() -> None
             proof_history=[],
             pass_attempts=0,
         )
+        _annotate_hole_offsets(leaf, str(level3["proof_sketch"]), hole_name="d", anchor="have d")
 
         # Build tree
         level3["children"].append(cast(TreeNode, leaf))

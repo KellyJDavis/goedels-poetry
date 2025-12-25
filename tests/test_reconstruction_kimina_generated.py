@@ -6,7 +6,7 @@ variations) so we can iterate on reconstruction correctness without proving real
 
 Configuration (env vars)
 ------------------------
-- RECONSTRUCTION_TEST_CASES: number of generated cases to run (default: 200). Set to 0 to skip.
+- RECONSTRUCTION_TEST_CASES: number of generated cases to run (default: 600). Set to 0 to skip.
 - RECONSTRUCTION_TEST_SEED: seed used to shuffle the deterministic corpus (default: 0).
 
 These tests match the conventions in `tests/test_kimina_agents.py`:
@@ -154,6 +154,92 @@ def _mk_case_calc(case_id: str, *, closer: str, comment_before_close: bool) -> R
     return ReconCase(case_id=case_id, parent_body=parent_body, child_proofs={"h₁": proof_h1, "h_step": proof_h_step})
 
 
+def _mk_case_anonymous_have(case_id: str, *, closer: str, comment_before_close: bool) -> ReconCase:
+    """
+    Anonymous have-hole:
+
+      have : n = n := by
+        sorry
+
+    The decomposition pipeline should assign a synthetic name
+    `gp_anon_have__<decl>__1` and record exact offsets for the `sorry`.
+    """
+    thm_name = f"recon_anon_have_{case_id}"
+    proof_lines: list[str] = []
+    if comment_before_close:
+        proof_lines.append("-- close the anonymous goal")
+    parent_body = f"""theorem {thm_name} (n : Nat) : n = n := by
+  have : n = n := by
+    sorry
+  exact this
+"""
+    anon_name = f"gp_anon_have__{thm_name}__1"
+    if closer == "exact":
+        proof_lines.append("exact rfl")
+    elif closer == "simpa":
+        proof_lines.append("simpa")
+    else:
+        proof_lines.append("rfl")
+
+    proof = "\n".join(proof_lines)
+    return ReconCase(case_id=case_id, parent_body=parent_body, child_proofs={anon_name: proof})
+
+
+def _mk_case_main_body(case_id: str, *, closer: str, comment_before_close: bool) -> ReconCase:
+    """
+    Main-body hole: a standalone `sorry` after a named have.
+
+    The hole name should be the special marker `"<main body>"`.
+    """
+    thm_name = f"recon_main_body_{case_id}"
+    parent_body = f"""theorem {thm_name} (n : Nat) : n = n := by
+  have h₁ : n = n := by
+    sorry
+  sorry
+"""
+
+    proof_h1 = "rfl"
+    if closer == "exact":
+        main = "exact h₁"
+    elif closer == "simpa":
+        main = "simpa using h₁"
+    else:
+        main = "rfl"
+    proof_main_lines: list[str] = []
+    if comment_before_close:
+        proof_main_lines.append("-- close main body")
+    proof_main_lines.append(main)
+    proof_main = "\n".join(proof_main_lines)
+
+    return ReconCase(case_id=case_id, parent_body=parent_body, child_proofs={"h₁": proof_h1, "<main body>": proof_main})
+
+
+def _mk_case_inline_by_sorry(case_id: str, *, closer: str, comment_before_close: bool) -> ReconCase:
+    """
+    Inline-hole form: `have h : ... := by sorry` (the `sorry` token is on the same line as `by`).
+
+    This specifically exercises the reconstructor's "inline hole" insertion path that must turn
+    `by sorry` into `by\\n  <proof>`.
+    """
+    thm_name = f"recon_inline_by_{case_id}"
+    parent_body = f"""theorem {thm_name} (n : Nat) : n = n := by
+  have h_inline : n = n := by sorry
+  exact h_inline
+"""
+
+    if closer == "exact":
+        close = "exact rfl"
+    elif closer == "simpa":
+        close = "simpa"
+    else:
+        close = "rfl"
+    lines: list[str] = []
+    if comment_before_close:
+        lines.append("-- close inline")
+    lines.append(close)
+    return ReconCase(case_id=case_id, parent_body=parent_body, child_proofs={"h_inline": "\n".join(lines)})
+
+
 def _generate_cases() -> list[ReconCase]:
     # Generate a deterministic corpus (no randomness here). We intentionally produce a corpus
     # larger than the default selection size (200) so the seed-shuffle has meaningful effect.
@@ -183,6 +269,31 @@ def _generate_cases() -> list[ReconCase]:
         closer = closers[j % len(closers)]
         comment_before_close = ((j // len(closers)) % 2) == 1
         cases.append(_mk_case_calc(f"{base + j:04d}", closer=closer, comment_before_close=comment_before_close))
+
+    # Anonymous have cases: 120 variants
+    base = len(cases)
+    for k in range(120):
+        closer = closers[k % len(closers)]
+        comment_before_close = ((k // len(closers)) % 2) == 1
+        cases.append(
+            _mk_case_anonymous_have(f"{base + k:04d}", closer=closer, comment_before_close=comment_before_close)
+        )
+
+    # Main-body cases: 120 variants
+    base = len(cases)
+    for m in range(120):
+        closer = closers[m % len(closers)]
+        comment_before_close = ((m // len(closers)) % 2) == 1
+        cases.append(_mk_case_main_body(f"{base + m:04d}", closer=closer, comment_before_close=comment_before_close))
+
+    # Inline `:= by sorry` cases: 120 variants
+    base = len(cases)
+    for p in range(120):
+        closer = closers[p % len(closers)]
+        comment_before_close = ((p // len(closers)) % 2) == 1
+        cases.append(
+            _mk_case_inline_by_sorry(f"{base + p:04d}", closer=closer, comment_before_close=comment_before_close)
+        )
 
     return cases
 

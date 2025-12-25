@@ -2406,14 +2406,34 @@ def _get_named_subgoal_rewritten_ast(  # noqa: C901
             if not isinstance(sorry, dict):
                 raise TypeError(f"sorries[{i}] must be a dict")  # noqa: TRY003
 
+    MAIN_BODY_NAME = "<main body>"
+
     anon_have_by_id, anon_have_by_name = __collect_anonymous_haves(ast)
     name_map = __collect_named_decls(ast)
     # Add synthetic anonymous-have names so the rest of the pipeline can treat them like normal named subgoals.
     for k, v in anon_have_by_name.items():
         name_map.setdefault(k, v)
-    if target_name not in name_map:
+
+    # Special marker: main-body `sorry` (a standalone sorry in the theorem body, not inside a `have`).
+    # For decomposition we still want to produce a child proof state for this hole, but it does not have
+    # a stable decl-name in the AST. We treat it as "the enclosing theorem itself" and synthesize a
+    # top-level lemma/theorem named `gp_main_body__<decl>`.
+    is_main_body = target_name == MAIN_BODY_NAME
+    lookup_name = target_name
+    enclosing_theorem_for_main: dict | None = None
+    if is_main_body:
+        enclosing_theorem_for_main = __find_first(
+            ast,
+            lambda n: n.get("kind") in {"Lean.Parser.Command.theorem", "Lean.Parser.Command.lemma"},
+        )
+        if enclosing_theorem_for_main is None:
+            raise KeyError("main body target found but no enclosing theorem/lemma in AST")  # noqa: TRY003
+        decl = _extract_decl_id_name(enclosing_theorem_for_main) or "unknown_decl"
+        lookup_name = decl
+
+    if lookup_name not in name_map:
         raise KeyError(f"target '{target_name}' not found in AST")  # noqa: TRY003
-    target = deepcopy(name_map[target_name])
+    target = deepcopy(name_map[lookup_name])
 
     # Find the corresponding sorry entry with goal context
     # Collect types from all sorries to get the most complete picture
@@ -2423,7 +2443,7 @@ def _get_named_subgoal_rewritten_ast(  # noqa: C901
         target_sorry_types: dict[str, str] = {}
         for sorry in sorries:
             goal = sorry.get("goal", "")
-            if goal and target_name in goal:
+            if goal and lookup_name in goal:
                 target_sorry_types = __parse_goal_context(goal)
                 break
 
@@ -2442,7 +2462,9 @@ def _get_named_subgoal_rewritten_ast(  # noqa: C901
         goal_var_types = target_sorry_types if target_sorry_types else all_types
 
     # Find enclosing theorem/lemma and extract its parameters/hypotheses
-    enclosing_theorem = __find_enclosing_theorem(ast, target_name, anon_have_by_id)
+    enclosing_theorem = __find_enclosing_theorem(ast, lookup_name, anon_have_by_id)
+    if enclosing_theorem is None and enclosing_theorem_for_main is not None:
+        enclosing_theorem = enclosing_theorem_for_main
     theorem_binders: list[dict] = []
     if enclosing_theorem is not None:
         theorem_binders = __extract_theorem_binders(enclosing_theorem, goal_var_types)
@@ -2450,7 +2472,7 @@ def _get_named_subgoal_rewritten_ast(  # noqa: C901
     # Find earlier bindings (have, let, obtain) that appear textually before the target
     earlier_bindings: list[tuple[str, str, dict]] = []
     if enclosing_theorem is not None:
-        earlier_bindings = __find_earlier_bindings(enclosing_theorem, target_name, name_map, anon_have_by_id)
+        earlier_bindings = __find_earlier_bindings(enclosing_theorem, lookup_name, name_map, anon_have_by_id)
 
     deps = __find_dependencies(target, name_map)
     binders: list[dict] = []
@@ -2477,7 +2499,7 @@ def _get_named_subgoal_rewritten_ast(  # noqa: C901
     # Add dependency names
     existing_names.update(deps)
     # Add target name
-    existing_names.add(target_name)
+    existing_names.add(lookup_name)
 
     # Next, add earlier bindings (have, let, obtain) as hypotheses
     for binding_name, binding_type, binding_node in earlier_bindings:
@@ -2659,7 +2681,9 @@ def _get_named_subgoal_rewritten_ast(  # noqa: C901
         name_leaf = (
             __find_first(decl_id, lambda n: isinstance(n.get("val"), str) and n.get("val") != "") if decl_id else None
         )
-        decl_name = name_leaf["val"] if name_leaf else target_name
+        decl_name = name_leaf["val"] if name_leaf else lookup_name
+        if is_main_body:
+            decl_name = f"gp_main_body__{decl_name}"
         type_ast_raw = __extract_type_ast(target)
         type_body = (
             __strip_leading_colon(type_ast_raw)

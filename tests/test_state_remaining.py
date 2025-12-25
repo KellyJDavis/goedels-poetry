@@ -10,6 +10,45 @@ def with_default_preamble(body: str) -> str:
     return combine_preamble_and_body(DEFAULT_IMPORTS, body)
 
 
+def _annotate_hole_offsets(node: dict, sketch: str, *, hole_name: str, anchor: str | None = None) -> None:
+    """
+    Attach hole metadata to a manually-constructed proof-tree node for offset-based reconstruction tests.
+    """
+
+    def _find_sorry_token(text: str, start: int) -> int:
+        i = start
+        while True:
+            i = text.find("sorry", i)
+            if i == -1:
+                raise ValueError("No standalone `sorry` token found")  # noqa: TRY003
+            before = text[i - 1] if i > 0 else " "
+            after = text[i + len("sorry")] if i + len("sorry") < len(text) else " "
+            if before.isspace() and after.isspace():
+                return i
+            i += len("sorry")
+
+    if anchor is None and hole_name == "<main body>":
+        positions: list[int] = []
+        cursor = 0
+        while True:
+            try:
+                pos = _find_sorry_token(sketch, cursor)
+            except ValueError:
+                break
+            positions.append(pos)
+            cursor = pos + len("sorry")
+        if not positions:
+            raise ValueError("No standalone `sorry` token found for <main body>")  # noqa: TRY003
+        start = positions[-1]
+    else:
+        base = 0 if anchor is None else sketch.index(anchor)
+        start = _find_sorry_token(sketch, base)
+
+    node["hole_name"] = hole_name
+    node["hole_start"] = start
+    node["hole_end"] = start + len("sorry")
+
+
 def test_reconstruct_complete_proof_nested_with_non_ascii_names() -> None:
     """Test nested decomposition with non-ASCII names (unicode subscripts, Greek letters, etc.)."""
     import uuid
@@ -62,6 +101,7 @@ def test_reconstruct_complete_proof_nested_with_non_ascii_names() -> None:
             self_correction_attempts=1,
             decomposition_history=[],
         )
+        _annotate_hole_offsets(child_decomposed, str(root["proof_sketch"]), hole_name="α₁", anchor="have α₁")
 
         # Grandchild with another unicode name
         grandchild = FormalTheoremProofState(
@@ -81,6 +121,7 @@ def test_reconstruct_complete_proof_nested_with_non_ascii_names() -> None:
             hole_start=None,
             hole_end=None,
         )
+        _annotate_hole_offsets(grandchild, str(child_decomposed["proof_sketch"]), hole_name="β₂", anchor="have β₂")
 
         child_decomposed["children"].append(cast(TreeNode, grandchild))
         root["children"].append(cast(TreeNode, child_decomposed))
@@ -156,6 +197,7 @@ def test_reconstruct_complete_proof_with_let_statement() -> None:
             proof_history=[],
             pass_attempts=0,
         )
+        _annotate_hole_offsets(child, sketch, hole_name="h", anchor="have h")
 
         decomposed["children"].append(cast(TreeNode, child))
         state.formal_theorem_proof = cast(TreeNode, decomposed)
@@ -229,6 +271,7 @@ def test_reconstruct_complete_proof_with_obtain_statement() -> None:
             proof_history=[],
             pass_attempts=0,
         )
+        _annotate_hole_offsets(child, sketch, hole_name="h", anchor="have h")
 
         decomposed["children"].append(cast(TreeNode, child))
         state.formal_theorem_proof = cast(TreeNode, decomposed)
@@ -304,6 +347,7 @@ def test_reconstruct_complete_proof_with_let_and_have_nested() -> None:
             self_correction_attempts=1,
             decomposition_history=[],
         )
+        _annotate_hole_offsets(child_decomposed, str(root["proof_sketch"]), hole_name="helper", anchor="have helper")
 
         # Grandchild proof
         grandchild = FormalTheoremProofState(
@@ -320,6 +364,7 @@ def test_reconstruct_complete_proof_with_let_and_have_nested() -> None:
             proof_history=[],
             pass_attempts=0,
         )
+        _annotate_hole_offsets(grandchild, str(child_decomposed["proof_sketch"]), hole_name="h", anchor="have h")
 
         child_decomposed["children"].append(cast(TreeNode, grandchild))
         root["children"].append(cast(TreeNode, child_decomposed))
@@ -396,6 +441,7 @@ def test_reconstruct_complete_proof_mixed_bindings_deep_nested() -> None:
             self_correction_attempts=1,
             decomposition_history=[],
         )
+        _annotate_hole_offsets(level1, str(root["proof_sketch"]), hole_name="h1", anchor="have h1")
 
         # Level 2: With let and have
         level2 = DecomposedFormalTheoremState(
@@ -414,6 +460,7 @@ def test_reconstruct_complete_proof_mixed_bindings_deep_nested() -> None:
             self_correction_attempts=1,
             decomposition_history=[],
         )
+        _annotate_hole_offsets(level2, str(level1["proof_sketch"]), hole_name="h2", anchor="have h2")
 
         # Level 3: Leaf
         leaf = FormalTheoremProofState(
@@ -430,6 +477,7 @@ def test_reconstruct_complete_proof_mixed_bindings_deep_nested() -> None:
             proof_history=[],
             pass_attempts=0,
         )
+        _annotate_hole_offsets(leaf, str(level2["proof_sketch"]), hole_name="h3", anchor="have h3")
 
         level2["children"].append(cast(TreeNode, leaf))
         level1["children"].append(cast(TreeNode, level2))
@@ -511,6 +559,7 @@ def test_reconstruct_complete_proof_non_ascii_with_let_obtain() -> None:
             proof_history=[],
             pass_attempts=0,
         )
+        _annotate_hole_offsets(child, sketch, hole_name="γ", anchor="have γ")  # noqa: RUF001
 
         decomposed["children"].append(cast(TreeNode, child))
         state.formal_theorem_proof = cast(TreeNode, decomposed)
@@ -585,6 +634,7 @@ def test_reconstruct_complete_proof_multiple_children_at_each_level() -> None:
             self_correction_attempts=1,
             decomposition_history=[],
         )
+        _annotate_hole_offsets(child1_decomposed, str(root["proof_sketch"]), hole_name="h1", anchor="have h1")
 
         # Second child decomposed
         child2_decomposed = DecomposedFormalTheoremState(
@@ -602,6 +652,7 @@ def test_reconstruct_complete_proof_multiple_children_at_each_level() -> None:
             self_correction_attempts=1,
             decomposition_history=[],
         )
+        _annotate_hole_offsets(child2_decomposed, str(root["proof_sketch"]), hole_name="h2", anchor="have h2")
 
         # Grandchildren for child1
         grandchild1a = FormalTheoremProofState(
@@ -618,6 +669,7 @@ def test_reconstruct_complete_proof_multiple_children_at_each_level() -> None:
             proof_history=[],
             pass_attempts=0,
         )
+        _annotate_hole_offsets(grandchild1a, str(child1_decomposed["proof_sketch"]), hole_name="h1a", anchor="have h1a")
 
         grandchild1b = FormalTheoremProofState(
             parent=cast(TreeNode, child1_decomposed),
@@ -633,6 +685,7 @@ def test_reconstruct_complete_proof_multiple_children_at_each_level() -> None:
             proof_history=[],
             pass_attempts=0,
         )
+        _annotate_hole_offsets(grandchild1b, str(child1_decomposed["proof_sketch"]), hole_name="h1b", anchor="have h1b")
 
         # Grandchild for child2
         grandchild2a = FormalTheoremProofState(
@@ -649,6 +702,7 @@ def test_reconstruct_complete_proof_multiple_children_at_each_level() -> None:
             proof_history=[],
             pass_attempts=0,
         )
+        _annotate_hole_offsets(grandchild2a, str(child2_decomposed["proof_sketch"]), hole_name="h2a", anchor="have h2a")
 
         # Build tree
         child1_decomposed["children"].extend([cast(TreeNode, grandchild1a), cast(TreeNode, grandchild1b)])
@@ -968,6 +1022,12 @@ def test_reconstruct_complete_proof_edge_case_very_deep_nesting() -> None:
             levels.append(level)
             if parent:
                 parent["children"].append(cast(TreeNode, level))
+                _annotate_hole_offsets(
+                    level,
+                    str(parent["proof_sketch"]),
+                    hole_name=f"level{i}",
+                    anchor=f"have level{i}",
+                )
 
         # Add leaf
         leaf = FormalTheoremProofState(
@@ -984,6 +1044,7 @@ def test_reconstruct_complete_proof_edge_case_very_deep_nesting() -> None:
             proof_history=[],
             pass_attempts=0,
         )
+        _annotate_hole_offsets(leaf, str(levels[-1]["proof_sketch"]), hole_name="<main body>", anchor=None)
         levels[-1]["children"].append(cast(TreeNode, leaf))
 
         state.formal_theorem_proof = cast(TreeNode, levels[0])

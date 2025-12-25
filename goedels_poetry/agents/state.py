@@ -189,6 +189,28 @@ class DecomposedFormalTheoremState(TypedDict):
         List of search results from the vector database, where search_results[i] corresponds to
         the results from search_queries[i]. None indicates results have not been retrieved yet,
         and an empty list indicates no queries were provided.
+
+    hole_name: Required[str | None]
+        The name of the `sorry` hole in the *parent sketch* that this decomposed node is intended to fill.
+
+        This is propagated when a `FormalTheoremProofState` is replaced by a `DecomposedFormalTheoremState`
+        (i.e., when a proof attempt is deemed too difficult and we decide to sketch+decompose it). It
+        typically matches a `have` identifier, a synthetic anonymous-have name, or the special marker
+        `"<main body>"`.
+
+        For root decompositions (no parent sketch) and for legacy/unknown cases, this is `None`.
+    hole_start: Required[int | None]
+        Character offset (0-based) into the parent sketch **body string** (i.e. `proof_sketch`)
+        indicating the start of the `sorry` token that should be replaced during reconstruction.
+
+        For root decompositions (no parent sketch) and for legacy/unknown cases, this is `None`.
+    hole_end: Required[int | None]
+        Character offset (0-based) into the parent sketch **body string** (i.e. `proof_sketch`)
+        indicating the end of the `sorry` token that should be replaced during reconstruction.
+
+        This is exclusive (Python slicing semantics): the `sorry` span is `proof_sketch[hole_start:hole_end]`.
+
+        For root decompositions (no parent sketch) and for legacy/unknown cases, this is `None`.
     """
 
     # InternalTreeNode specific properties
@@ -207,6 +229,9 @@ class DecomposedFormalTheoremState(TypedDict):
     decomposition_history: Required[Annotated[list[AnyMessage], add]]
     search_queries: Required[list[str] | None]
     search_results: Required[list[APISearchResponseTypedDict] | None]
+    hole_name: Required[str | None]
+    hole_start: Required[int | None]
+    hole_end: Required[int | None]
 
 
 class DecomposedFormalTheoremStates(TypedDict):

@@ -51,10 +51,6 @@ _OUTPUT_DIR = os.environ.get("GOEDELS_POETRY_DIR", os.path.expanduser("~/.goedel
 #     exact h
 PROOF_BODY_INDENT_SPACES = 2
 
-# Synthetic anonymous-have naming (must match `goedels_poetry.parsers.util`).
-# Format: gp_anon_have__<theorem_name>__<idx>
-_ANON_HAVE_NAME_RE = re.compile(r"^gp_anon_have__(?P<decl>.+)__(?P<idx>\d+)$")
-
 MISSING_FORMAL_PREAMBLE_MSG = "Formal theorems must include a Lean preamble/header (imports, options, etc.)."
 
 
@@ -787,6 +783,11 @@ class GoedelsPoetryStateManager:
                 decomposition_history=[],
                 search_queries=None,
                 search_results=None,
+                # Preserve the parent's hole metadata so reconstruction can remain offset-based,
+                # even after converting a leaf proof into a decomposed (internal) node.
+                hole_name=proof_too_difficult.get("hole_name"),
+                hole_start=proof_too_difficult.get("hole_start"),
+                hole_end=proof_too_difficult.get("hole_end"),
             )
             self._state.decomposition_search_queue.append(formal_theorem_to_decompose)
 
@@ -1503,14 +1504,12 @@ class GoedelsPoetryStateManager:
         # No proof yet, return the theorem with sorry
         return f"{formal_proof_state['formal_theorem']} := by sorry\n"
 
-    def _apply_offset_replacements(self, sketch: str, children: list[TreeNode]) -> tuple[str, list[TreeNode]]:
+    def _apply_offset_replacements(self, sketch: str, children: list[TreeNode]) -> str:  # noqa: C901
         """
         Apply offset-based replacements for children that have hole metadata.
-
-        Returns (updated_sketch, legacy_children) where legacy_children are those without valid offsets.
         """
         replacements: list[tuple[int, int, str]] = []
-        legacy_children: list[TreeNode] = []
+        missing: list[TreeNode] = []
 
         for child in children:
             child_proof_body = self._extract_proof_body(child)
@@ -1525,33 +1524,60 @@ class GoedelsPoetryStateManager:
                 ):
                     # Determine indentation prefix on the line containing the hole.
                     line_start = sketch.rfind("\n", 0, hole_start) + 1
-                    indent_prefix = sketch[line_start:hole_start]
+                    line_prefix = sketch[line_start:hole_start]
+                    # Leading whitespace at the start of this line (used for inline `by sorry` holes).
+                    line = sketch[
+                        line_start : sketch.find("\n", line_start) if "\n" in sketch[line_start:] else len(sketch)
+                    ]
+                    leading_ws = line[: len(line) - len(line.lstrip(" \t"))]
 
                     normalized_body = self._normalize_child_proof_body(child_proof_body, offset_insertion=True)
                     body_lines = normalized_body.split("\n")
                     if not body_lines:
                         body_lines = ["sorry"]
 
-                    # Indent every line after the first to match the parent's hole indentation.
+                    # Two forms of `sorry` holes exist in sketches:
+                    # 1) Standalone line: `    sorry` (hole indentation is pure whitespace)
+                    # 2) Inline: `have h : T := by sorry` (hole indentation includes non-whitespace)
+                    #
+                    # For (1), we can replace the token in-place: the line already contains the correct
+                    # indentation prefix before the token. We only need to indent subsequent lines.
+                    #
+                    # For (2), replacing `sorry` with a multi-line proof must insert a newline and indent
+                    # the *entire* proof body under the surrounding `by`.
+                    inline_hole = bool(line_prefix.strip())
                     rebuilt_lines: list[str] = []
-                    for i, ln in enumerate(body_lines):
-                        if i == 0:
-                            rebuilt_lines.append(ln)
-                        else:
-                            rebuilt_lines.append(f"{indent_prefix}{ln}" if ln.strip() else ln)
+                    if inline_hole:
+                        proof_indent = leading_ws + (" " * PROOF_BODY_INDENT_SPACES)
+                        rebuilt_lines.append("")  # turn `by sorry` into `by\n<proof>`
+                        for ln in body_lines:
+                            rebuilt_lines.append(f"{proof_indent}{ln}" if ln.strip() else ln)
+                    else:
+                        indent_prefix = line_prefix
+                        for i, ln in enumerate(body_lines):
+                            if i == 0:
+                                rebuilt_lines.append(ln)
+                            else:
+                                rebuilt_lines.append(f"{indent_prefix}{ln}" if ln.strip() else ln)
 
                     replacement_text = "\n".join(rebuilt_lines)
                     replacements.append((hole_start, hole_end, replacement_text))
                     continue
 
-            legacy_children.append(child)
+            missing.append(child)
 
         if replacements:
             replacements.sort(key=lambda t: t[0], reverse=True)
             for start, end, rep in replacements:
                 sketch = sketch[:start] + rep + sketch[end:]
 
-        return sketch, legacy_children
+        if missing:
+            logger.warning(
+                "Reconstruction skipped %d child(ren) missing valid hole offsets; "
+                "their `sorry` placeholders will remain in the parent sketch.",
+                len(missing),
+            )
+        return sketch
 
     def _reconstruct_decomposed_node_proof(self, decomposed_state: DecomposedFormalTheoremState) -> str:
         """
@@ -1562,15 +1588,9 @@ class GoedelsPoetryStateManager:
 
         sketch = str(decomposed_state["proof_sketch"])
 
-        # Prefer filling holes by absolute offsets recorded during decomposition (hole_start/hole_end).
-        sketch, legacy_children = self._apply_offset_replacements(sketch, decomposed_state["children"])
-
-        # Legacy fallback: name-based inlining for any children missing hole metadata.
-        for child in legacy_children:
-            child_proof_body = self._extract_proof_body(child)
-            sketch = self._inline_child_proof(sketch, child, child_proof_body)
-
-        return sketch
+        # Fill holes using absolute offsets recorded during decomposition (hole_start/hole_end).
+        # The legacy name/regex-based reconstruction path has been removed.
+        return self._apply_offset_replacements(sketch, decomposed_state["children"])
 
     def _reconstruct_node_proof(self, node: TreeNode) -> str:
         """
@@ -2005,355 +2025,6 @@ class GoedelsPoetryStateManager:
         """
         idx = formal_decl.find(":=")
         return formal_decl[:idx].rstrip() if idx != -1 else formal_decl
-
-    def _inline_child_proof(self, parent_sketch: str, child: TreeNode, child_proof_body: str) -> str:
-        """
-        Inlines a child's proof body into the parent's sketch by replacing the corresponding sorry.
-
-        Important: The child's formal_theorem may differ from what appears in the parent sketch
-        because AST.get_named_subgoal_code() adds earlier dependencies as explicit parameters.
-        For example:
-          - Parent sketch has: "have sum_not_3 : ... := by sorry"
-          - Child formal_theorem: "lemma sum_not_3 (cube_mod9 : ...) : ... := by ..."
-
-        We handle this by:
-          1. Extracting just the name from the child (e.g., "sum_not_3")
-          2. Searching for that name in the parent sketch (which has the original signature)
-          3. Replacing the sorry in the parent's original have statement
-
-        Parameters
-        ----------
-        parent_sketch : str
-            The parent's proof sketch with sorry placeholders
-        child : TreeNode
-            The child node whose proof we're inlining
-        child_proof_body : str
-            The proof body to inline
-
-        Returns
-        -------
-        str
-            The parent sketch with the child proof inlined
-        """
-        # Get the child's theorem name from formal_theorem
-        child_formal_theorem = ""
-        if isinstance(child, dict) and "formal_theorem" in child:
-            child_formal_theorem = str(child["formal_theorem"])
-
-        # Extract the have/lemma name from the child's theorem
-        # This strips away any added parameters to get just the name
-        have_name = self._extract_have_name(child_formal_theorem)
-
-        if not have_name:
-            # Can't identify the have name, might be the main body
-            # Try to replace a standalone sorry (not part of a have statement)
-            return self._replace_main_body_sorry(parent_sketch, child_proof_body)
-
-        # Check if this name actually appears as a "have" statement in the parent sketch
-        # Pattern: "have <name> : ..."
-        have_pattern = rf"have\s+{re.escape(have_name)}\s*:"
-        if re.search(have_pattern, parent_sketch):
-            # Find the "have <name> : ... := by sorry" pattern in the parent sketch
-            # Note: The parent sketch still has the original signature without extra parameters
-            return self._replace_sorry_for_have(parent_sketch, have_name, child_proof_body)
-        else:
-            # This name doesn't appear as a "have" statement.
-            #
-            # Only treat this as "main body" for the dedicated synthetic node `main_body`.
-            # Falling back for arbitrary names is brittle and can splice proofs into the wrong `sorry`.
-            if have_name == "main_body":
-                return self._replace_main_body_sorry(parent_sketch, child_proof_body)
-
-            # Synthetic anonymous-have support:
-            # If the child lemma corresponds to an anonymous `have : ... := by sorry` block,
-            # inline into the Nth anonymous-have hole instead of falling back to main body.
-            m_anon = _ANON_HAVE_NAME_RE.match(have_name)
-            if m_anon:
-                try:
-                    idx = int(m_anon.group("idx"))
-                except ValueError:
-                    idx = -1
-                if idx > 0:
-                    candidate = self._replace_sorry_for_anonymous_have(parent_sketch, idx, child_proof_body)
-                    if candidate != parent_sketch:
-                        logger.debug("Reconstruction inlined child '%s' into anonymous have #%d.", have_name, idx)
-                        return candidate
-
-            # Heuristic fallback: if the parent has a standalone main-body `sorry`, inline there.
-            # This preserves support for decompositions where the final child corresponds to the
-            # main goal, but its formal_theorem name is not present as a `have` in the sketch
-            # (e.g. deep nesting tests that end in a leaf lemma).
-            candidate = self._replace_main_body_sorry(parent_sketch, child_proof_body)
-            if candidate != parent_sketch:
-                logger.debug(
-                    "Reconstruction inlined child '%s' into a standalone main-body sorry (no matching `have`).",
-                    have_name,
-                )
-                return candidate
-
-            logger.warning(
-                "Reconstruction could not find matching `have %s` in parent sketch and no standalone main-body sorry; "
-                "leaving sketch unchanged.",
-                have_name,
-            )
-            return parent_sketch
-
-    def _replace_sorry_for_anonymous_have(self, parent_sketch: str, anon_idx: int, child_proof_body: str) -> str:
-        """
-        Replace the `sorry` inside the Nth anonymous have statement:
-
-          have : P := by
-            ...
-            sorry
-
-        This is needed when decomposition extracts an anonymous `have` as a synthetic subgoal
-        (e.g. `gp_anon_have__<decl>__1`) and later reconstruction needs to inline its proof.
-        """
-        if anon_idx <= 0:
-            return parent_sketch
-
-        # Match an anonymous have (no name between `have` and `:`) and capture the prefix up to `by`.
-        # Use non-greedy `.*?` to avoid spanning across later haves.
-        pattern = re.compile(
-            r"(?ms)"
-            r"(^([ \t]*)have\s*:\s*.*?:=(?:\s|--[^\n]*\n|/-.*?-/)*?by(?:\s|--[^\n]*\n|/-.*?-/)*?)"
-            r"sorry\b"
-        )
-
-        matches = list(pattern.finditer(parent_sketch))
-        if anon_idx > len(matches):
-            return parent_sketch
-
-        match = matches[anon_idx - 1]
-        base_indent = match.group(2) or ""
-        proof_indent = " " * (len(base_indent) + PROOF_BODY_INDENT_SPACES)
-
-        normalized_body = self._normalize_child_proof_body(child_proof_body)
-        indented_proof = self._indent_proof_body(normalized_body, proof_indent)
-
-        replacement = f"{match.group(1)}\n{indented_proof}"
-        return parent_sketch[: match.start()] + replacement + parent_sketch[match.end() :]
-
-    def _extract_have_name(self, formal_theorem: str) -> str:
-        """
-        Extracts the name from a have/lemma declaration.
-
-        Note: The child's formal_theorem may have dependencies added as explicit parameters
-        by AST.get_named_subgoal_code(), e.g.:
-          lemma sum_not_3 (cube_mod9 : ...) : result_type := ...
-        We need to extract just the name "sum_not_3", not including the parameters.
-
-        Parameters
-        ----------
-        formal_theorem : str
-            The formal theorem text
-
-        Returns
-        -------
-        str
-            The name of the have/lemma
-        """
-        # Lean identifiers allow a wide range of unicode characters (e.g., h₁ or names
-        # that use Greek letters), so we capture the entire token that appears immediately
-        # after the keyword and stop before any whitespace, ':' or '('. This mirrors how
-        # the parent sketch spells the have/lemma names, which is what we need for
-        # pattern replacement.
-        pattern = r"\b(?:lemma|have|theorem)\s+([^\s:(]+)"
-        match = re.search(pattern, formal_theorem)
-
-        if match:
-            return match.group(1)
-
-        return ""
-
-    def _replace_sorry_for_have(self, parent_sketch: str, have_name: str, child_proof_body: str) -> str:
-        """
-        Replaces the sorry in a specific have statement with the actual proof body.
-
-        Note: We search by name only in the parent sketch, which contains the original
-        "have <name> : ... := by sorry" without any added parameters. The child's
-        formal_theorem may have dependencies added as parameters, but we don't use
-        that here - we only search in the parent's original text.
-
-        Parameters
-        ----------
-        parent_sketch : str
-            The parent's proof sketch (with original signatures, no added parameters)
-        have_name : str
-            The name of the have statement to replace
-        child_proof_body : str
-            The proof body to insert
-
-        Returns
-        -------
-        str
-            The modified sketch with sorry replaced
-        """
-        # Pattern to match: "have <name> : ... := <whitespace/comments> by <whitespace/comments> sorry" in the parent's original text
-        # The parent sketch has the original signature without extra parameters
-        # Allow for comments (-- ...) and whitespace between := and by, and between by and sorry
-        # This handles cases like:
-        #   have h : Type :=
-        #     -- comment
-        #     by sorry
-        pattern = rf"(have\s+{re.escape(have_name)}\s*:.*?:=(?:\s|--[^\n]*\n|/-.*?-/)*?by(?:\s|--[^\n]*)*)sorry"
-
-        # Find the match to determine indentation
-        match = re.search(pattern, parent_sketch, re.DOTALL)
-        if not match:
-            # Pattern not found, log for debugging
-            logger.warning(
-                f"Failed to match pattern for have statement '{have_name}'. "
-                "The have statement may have an unexpected format or the pattern needs adjustment."
-            )
-            logger.debug(f"Pattern used: {pattern}")
-            # Show a snippet of the parent sketch around where the have should be
-            have_pattern_search = rf"have\s+{re.escape(have_name)}\s*:"
-            have_match = re.search(have_pattern_search, parent_sketch)
-            if have_match:
-                start = max(0, have_match.start() - 100)
-                end = min(len(parent_sketch), have_match.end() + 200)
-                logger.debug(f"Parent sketch snippet around '{have_name}':\n{parent_sketch[start:end]}")
-            return parent_sketch
-
-        # Determine the indentation level of the have statement
-        start_pos = match.start()
-        # Find the start of the line containing this have
-        # Note: rfind returns -1 if not found, so +1 makes it 0 (start of string)
-        line_start = parent_sketch.rfind("\n", 0, start_pos) + 1
-        have_line = parent_sketch[line_start:start_pos]
-        base_indent = len(have_line) - len(have_line.lstrip())
-
-        # Add spaces for the indentation of the proof body
-        proof_indent = " " * (base_indent + PROOF_BODY_INDENT_SPACES)
-
-        # Normalize indentation of the child proof body before re-indenting into the parent's hole.
-        # This prevents layout bugs where `have`/`calc` blocks get pushed too far right and become
-        # syntactically nested under `calc` steps (see partial.log).
-        normalized_body = self._normalize_child_proof_body(child_proof_body)
-        indented_proof = self._indent_proof_body(normalized_body, proof_indent)
-
-        # Replace sorry with the indented proof
-        result = re.sub(pattern, rf"\1\n{indented_proof}", parent_sketch, count=1, flags=re.DOTALL)
-
-        return result
-
-    def _is_sorry_part_of_have(self, lines: list[str], sorry_idx: int) -> bool:
-        """
-        Checks if a sorry at the given line index is part of a have statement.
-
-        Parameters
-        ----------
-        lines : list[str]
-            The lines of the proof sketch
-        sorry_idx : int
-            The index of the sorry line to check
-
-        Returns
-        -------
-        bool
-            True if the sorry is part of a have statement, False otherwise
-        """
-        # Look back up to 5 lines to see if we're in a have statement
-        lookback_limit = min(5, sorry_idx)
-        sorry_indent = len(lines[sorry_idx]) - len(lines[sorry_idx].lstrip())
-
-        for j in range(1, lookback_limit + 1):
-            prev_idx = sorry_idx - j
-            prev_line = lines[prev_idx]
-
-            # Pattern: "have <name> : <type> := <whitespace/newline> by <whitespace/newline> sorry"
-            # Lean identifiers can be unicode (e.g. h₁), so capture a token-like chunk.
-            if re.search(r"\bhave\s+[^\s:(]+\s*:", prev_line):
-                # Found a have statement - now check if our sorry is part of its proof body
-                have_indent = len(prev_line) - len(prev_line.lstrip())
-
-                # Check lines between the have and our sorry for a ":= ... by" pattern.
-                # Allow comments between `:=` and `by` (common in sketches), otherwise we may
-                # misclassify a have-sorry as a standalone sorry and replace the wrong hole.
-                between_text = "\n".join(lines[prev_idx:sorry_idx])
-
-                # If there's a ":= ... by" pattern in the lines from have to (but not including) sorry,
-                # and our sorry is indented MORE than the have line, it's part of the have
-                if (
-                    re.search(
-                        r":=(?:\s|--[^\n]*\n|/-.*?-/)*by",
-                        between_text,
-                        re.MULTILINE | re.DOTALL,
-                    )
-                    and sorry_indent > have_indent
-                ):
-                    return True
-
-            # If we hit an empty line, stop looking back
-            if not prev_line.strip():
-                break
-
-        return False
-
-    def _replace_main_body_sorry(self, parent_sketch: str, child_proof_body: str) -> str:
-        """
-        Replaces a standalone sorry (not part of a have statement) with the actual proof body.
-        This handles the main proof body after all have statements.
-
-        This method handles both single-line and multiline patterns:
-        - Single-line: "have h : Type := by sorry" (skip this)
-        - Multiline: "have h : Type :=\n  by sorry" (skip this)
-        - Main body: standalone "sorry" after all have statements (replace this)
-
-        Parameters
-        ----------
-        parent_sketch : str
-            The parent's proof sketch
-        child_proof_body : str
-            The proof body to insert
-
-        Returns
-        -------
-        str
-            The modified sketch with the main body sorry replaced
-        """
-        # Find a standalone sorry that's not part of a have statement
-        # We need to find the last sorry in the sketch that's at the end after all have statements
-
-        # Split into lines to find standalone sorry
-        lines = parent_sketch.split("\n")
-
-        # Find the last line that contains just "sorry" (possibly with indentation)
-        # that is NOT part of a have statement (checking previous lines for multiline patterns)
-        last_sorry_idx = -1
-        for i in range(len(lines) - 1, -1, -1):
-            stripped = lines[i].strip()
-
-            # Check if this line is just "sorry"
-            if stripped == "sorry":
-                # Check if this is part of a ":= by sorry" pattern (single-line)
-                if re.search(r":=\s*by", lines[i]):
-                    continue
-
-                # Check if this is part of a multiline ":= ... by ... sorry" pattern
-                if not self._is_sorry_part_of_have(lines, i):
-                    # This is a standalone sorry (main body)
-                    last_sorry_idx = i
-                    break
-
-        if last_sorry_idx == -1:
-            # No standalone sorry found
-            return parent_sketch
-
-        # Get the indentation of the sorry line
-        sorry_line = lines[last_sorry_idx]
-        base_indent = len(sorry_line) - len(sorry_line.lstrip())
-        indent_str = " " * base_indent
-
-        # Normalize indentation of the child proof body before matching the sorry's indentation.
-        normalized_body = self._normalize_child_proof_body(child_proof_body)
-        indented_proof = self._indent_proof_body(normalized_body, indent_str)
-
-        # Replace the sorry line with the indented proof
-        lines[last_sorry_idx] = indented_proof
-
-        return "\n".join(lines)
 
     def _indent_proof_body(self, proof_body: str, indent: str) -> str:
         """
