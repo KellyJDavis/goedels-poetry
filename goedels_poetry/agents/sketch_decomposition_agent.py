@@ -92,21 +92,45 @@ def _sketch_decomposer(state: DecomposedFormalTheoremState) -> DecomposedFormalT
     """
     # Obtain the names of all unproven subgoals
     unproven_subgoal_names = cast(AST, state["ast"]).get_unproven_subgoal_names()
+    # Map subgoal-name -> (start, end) offsets of the corresponding `sorry` token in the sketch (body-relative).
+    holes_by_name = cast(AST, state["ast"]).get_sorry_holes_by_name()
 
     # Loop over named unproven subgoals
     for unproven_subgoal_name in unproven_subgoal_names:
         # Obtain code of named unproven subgoal
         unproven_subgoal_code = cast(AST, state["ast"]).get_named_subgoal_code(unproven_subgoal_name)
+        # Multiple sorries can share the same have-name (rare but possible in LLM sketches).
+        # We match by traversal order: consume the next span for this name.
+        hole_spans = holes_by_name.get(unproven_subgoal_name) or []
+        hole_span = hole_spans.pop(0) if hole_spans else None
+        hole_start = hole_span[0] if hole_span is not None else None
+        hole_end = hole_span[1] if hole_span is not None else None
 
         # Append a FormalTheoremProofState corresponding to the unproven subgoal as a child of state
-        state["children"].append(cast(TreeNode, _create_formal_theorem_proof_state(unproven_subgoal_code, state)))
+        state["children"].append(
+            cast(
+                TreeNode,
+                _create_formal_theorem_proof_state(
+                    unproven_subgoal_code,
+                    state,
+                    hole_name=unproven_subgoal_name,
+                    hole_start=hole_start,
+                    hole_end=hole_end,
+                ),
+            )
+        )
 
     # Return a DecomposedFormalTheoremStates with state added to its outputs
     return {"outputs": [state]}  # type: ignore[typeddict-item]
 
 
 def _create_formal_theorem_proof_state(
-    formal_theorem: str, state: DecomposedFormalTheoremState
+    formal_theorem: str,
+    state: DecomposedFormalTheoremState,
+    *,
+    hole_name: str | None = None,
+    hole_start: int | None = None,
+    hole_end: int | None = None,
 ) -> FormalTheoremProofState:
     """
     Creates a FormalTheoremProofState with the passed formal_theorem and with state as its parent.
@@ -131,4 +155,7 @@ def _create_formal_theorem_proof_state(
         self_correction_attempts=0,
         proof_history=[],
         pass_attempts=0,
+        hole_name=hole_name,
+        hole_start=hole_start,
+        hole_end=hole_end,
     )

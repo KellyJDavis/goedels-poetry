@@ -113,7 +113,15 @@ def _parse_sketch(
     kimina_client = KiminaClient(api_url=server_url, http_timeout=36000, n_retries=server_max_retries)
 
     # Parse the formal proof sketch with the stored preamble prefix
-    sketch_with_imports = combine_preamble_and_body(state["preamble"], str(state["proof_sketch"]))
+    normalized_preamble = state["preamble"].strip()
+    normalized_body = str(state["proof_sketch"]).strip()
+    sketch_with_imports = combine_preamble_and_body(normalized_preamble, normalized_body)
+    # Compute the body start offset based on the actual combined string (avoid assuming "\n\n").
+    if normalized_preamble and normalized_body:
+        body_start = sketch_with_imports.find(normalized_body, len(normalized_preamble))
+        body_start = body_start if body_start != -1 else len(normalized_preamble)
+    else:
+        body_start = 0
     ast_code_response = kimina_client.ast_code(sketch_with_imports)
 
     # Parse ast_code_response
@@ -126,7 +134,7 @@ def _parse_sketch(
     ast_without_imports = remove_default_imports_from_ast(parsed_response["ast"], preamble=state["preamble"])
 
     # Set state["ast"] with the parsed_response (without DEFAULT_IMPORTS)
-    state["ast"] = AST(ast_without_imports)
+    state["ast"] = AST(ast_without_imports, source_text=sketch_with_imports, body_start=body_start)
 
     # Return a DecomposedFormalTheoremStates with state added to its outputs
     return {"outputs": [state]}  # type: ignore[typeddict-item]

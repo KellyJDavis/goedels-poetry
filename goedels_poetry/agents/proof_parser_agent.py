@@ -122,7 +122,15 @@ def _parse_proof(server_url: str, server_max_retries: int, state: FormalTheoremP
     )
 
     # Parse formal proof of the passed state with the stored preamble prefix
-    proof_with_imports = combine_preamble_and_body(state["preamble"], theorem_with_proof)
+    normalized_preamble = state["preamble"].strip()
+    normalized_body = theorem_with_proof.strip()
+    proof_with_imports = combine_preamble_and_body(normalized_preamble, normalized_body)
+    # Compute the body start offset based on the actual combined string (avoid assuming "\n\n").
+    if normalized_preamble and normalized_body:
+        body_start = proof_with_imports.find(normalized_body, len(normalized_preamble))
+        body_start = body_start if body_start != -1 else len(normalized_preamble)
+    else:
+        body_start = 0
     ast_code_response = kimina_client.ast_code(proof_with_imports)
 
     # Parse ast_code_response
@@ -135,7 +143,7 @@ def _parse_proof(server_url: str, server_max_retries: int, state: FormalTheoremP
     ast_without_imports = remove_default_imports_from_ast(parsed_response["ast"], preamble=state["preamble"])
 
     # Set state["ast"] with the parsed_response (without DEFAULT_IMPORTS)
-    state["ast"] = AST(ast_without_imports)
+    state["ast"] = AST(ast_without_imports, source_text=proof_with_imports, body_start=body_start)
 
     # Return a FormalTheoremProofStates with state added to its outputs
     return {"outputs": [state]}  # type: ignore[typeddict-item]
