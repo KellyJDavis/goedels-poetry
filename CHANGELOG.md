@@ -5,6 +5,27 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.6] - 2025-12-25
+
+### Changed
+- Proof reconstruction now uses AST-guided, offset-based replacement strategy instead of brittle regex-based matching, enabling deterministic splicing of proofs into exact `sorry` placeholder locations and avoiding failures from formatting/comments/layout variations.
+- AST now carries `source_text` (exact Kimina-parsed text) and `body_start` (offset where the body begins) to enable translation of token positions from the AST into body-relative offsets used by stored `proof_sketch` strings.
+- Reconstruction now prefers offset-based splicing (collecting start/end/replacement tuples and applying replacements right-to-left) with fallback to legacy name-based inlining only when hole metadata is missing.
+
+### Fixed
+- Fixed reconstruction correctness issues: convert Kimina/ast_export UTF-8 byte offsets to Python string indices when mapping `sorry` spans to avoid misalignment errors.
+- Added conservative, offset-only normalization for nested `have ... := by` blocks to avoid layout/scope errors ("unsolved goals" / "no goals to be solved") after inlining.
+- Narrowed closing-tactic indentation fix to a minimal, high-confidence set of one-line goal-closing tactics (e.g., `exact`, `apply`, `simp/simpa`, `assumption`, `rfl`, `decide`, `aesop`, `linarith`, `nlinarith`, `ring_nf`, `norm_num`) to prevent Lean layout-sensitive parsing failures from over-indented closing tactics.
+
+### Added
+- New utility to extract `tacticSorry` occurrences from the Kimina/ast_export syntax tree and map them to surrounding subgoal context (named `have`, synthetic anonymous-have, or `<main body>`), supporting multiple holes per name.
+- `FormalTheoremProofState` now includes `hole_name`, `hole_start`, and `hole_end` fields to track target subgoal/hole metadata in parent sketches, populated when subgoals are created from a sketch.
+- Kimina-backed, runtime-generated reconstruction integration suite (`tests/test_reconstruction_kimina_generated.py`) with configurable corpus generation via `RECONSTRUCTION_TEST_CASES` (default 600) and `RECONSTRUCTION_TEST_SEED` (default 0) environment variables, validating reconstruction by running Kimina `check` on reconstructed code.
+
+### Tests
+- Added comprehensive regression test suite for AST-guided proof reconstruction (`tests/test_reconstruction_ast_guided.py`) covering offset-based replacement, hole metadata extraction, and edge cases.
+- Generated integration suite passes on default corpus (600 test cases) against running Kimina server, ensuring reconstruction robustness across diverse proof patterns.
+
 ## [1.1.5] - 2025-12-24
 
 ### Fixed
@@ -291,6 +312,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Typer for CLI
 - Rich for beautiful terminal output
 
+[1.1.6]: https://github.com/KellyJDavis/goedels-poetry/releases/tag/v1.1.6
 [1.1.5]: https://github.com/KellyJDavis/goedels-poetry/releases/tag/v1.1.5
 [1.1.4]: https://github.com/KellyJDavis/goedels-poetry/releases/tag/v1.1.4
 [1.1.3]: https://github.com/KellyJDavis/goedels-poetry/releases/tag/v1.1.3
