@@ -17,6 +17,71 @@ def with_default_preamble(body: str) -> str:
     return combine_preamble_and_body(DEFAULT_IMPORTS, body)
 
 
+def _annotate_hole_offsets(  # noqa: C901
+    node: dict,
+    sketch: str,
+    *,
+    hole_name: str,
+    anchor: str | None = None,
+    occurrence: int = 0,
+) -> None:
+    """
+    Attach AST-style hole metadata (hole_name/hole_start/hole_end) to a proof-tree node for tests.
+
+    These tests construct proof trees manually (without a Kimina AST), so we compute the `sorry`
+    span by simple string offsets. Production code computes these from the AST.
+    """
+
+    def _find_sorry_token(text: str, start: int) -> int:
+        """
+        Find the next standalone `sorry` token at/after `start`.
+
+        This intentionally skips occurrences inside comments/strings (e.g. `-- ... 'sorry' ...`)
+        by requiring whitespace boundaries around the word.
+        """
+        i = start
+        while True:
+            i = text.find("sorry", i)
+            if i == -1:
+                raise ValueError("No standalone `sorry` token found")  # noqa: TRY003
+            before = text[i - 1] if i > 0 else " "
+            after = text[i + len("sorry")] if i + len("sorry") < len(text) else " "
+            if before.isspace() and after.isspace():
+                return i
+            i += len("sorry")
+
+    def _nth_sorry_token(text: str, start: int, n: int) -> int:
+        i = start
+        for _ in range(n + 1):
+            i = _find_sorry_token(text, i)
+            i += len("sorry")
+        return i - len("sorry")
+
+    if anchor is None and hole_name == "<main body>":
+        # In sketches, the main-body `sorry` is typically the last `sorry` token in the body.
+        # Use the last standalone token, not a mention inside a comment.
+        positions: list[int] = []
+        cursor = 0
+        while True:
+            try:
+                pos = _find_sorry_token(sketch, cursor)
+            except ValueError:
+                break
+            positions.append(pos)
+            cursor = pos + len("sorry")
+        if not positions:
+            raise ValueError("No standalone `sorry` token found for <main body>")  # noqa: TRY003
+        start = positions[-1]
+    else:
+        base = 0 if anchor is None else sketch.index(anchor)
+        start = _nth_sorry_token(sketch, base, occurrence)
+    end = start + len("sorry")
+
+    node["hole_name"] = hole_name
+    node["hole_start"] = start
+    node["hole_end"] = end
+
+
 def test_normalize_theorem() -> None:
     """Test theorem normalization."""
     # Test basic normalization
@@ -137,6 +202,7 @@ def test_reconstruct_includes_root_signature_shallow_decomposition() -> None:
             "proof_history": [],
             "pass_attempts": 0,
         }
+        _annotate_hole_offsets(child, cast(str, parent["proof_sketch"]), hole_name="h", anchor="have h")
 
         parent["children"].append(cast(TreeNode, child))
         state.formal_theorem_proof = cast(TreeNode, parent)
@@ -198,6 +264,7 @@ def test_reconstruct_includes_root_signature_deep_decomposition() -> None:
             "self_correction_attempts": 1,
             "decomposition_history": [],
         }
+        _annotate_hole_offsets(mid, cast(str, root["proof_sketch"]), hole_name="h1", anchor="have h1")
 
         leaf: FormalTheoremProofState = {
             "parent": cast(TreeNode, mid),
@@ -213,6 +280,7 @@ def test_reconstruct_includes_root_signature_deep_decomposition() -> None:
             "proof_history": [],
             "pass_attempts": 0,
         }
+        _annotate_hole_offsets(leaf, cast(str, mid["proof_sketch"]), hole_name="h2", anchor="have h2")
 
         mid["children"].append(cast(TreeNode, leaf))
         root["children"].append(cast(TreeNode, mid))
@@ -751,6 +819,7 @@ def test_reconstruct_complete_proof_with_single_have() -> None:
             proof_history=[],
             pass_attempts=0,
         )
+        _annotate_hole_offsets(child_proof, sketch, hole_name="helper", anchor="have helper")
 
         decomposed["children"].append(cast(TreeNode, child_proof))
         state.formal_theorem_proof = cast(TreeNode, decomposed)
@@ -842,6 +911,7 @@ def test_reconstruct_complete_proof_with_multiple_haves() -> None:
             proof_history=[],
             pass_attempts=0,
         )
+        _annotate_hole_offsets(child1, sketch, hole_name="helper1", anchor="have helper1")
 
         # Create second child proof (with dependency)
         child2 = FormalTheoremProofState(
@@ -858,6 +928,7 @@ def test_reconstruct_complete_proof_with_multiple_haves() -> None:
             proof_history=[],
             pass_attempts=0,
         )
+        _annotate_hole_offsets(child2, sketch, hole_name="helper2", anchor="have helper2")
 
         decomposed["children"].extend([cast(TreeNode, child1), cast(TreeNode, child2)])
         state.formal_theorem_proof = cast(TreeNode, decomposed)
@@ -934,6 +1005,7 @@ def test_reconstruct_complete_proof_handles_unicode_have_names() -> None:
             proof_history=[],
             pass_attempts=0,
         )
+        _annotate_hole_offsets(child1, sketch, hole_name="h₁", anchor="have h₁")
 
         child2 = FormalTheoremProofState(
             parent=cast(TreeNode, decomposed),
@@ -949,6 +1021,7 @@ def test_reconstruct_complete_proof_handles_unicode_have_names() -> None:
             proof_history=[],
             pass_attempts=0,
         )
+        _annotate_hole_offsets(child2, sketch, hole_name="h₂", anchor="have h₂")
 
         decomposed["children"].extend([cast(TreeNode, child1), cast(TreeNode, child2)])
         state.formal_theorem_proof = cast(TreeNode, decomposed)
@@ -1019,6 +1092,7 @@ def test_reconstruct_complete_proof_with_main_body() -> None:
             proof_history=[],
             pass_attempts=0,
         )
+        _annotate_hole_offsets(child_have, sketch, hole_name="helper", anchor="have helper")
 
         # Create main body proof (no clear name, so it's the main body)
         child_main = FormalTheoremProofState(
@@ -1035,6 +1109,7 @@ def test_reconstruct_complete_proof_with_main_body() -> None:
             proof_history=[],
             pass_attempts=0,
         )
+        _annotate_hole_offsets(child_main, sketch, hole_name="<main body>", anchor=None)
 
         decomposed["children"].extend([cast(TreeNode, child_have), cast(TreeNode, child_main)])
         state.formal_theorem_proof = cast(TreeNode, decomposed)
@@ -1120,6 +1195,7 @@ def test_reconstruct_complete_proof_with_anonymous_have() -> None:
             proof_history=[],
             pass_attempts=0,
         )
+        _annotate_hole_offsets(child, sketch, hole_name=f"gp_anon_have__{decl}__1", anchor="have : False")
 
         decomposed["children"].append(cast(TreeNode, child))
         state.formal_theorem_proof = cast(TreeNode, decomposed)
@@ -1291,6 +1367,7 @@ def test_reconstruct_complete_proof_calc_with_comments_and_indented_child_proof(
             "proof_history": [],
             "pass_attempts": 0,
         }
+        _annotate_hole_offsets(child, sketch, hole_name="hv_subst", anchor="have hv_subst")
 
         decomposed["children"].append(cast(TreeNode, child))
         state.formal_theorem_proof = cast(TreeNode, decomposed)
@@ -1305,7 +1382,8 @@ def test_reconstruct_complete_proof_calc_with_comments_and_indented_child_proof(
             assert line.strip() != "sorry"
 
         # Child proof must keep its `have` binders (no dangling `exact step₂` / missing `step₁`).
-        assert "\n    have step₁ : (1 : ℕ) = 1 := by" in result
+        assert "have step₁ : (1 : ℕ) = 1 := by" in result
+        assert "have step₂ : (1 : ℕ) = 1 := by" in result
         assert "exact step₂" in result
     finally:
         with suppress(Exception):
@@ -1376,6 +1454,7 @@ def test_reconstruct_complete_proof_normalizes_misindented_trailing_apply() -> N
             "proof_history": [],
             "pass_attempts": 0,
         }
+        _annotate_hole_offsets(child, sketch, hole_name="hv_subst", anchor="have hv_subst")
 
         parent["children"].append(cast(TreeNode, child))
         state.formal_theorem_proof = cast(TreeNode, parent)
@@ -1448,6 +1527,7 @@ def test_reconstruct_complete_proof_nested_decomposition() -> None:
             self_correction_attempts=1,
             proof_history=[],
         )
+        _annotate_hole_offsets(child_decomposed, parent_sketch, hole_name="helper1", anchor="have helper1")
 
         # Create grandchild proof
         grandchild = FormalTheoremProofState(
@@ -1464,6 +1544,7 @@ def test_reconstruct_complete_proof_nested_decomposition() -> None:
             proof_history=[],
             pass_attempts=0,
         )
+        _annotate_hole_offsets(grandchild, child_sketch, hole_name="subhelper", anchor="have subhelper")
 
         child_decomposed["children"].append(cast(TreeNode, grandchild))
         parent["children"].append(cast(TreeNode, child_decomposed))
@@ -1547,6 +1628,7 @@ def test_reconstruct_complete_proof_with_dependencies_in_signature() -> None:
             proof_history=[],
             pass_attempts=0,
         )
+        _annotate_hole_offsets(child1, sketch, hole_name="cube_mod9", anchor="have cube_mod9")
 
         # Create second child WITH DEPENDENCY in signature (as AST.get_named_subgoal_code does)
         child2 = FormalTheoremProofState(
@@ -1563,6 +1645,7 @@ def test_reconstruct_complete_proof_with_dependencies_in_signature() -> None:
             proof_history=[],
             pass_attempts=0,
         )
+        _annotate_hole_offsets(child2, sketch, hole_name="sum_not_3", anchor="have sum_not_3")
 
         # Create main body
         child3 = FormalTheoremProofState(
@@ -1579,6 +1662,7 @@ def test_reconstruct_complete_proof_with_dependencies_in_signature() -> None:
             proof_history=[],
             pass_attempts=0,
         )
+        _annotate_hole_offsets(child3, sketch, hole_name="<main body>", anchor=None)
 
         decomposed["children"].extend([cast(TreeNode, child1), cast(TreeNode, child2), cast(TreeNode, child3)])
         state.formal_theorem_proof = cast(TreeNode, decomposed)
@@ -1687,25 +1771,6 @@ def test_reconstruct_complete_proof_whitespace_robustness() -> None:
         tactics3 = manager._extract_tactics_after_by(proof_with_newline)
         assert tactics3 == "rfl", f"Expected 'rfl', got '{tactics3}'"
 
-        # Test _extract_have_name with various whitespace patterns
-        name1 = manager._extract_have_name("lemma  h1  : 1 = 1 := by sorry")  # Multiple spaces
-        assert name1 == "h1", f"Expected 'h1', got '{name1}'"
-
-        name2 = manager._extract_have_name("have\th2\t: 2 = 2 := by sorry")  # Tabs
-        assert name2 == "h2", f"Expected 'h2', got '{name2}'"
-
-        name3 = manager._extract_have_name("theorem my_theorem(x : Nat) : True := by sorry")  # Paren delimiter
-        assert name3 == "my_theorem", f"Expected 'my_theorem', got '{name3}'"
-
-        # Test _replace_main_body_sorry doesn't get confused by ":=  by" with multiple spaces
-        sketch_for_test = """theorem test : True := by
-  have h : 1 = 1 :=  by rfl
-  sorry"""
-        result = manager._replace_main_body_sorry(sketch_for_test, "exact trivial")
-        assert "exact trivial" in result
-        # Should only replace the standalone sorry, not the one in "have"
-        assert result.count("rfl") == 1
-
     finally:
         with suppress(Exception):
             GoedelsPoetryState.clear_theorem_directory(theorem)
@@ -1773,6 +1838,7 @@ def test_reconstruct_complete_proof_multiline_type_signatures() -> None:
             proof_history=[],
             pass_attempts=0,
         )
+        _annotate_hole_offsets(child1, sketch, hole_name="helper1", anchor="have helper1")
 
         # Create second child proof with := on different line
         child2 = FormalTheoremProofState(
@@ -1791,6 +1857,7 @@ def test_reconstruct_complete_proof_multiline_type_signatures() -> None:
             proof_history=[],
             pass_attempts=0,
         )
+        _annotate_hole_offsets(child2, sketch, hole_name="helper2", anchor="have helper2")
 
         decomposed["children"].extend([cast(TreeNode, child1), cast(TreeNode, child2)])
         state.formal_theorem_proof = cast(TreeNode, decomposed)
@@ -1861,90 +1928,6 @@ by rfl"""
             GoedelsPoetryState.clear_theorem_directory(theorem)
 
 
-def test_extract_have_name_multiline_signature() -> None:
-    """Test _extract_have_name with multiline type signatures."""
-    import uuid
-
-    from goedels_poetry.state import GoedelsPoetryStateManager
-
-    theorem = with_default_preamble(f"theorem test_name_extraction_{uuid.uuid4()} : True")
-
-    with suppress(Exception):
-        GoedelsPoetryState.clear_theorem_directory(theorem)
-
-    try:
-        state = GoedelsPoetryState(formal_theorem=theorem)
-        manager = GoedelsPoetryStateManager(state)
-
-        # Test with multiline before colon
-        name1 = manager._extract_have_name("""lemma helper1 :
-  VeryLongType → AnotherType := by sorry""")
-        assert name1 == "helper1"
-
-        # Test with multiline and spaces
-        name2 = manager._extract_have_name("""lemma   helper2   :
-  Type1 →
-  Type2 := by sorry""")
-        assert name2 == "helper2"
-
-        # Test with opening paren delimiter on multiline
-        name3 = manager._extract_have_name("""lemma helper3
-  (x : Nat) : True := by sorry""")
-        assert name3 == "helper3"
-
-    finally:
-        with suppress(Exception):
-            GoedelsPoetryState.clear_theorem_directory(theorem)
-
-
-def test_extract_have_name_with_apostrophes() -> None:
-    """Test _extract_have_name with identifiers containing apostrophes."""
-    import uuid
-
-    from goedels_poetry.state import GoedelsPoetryStateManager
-
-    theorem = with_default_preamble(f"theorem test_apostrophes_{uuid.uuid4()} : True")
-
-    with suppress(Exception):
-        GoedelsPoetryState.clear_theorem_directory(theorem)
-
-    try:
-        state = GoedelsPoetryState(formal_theorem=theorem)
-        manager = GoedelsPoetryStateManager(state)
-
-        # Test single apostrophe
-        name1 = manager._extract_have_name("lemma helper' : 1 = 1 := by sorry")
-        assert name1 == "helper'", f'Expected "helper\'", got "{name1}"'
-
-        # Test double apostrophe
-        name2 = manager._extract_have_name("lemma helper'' : 2 = 2 := by sorry")
-        assert name2 == "helper''", f'Expected "helper\'\'", got "{name2}"'
-
-        # Test apostrophe in middle
-        name3 = manager._extract_have_name("lemma my'Lemma : 3 = 3 := by sorry")
-        assert name3 == "my'Lemma", f'Expected "my\'Lemma", got "{name3}"'
-
-        # Test multiple apostrophes
-        name4 = manager._extract_have_name("theorem proof'_step'_1 : True := by sorry")
-        assert name4 == "proof'_step'_1", f'Expected "proof\'_step\'_1", got "{name4}"'
-
-        # Test with have keyword
-        name5 = manager._extract_have_name("have h' : Q := by sorry")
-        assert name5 == "h'", f'Expected "h\'", got "{name5}"'
-
-        # Test with parentheses after name with apostrophe
-        name6 = manager._extract_have_name("lemma helper'(x : Nat) : True := by sorry")
-        assert name6 == "helper'", f'Expected "helper\'", got "{name6}"'
-
-        # Test with colon after name with apostrophe
-        name7 = manager._extract_have_name("lemma helper' : VeryLongType := by sorry")
-        assert name7 == "helper'", f'Expected "helper\'", got "{name7}"'
-
-    finally:
-        with suppress(Exception):
-            GoedelsPoetryState.clear_theorem_directory(theorem)
-
-
 def test_reconstruct_proof_with_apostrophe_identifiers() -> None:
     """Test proof reconstruction with identifiers containing apostrophes."""
     import uuid
@@ -1997,6 +1980,7 @@ def test_reconstruct_proof_with_apostrophe_identifiers() -> None:
             proof_history=[],
             pass_attempts=0,
         )
+        _annotate_hole_offsets(child, sketch, hole_name="helper'", anchor="have helper'")
 
         decomposed["children"].append(cast(TreeNode, child))
         state.formal_theorem_proof = cast(TreeNode, decomposed)
@@ -2014,66 +1998,6 @@ def test_reconstruct_proof_with_apostrophe_identifiers() -> None:
         # Should NOT contain sorry
         result_no_imports = result[len(DEFAULT_IMPORTS) :]
         assert "sorry" not in result_no_imports
-
-    finally:
-        with suppress(Exception):
-            GoedelsPoetryState.clear_theorem_directory(theorem)
-
-
-def test_replace_main_body_sorry_multiline_have() -> None:
-    """Test that _replace_main_body_sorry correctly handles multiline have statements."""
-    import uuid
-
-    from goedels_poetry.state import GoedelsPoetryStateManager
-
-    theorem = with_default_preamble(f"theorem test_multiline_have_{uuid.uuid4()} : True")
-
-    with suppress(Exception):
-        GoedelsPoetryState.clear_theorem_directory(theorem)
-
-    try:
-        state = GoedelsPoetryState(formal_theorem=theorem)
-        manager = GoedelsPoetryStateManager(state)
-
-        # Test case 1: Multiline have with := and by on separate lines
-        sketch1 = """theorem test : True := by
-  have h : VeryLongType :=
-    by sorry
-  sorry"""
-
-        # The first sorry (in have) should NOT be replaced, only the last one
-        result1 = manager._replace_main_body_sorry(sketch1, "exact trivial")
-        assert "have h : VeryLongType :=" in result1
-        assert "by sorry" in result1  # The have's sorry should remain
-        assert "exact trivial" in result1  # Main body sorry should be replaced
-        # Count sorries - should have exactly one (in the have statement)
-        assert result1.count("sorry") == 1
-
-        # Test case 2: Multiline have with newline before by
-        sketch2 = """theorem test : True := by
-  have h' : Type
-    := by
-      sorry
-  sorry"""
-
-        result2 = manager._replace_main_body_sorry(sketch2, "done")
-        assert "have h' : Type" in result2
-        assert "sorry" in result2  # The have's sorry should remain
-        assert "done" in result2  # Main body sorry should be replaced
-
-        # Test case 3: Multiple lines between := and by
-        sketch3 = """theorem test : True := by
-  have helper :
-    LongType →
-    AnotherLongType :=
-    by
-      sorry
-  sorry"""
-
-        result3 = manager._replace_main_body_sorry(sketch3, "apply helper")
-        assert "have helper :" in result3
-        assert result3.count("sorry") == 1  # Only the have's sorry should remain
-        assert "apply helper" in result3
 
     finally:
         with suppress(Exception):
@@ -2134,6 +2058,7 @@ def test_reconstruct_proof_multiline_have_sorry() -> None:
             proof_history=[],
             pass_attempts=0,
         )
+        _annotate_hole_offsets(child_have, sketch, hole_name="helper", anchor="have helper")
 
         # Create child proof for main body
         child_main = FormalTheoremProofState(
@@ -2150,6 +2075,7 @@ def test_reconstruct_proof_multiline_have_sorry() -> None:
             proof_history=[],
             pass_attempts=0,
         )
+        _annotate_hole_offsets(child_main, sketch, hole_name="<main body>", anchor=None)
 
         decomposed["children"].extend([cast(TreeNode, child_have), cast(TreeNode, child_main)])
         state.formal_theorem_proof = cast(TreeNode, decomposed)
@@ -2171,67 +2097,6 @@ def test_reconstruct_proof_multiline_have_sorry() -> None:
         # Should NOT contain any sorry
         result_no_imports = result[len(DEFAULT_IMPORTS) :]
         assert "sorry" not in result_no_imports
-
-    finally:
-        with suppress(Exception):
-            GoedelsPoetryState.clear_theorem_directory(theorem)
-
-
-def test_replace_main_body_sorry_edge_cases() -> None:
-    """Test edge cases for _replace_main_body_sorry with various whitespace and formatting."""
-    import uuid
-
-    from goedels_poetry.state import GoedelsPoetryStateManager
-
-    theorem = with_default_preamble(f"theorem test_edge_cases_{uuid.uuid4()} : True")
-
-    with suppress(Exception):
-        GoedelsPoetryState.clear_theorem_directory(theorem)
-
-    try:
-        state = GoedelsPoetryState(formal_theorem=theorem)
-        manager = GoedelsPoetryStateManager(state)
-
-        # Test case 1: Have with lots of whitespace
-        sketch1 = """theorem test : True := by
-  have   h'   :   Type   :=
-
-    by
-      sorry
-  sorry"""
-
-        result1 = manager._replace_main_body_sorry(sketch1, "done")
-        assert "done" in result1
-        assert result1.count("sorry") == 1  # Only have's sorry remains
-
-        # Test case 2: Multiple haves with multiline patterns
-        sketch2 = """theorem test : True := by
-  have h1 :=
-    by sorry
-  have h2 : Type :=
-    by
-      sorry
-  sorry"""
-
-        result2 = manager._replace_main_body_sorry(sketch2, "trivial")
-        assert "trivial" in result2
-        assert result2.count("sorry") == 2  # Both have's sorries remain
-
-        # Test case 3: Empty lines between have and sorry
-        sketch3 = """theorem test : True := by
-  have helper : Q :=
-
-    by
-
-      sorry
-
-  sorry"""
-
-        result3 = manager._replace_main_body_sorry(sketch3, "constructor")
-        assert "constructor" in result3
-        # The have's sorry should remain, main body replaced
-        assert "by" in result3
-        assert result3.count("sorry") == 1
 
     finally:
         with suppress(Exception):
@@ -2299,6 +2164,7 @@ def test_reconstruct_complete_proof_deep_nested_decomposition_3_levels() -> None
             self_correction_attempts=1,
             decomposition_history=[],
         )
+        _annotate_hole_offsets(level1, root_sketch, hole_name="h1", anchor="have h1")
 
         # Level 2: Second child decomposed state
         level2_sketch = """lemma h2 : R := by
@@ -2318,6 +2184,7 @@ def test_reconstruct_complete_proof_deep_nested_decomposition_3_levels() -> None
             self_correction_attempts=1,
             decomposition_history=[],
         )
+        _annotate_hole_offsets(level2, level1_sketch, hole_name="h2", anchor="have h2")
 
         # Level 3: Leaf proof state
         leaf = FormalTheoremProofState(
@@ -2334,6 +2201,7 @@ def test_reconstruct_complete_proof_deep_nested_decomposition_3_levels() -> None
             proof_history=[],
             pass_attempts=0,
         )
+        _annotate_hole_offsets(leaf, level2_sketch, hole_name="h3", anchor="have h3")
 
         # Build tree
         level2["children"].append(cast(TreeNode, leaf))
@@ -2424,6 +2292,7 @@ def test_reconstruct_complete_proof_deep_nested_decomposition_4_levels() -> None
             self_correction_attempts=1,
             decomposition_history=[],
         )
+        _annotate_hole_offsets(level1, cast(str, root["proof_sketch"]), hole_name="a", anchor="have a")
 
         # Level 2
         level2 = DecomposedFormalTheoremState(
@@ -2441,6 +2310,7 @@ def test_reconstruct_complete_proof_deep_nested_decomposition_4_levels() -> None
             self_correction_attempts=1,
             decomposition_history=[],
         )
+        _annotate_hole_offsets(level2, cast(str, level1["proof_sketch"]), hole_name="b", anchor="have b")
 
         # Level 3
         level3 = DecomposedFormalTheoremState(
@@ -2458,6 +2328,7 @@ def test_reconstruct_complete_proof_deep_nested_decomposition_4_levels() -> None
             self_correction_attempts=1,
             decomposition_history=[],
         )
+        _annotate_hole_offsets(level3, cast(str, level2["proof_sketch"]), hole_name="c", anchor="have c")
 
         # Level 4: Leaf
         leaf = FormalTheoremProofState(
@@ -2474,6 +2345,7 @@ def test_reconstruct_complete_proof_deep_nested_decomposition_4_levels() -> None
             proof_history=[],
             pass_attempts=0,
         )
+        _annotate_hole_offsets(leaf, cast(str, level3["proof_sketch"]), hole_name="d", anchor="have d")
 
         # Build tree
         level3["children"].append(cast(TreeNode, leaf))
@@ -2551,6 +2423,7 @@ def test_reconstruct_complete_proof_nested_with_non_ascii_names() -> None:
             self_correction_attempts=1,
             decomposition_history=[],
         )
+        _annotate_hole_offsets(child_decomposed, cast(str, root["proof_sketch"]), hole_name="α₁", anchor="have α₁")
 
         # Grandchild with another unicode name
         grandchild = FormalTheoremProofState(
@@ -2566,6 +2439,9 @@ def test_reconstruct_complete_proof_nested_with_non_ascii_names() -> None:
             self_correction_attempts=1,
             proof_history=[],
             pass_attempts=0,
+        )
+        _annotate_hole_offsets(
+            grandchild, cast(str, child_decomposed["proof_sketch"]), hole_name="β₂", anchor="have β₂"
         )
 
         child_decomposed["children"].append(cast(TreeNode, grandchild))
@@ -2642,6 +2518,7 @@ def test_reconstruct_complete_proof_with_let_statement() -> None:
             proof_history=[],
             pass_attempts=0,
         )
+        _annotate_hole_offsets(child, sketch, hole_name="h", anchor="have h")
 
         decomposed["children"].append(cast(TreeNode, child))
         state.formal_theorem_proof = cast(TreeNode, decomposed)
@@ -2715,6 +2592,7 @@ def test_reconstruct_complete_proof_with_obtain_statement() -> None:
             proof_history=[],
             pass_attempts=0,
         )
+        _annotate_hole_offsets(child, sketch, hole_name="h", anchor="have h")
 
         decomposed["children"].append(cast(TreeNode, child))
         state.formal_theorem_proof = cast(TreeNode, decomposed)
@@ -2790,6 +2668,9 @@ def test_reconstruct_complete_proof_with_let_and_have_nested() -> None:
             self_correction_attempts=1,
             decomposition_history=[],
         )
+        _annotate_hole_offsets(
+            child_decomposed, cast(str, root["proof_sketch"]), hole_name="helper", anchor="have helper"
+        )
 
         # Grandchild proof
         grandchild = FormalTheoremProofState(
@@ -2806,6 +2687,7 @@ def test_reconstruct_complete_proof_with_let_and_have_nested() -> None:
             proof_history=[],
             pass_attempts=0,
         )
+        _annotate_hole_offsets(grandchild, cast(str, child_decomposed["proof_sketch"]), hole_name="h", anchor="have h")
 
         child_decomposed["children"].append(cast(TreeNode, grandchild))
         root["children"].append(cast(TreeNode, child_decomposed))
@@ -2882,6 +2764,7 @@ def test_reconstruct_complete_proof_mixed_bindings_deep_nested() -> None:
             self_correction_attempts=1,
             decomposition_history=[],
         )
+        _annotate_hole_offsets(level1, cast(str, root["proof_sketch"]), hole_name="h1", anchor="have h1")
 
         # Level 2: With let and have
         level2 = DecomposedFormalTheoremState(
@@ -2900,6 +2783,7 @@ def test_reconstruct_complete_proof_mixed_bindings_deep_nested() -> None:
             self_correction_attempts=1,
             decomposition_history=[],
         )
+        _annotate_hole_offsets(level2, cast(str, level1["proof_sketch"]), hole_name="h2", anchor="have h2")
 
         # Level 3: Leaf
         leaf = FormalTheoremProofState(
@@ -2916,6 +2800,7 @@ def test_reconstruct_complete_proof_mixed_bindings_deep_nested() -> None:
             proof_history=[],
             pass_attempts=0,
         )
+        _annotate_hole_offsets(leaf, cast(str, level2["proof_sketch"]), hole_name="h3", anchor="have h3")
 
         level2["children"].append(cast(TreeNode, leaf))
         level1["children"].append(cast(TreeNode, level2))
@@ -2997,6 +2882,7 @@ def test_reconstruct_complete_proof_non_ascii_with_let_obtain() -> None:
             proof_history=[],
             pass_attempts=0,
         )
+        _annotate_hole_offsets(child, sketch, hole_name="γ", anchor="have γ")
 
         decomposed["children"].append(cast(TreeNode, child))
         state.formal_theorem_proof = cast(TreeNode, decomposed)
@@ -3071,6 +2957,7 @@ def test_reconstruct_complete_proof_multiple_children_at_each_level() -> None:
             self_correction_attempts=1,
             decomposition_history=[],
         )
+        _annotate_hole_offsets(child1_decomposed, cast(str, root["proof_sketch"]), hole_name="h1", anchor="have h1")
 
         # Second child decomposed
         child2_decomposed = DecomposedFormalTheoremState(
@@ -3088,6 +2975,7 @@ def test_reconstruct_complete_proof_multiple_children_at_each_level() -> None:
             self_correction_attempts=1,
             decomposition_history=[],
         )
+        _annotate_hole_offsets(child2_decomposed, cast(str, root["proof_sketch"]), hole_name="h2", anchor="have h2")
 
         # Grandchildren for child1
         grandchild1a = FormalTheoremProofState(
@@ -3104,6 +2992,9 @@ def test_reconstruct_complete_proof_multiple_children_at_each_level() -> None:
             proof_history=[],
             pass_attempts=0,
         )
+        _annotate_hole_offsets(
+            grandchild1a, cast(str, child1_decomposed["proof_sketch"]), hole_name="h1a", anchor="have h1a"
+        )
 
         grandchild1b = FormalTheoremProofState(
             parent=cast(TreeNode, child1_decomposed),
@@ -3118,6 +3009,9 @@ def test_reconstruct_complete_proof_multiple_children_at_each_level() -> None:
             self_correction_attempts=1,
             proof_history=[],
             pass_attempts=0,
+        )
+        _annotate_hole_offsets(
+            grandchild1b, cast(str, child1_decomposed["proof_sketch"]), hole_name="h1b", anchor="have h1b"
         )
 
         # Grandchild for child2
@@ -3134,6 +3028,9 @@ def test_reconstruct_complete_proof_multiple_children_at_each_level() -> None:
             self_correction_attempts=1,
             proof_history=[],
             pass_attempts=0,
+        )
+        _annotate_hole_offsets(
+            grandchild2a, cast(str, child2_decomposed["proof_sketch"]), hole_name="h2a", anchor="have h2a"
         )
 
         # Build tree
@@ -3454,6 +3351,12 @@ def test_reconstruct_complete_proof_edge_case_very_deep_nesting() -> None:
             levels.append(level)
             if parent:
                 parent["children"].append(cast(TreeNode, level))
+                _annotate_hole_offsets(
+                    level,
+                    cast(str, parent["proof_sketch"]),
+                    hole_name=f"level{i}",
+                    anchor=f"have level{i}",
+                )
 
         # Add leaf
         leaf = FormalTheoremProofState(
@@ -3470,6 +3373,7 @@ def test_reconstruct_complete_proof_edge_case_very_deep_nesting() -> None:
             proof_history=[],
             pass_attempts=0,
         )
+        _annotate_hole_offsets(leaf, cast(str, levels[-1]["proof_sketch"]), hole_name="<main body>", anchor=None)
         levels[-1]["children"].append(cast(TreeNode, leaf))
 
         state.formal_theorem_proof = cast(TreeNode, levels[0])
@@ -3492,126 +3396,9 @@ def test_reconstruct_complete_proof_edge_case_very_deep_nesting() -> None:
 
 
 # ============================================================================
-# Tests for proof reconstruction fixes (handling comments between := by and sorry)
+# Regression: reconstruction should still succeed for the exact case from partial.log
+# (now covered via offset-based hole replacement).
 # ============================================================================
-
-
-def test_replace_sorry_for_have_with_comment() -> None:
-    """Test that _replace_sorry_for_have correctly handles comments between := by and sorry."""
-    import uuid
-
-    from goedels_poetry.state import GoedelsPoetryStateManager
-
-    theorem = with_default_preamble(f"theorem test_comment_{uuid.uuid4()} : True")
-
-    with suppress(Exception):
-        GoedelsPoetryState.clear_theorem_directory(theorem)
-
-    try:
-        state = GoedelsPoetryState(formal_theorem=theorem)
-        manager = GoedelsPoetryStateManager(state)
-
-        # Test case: have statement with comment between := by and sorry
-        sketch = """theorem test : True := by
-  have hv_rewrite : v = (1 / 3 : ℝ) * (30 * (13 / 2 : ℝ)) := by
-    -- from `v = 1/3 * (b*h)` and `b=30`, `h=13/2`
-    sorry
-  sorry"""
-
-        child_proof_body = """calc
-    v = 1 / 3 * (b * h) := h₁
-    _ = 1 / 3 * (30 * (13 / 2 : ℝ)) := by rw [h₂, h₃]"""
-
-        result = manager._replace_sorry_for_have(sketch, "hv_rewrite", child_proof_body)
-
-        # Should have replaced the sorry in hv_rewrite
-        assert "sorry" in result  # Main body sorry should remain
-        # Count sorries - should have exactly one (the main body sorry)
-        assert result.count("sorry") == 1
-        # Should contain the proof body
-        assert "calc" in result
-        assert "v = 1 / 3 * (b * h) := h₁" in result
-        assert "rw [h₂, h₃]" in result
-        # Should preserve the comment
-        assert "-- from `v = 1/3 * (b*h)`" in result
-
-    finally:
-        with suppress(Exception):
-            GoedelsPoetryState.clear_theorem_directory(theorem)
-
-
-def test_replace_sorry_for_have_with_multiple_comments() -> None:
-    """Test that _replace_sorry_for_have handles multiple comment lines between := by and sorry."""
-    import uuid
-
-    from goedels_poetry.state import GoedelsPoetryStateManager
-
-    theorem = with_default_preamble(f"theorem test_multi_comment_{uuid.uuid4()} : True")
-
-    with suppress(Exception):
-        GoedelsPoetryState.clear_theorem_directory(theorem)
-
-    try:
-        state = GoedelsPoetryState(formal_theorem=theorem)
-        manager = GoedelsPoetryStateManager(state)
-
-        sketch = """theorem test : True := by
-  have helper : Type := by
-    -- First comment
-    -- Second comment
-    -- Third comment
-    sorry
-  sorry"""
-
-        child_proof_body = "constructor"
-
-        result = manager._replace_sorry_for_have(sketch, "helper", child_proof_body)
-
-        assert result.count("sorry") == 1  # Only main body sorry remains
-        assert "constructor" in result
-        assert "-- First comment" in result
-        assert "-- Second comment" in result
-        assert "-- Third comment" in result
-
-    finally:
-        with suppress(Exception):
-            GoedelsPoetryState.clear_theorem_directory(theorem)
-
-
-def test_replace_sorry_for_have_with_comment_between_assign_and_by() -> None:
-    """Test that _replace_sorry_for_have handles comments between := and by."""
-    import uuid
-
-    from goedels_poetry.state import GoedelsPoetryStateManager
-
-    theorem = with_default_preamble(f"theorem test_assign_by_comment_{uuid.uuid4()} : True")
-
-    with suppress(Exception):
-        GoedelsPoetryState.clear_theorem_directory(theorem)
-
-    try:
-        state = GoedelsPoetryState(formal_theorem=theorem)
-        manager = GoedelsPoetryStateManager(state)
-
-        # Test case: have statement with comment between := and by
-        sketch = """theorem test : True := by
-  have helper : Type :=
-    -- comment between := and by
-    by
-      sorry
-  sorry"""
-
-        child_proof_body = "constructor"
-
-        result = manager._replace_sorry_for_have(sketch, "helper", child_proof_body)
-
-        assert result.count("sorry") == 1  # Only main body sorry remains
-        assert "constructor" in result
-        assert "-- comment between := and by" in result
-
-    finally:
-        with suppress(Exception):
-            GoedelsPoetryState.clear_theorem_directory(theorem)
 
 
 def test_replace_sorry_for_have_exact_partial_log_case() -> None:
@@ -3649,6 +3436,12 @@ def test_replace_sorry_for_have_exact_partial_log_case() -> None:
     v = (1 / 3 : ℝ) * (30 * (13 / 2 : ℝ)) := hv_rewrite
     _ = 65 := hcalc"""
 
+        # Compute body-relative `sorry` spans (the offset-based reconstruction path).
+        hv_sorry_start = sketch.index("sorry", sketch.index("have hv_rewrite"))
+        hv_sorry_end = hv_sorry_start + len("sorry")
+        hcalc_sorry_start = sketch.index("sorry", sketch.index("have hcalc"))
+        hcalc_sorry_end = hcalc_sorry_start + len("sorry")
+
         decomposed = DecomposedFormalTheoremState(
             parent=None,
             children=[],
@@ -3682,6 +3475,9 @@ exact h₄""",
             proof_history=[],
             pass_attempts=0,
         )
+        child_hv_rewrite["hole_name"] = "hv_rewrite"
+        child_hv_rewrite["hole_start"] = hv_sorry_start
+        child_hv_rewrite["hole_end"] = hv_sorry_end
 
         # Create child proof for hcalc (from partial.log)
         child_hcalc = FormalTheoremProofState(
@@ -3702,6 +3498,9 @@ calc
             proof_history=[],
             pass_attempts=0,
         )
+        child_hcalc["hole_name"] = "hcalc"
+        child_hcalc["hole_start"] = hcalc_sorry_start
+        child_hcalc["hole_end"] = hcalc_sorry_end
 
         decomposed["children"].extend([cast(TreeNode, child_hv_rewrite), cast(TreeNode, child_hcalc)])
         state.formal_theorem_proof = cast(TreeNode, decomposed)
