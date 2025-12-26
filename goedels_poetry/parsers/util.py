@@ -305,7 +305,17 @@ def _extract_have_id_name(node: dict[str, Any]) -> str | None:
     # Based on Lean parser: have haveIdDecl : type := proof
     name_node = _extract_nested_value(node, ["args", 1, "args", 0, "args", 0, "args", 0])
     if isinstance(name_node, dict):
-        return name_node.get("val")
+        val = name_node.get("val")
+        if not isinstance(val, str):
+            return None
+        # Kimina sometimes represents anonymous haves as a placeholder identifier "[anonymous]".
+        # Treat these as truly anonymous so we can assign stable synthetic names.
+        #
+        # We also treat `have _ : ...` as anonymous (non-referable) for decomposition purposes.
+        val = val.strip()
+        if not val or val in {"[anonymous]", "_"}:
+            return None
+        return val
     return None
 
 
@@ -604,13 +614,13 @@ def __collect_named_decls(ast: Node) -> dict[str, dict]:  # noqa: C901
                     val_node = __find_first(decl_id, lambda x: isinstance(x.get("val"), str) and x.get("val") != "")
                     if val_node:
                         name_map[val_node["val"]] = n
-            # Collect have statements
+            # Collect have statements (only if referable by a real name).
+            # Note: Kimina may emit placeholder "[anonymous]" for anonymous have statements; those
+            # are handled separately via synthetic `gp_anon_have__...` names.
             if k == "Lean.Parser.Tactic.tacticHave_":
-                have_id = __find_first(n, lambda x: x.get("kind") == "Lean.Parser.Term.haveId")
-                if have_id:
-                    val_node = __find_first(have_id, lambda x: isinstance(x.get("val"), str) and x.get("val") != "")
-                    if val_node:
-                        name_map[val_node["val"]] = n
+                have_name = _extract_have_id_name(n)
+                if have_name:
+                    name_map[have_name] = n
             # Collect let bindings
             if k in {"Lean.Parser.Term.let", "Lean.Parser.Tactic.tacticLet_"}:
                 let_name = __extract_let_name(n)
@@ -1356,12 +1366,12 @@ def __find_enclosing_theorem(  # noqa: C901
             return ast
         # Otherwise, recurse into children
         for v in ast.values():
-            result = __find_enclosing_theorem(v, target_name)
+            result = __find_enclosing_theorem(v, target_name, anon_have_by_id)
             if result is not None:
                 return result
     elif isinstance(ast, list):
         for item in ast:
-            result = __find_enclosing_theorem(item, target_name)
+            result = __find_enclosing_theorem(item, target_name, anon_have_by_id)
             if result is not None:
                 return result
     return None
@@ -2685,14 +2695,8 @@ def _get_named_subgoal_rewritten_ast(  # noqa: C901
 
     # Case: target is an in-proof 'have' -> produce a top-level lemma AST
     if target.get("kind") == "Lean.Parser.Tactic.tacticHave_":
-        have_id_node = __find_first(target, lambda n: n.get("kind") == "Lean.Parser.Term.haveId")
-        have_name = None
-        if have_id_node:
-            name_leaf = __find_first(have_id_node, lambda n: isinstance(n.get("val"), str) and n.get("val") != "")
-            if name_leaf:
-                have_name = name_leaf["val"]
-        if have_name is None:
-            have_name = target_name
+        # Use the normalized extractor so placeholder "[anonymous]" / "_" are treated as anonymous.
+        have_name = _extract_have_id_name(target) or target_name
         # extract declared type and strip leading colon
         type_ast_raw = __extract_type_ast(target)
         type_body = (

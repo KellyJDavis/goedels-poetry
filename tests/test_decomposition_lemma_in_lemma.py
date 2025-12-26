@@ -190,6 +190,26 @@ def test_anonymous_have_in_unqualified_lemma_gets_stable_synthetic_name() -> Non
     assert "(h" in code
 
 
+def test_kimina_placeholder_anonymous_have_name_is_treated_as_anonymous() -> None:
+    """
+    Kimina sometimes emits anonymous `have : ...` as if it had the identifier `[anonymous]`.
+
+    This must be treated as truly anonymous, assigned a stable synthetic name, and the generated
+    lemma must carry enclosing binders.
+    """
+    outer = _unqualified_outer_lemma_with_have(have_name="[anonymous]")
+    ast = AST(outer)
+
+    names = ast.get_unproven_subgoal_names()
+    assert "gp_anon_have__Outer__1" in names
+    assert "[anonymous]" not in names
+
+    code = ast.get_named_subgoal_code("gp_anon_have__Outer__1")
+    assert "lemma gp_anon_have__Outer__1" in code
+    assert "(x" in code
+    assert "(h" in code
+
+
 def test_main_body_sorry_in_unqualified_lemma_is_resolvable() -> None:
     # Ensure the "<main body>" synthetic extraction also works when the enclosing decl kind is unqualified.
     outer = _unqualified_outer_lemma_with_have()
