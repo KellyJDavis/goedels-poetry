@@ -143,7 +143,12 @@ def _parse_proof(server_url: str, server_max_retries: int, state: FormalTheoremP
     ast_without_imports = remove_default_imports_from_ast(parsed_response["ast"], preamble=state["preamble"])
 
     # Set state["ast"] with the parsed_response (without DEFAULT_IMPORTS)
-    state["ast"] = AST(ast_without_imports, source_text=proof_with_imports, body_start=body_start)
+    state["ast"] = AST(
+        ast_without_imports,
+        sorries=parsed_response.get("sorries"),
+        source_text=proof_with_imports,
+        body_start=body_start,
+    )
 
     # Return a FormalTheoremProofStates with state added to its outputs
     return {"outputs": [state]}  # type: ignore[typeddict-item]
