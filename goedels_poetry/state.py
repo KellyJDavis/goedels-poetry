@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import dataclasses
 import logging
 import os
 import pickle
@@ -23,6 +24,7 @@ from goedels_poetry.agents.util.common import (
     ensure_mandatory_preamble,
     split_preamble_and_body,
 )
+from goedels_poetry.agents.util.debug import is_debug_enabled
 from goedels_poetry.config.llm import (
     DECOMPOSER_AGENT_MAX_SELF_CORRECTION_ATTEMPTS,
     FORMALIZER_AGENT_MAX_RETRIES,
@@ -71,6 +73,14 @@ class GoedelsPoetryState:
         # Introduce a bool | None to hold the final proof validation result
         # True = validation passed, False = validation failed, None = validation not run or exception occurred
         self.proof_validation_result: bool | None = None
+
+        # Kimina-guided reconstruction metadata (persisted in checkpoints)
+        self.reconstruction_attempts: int = 0
+        self.reconstruction_strategy_used: str | None = None
+
+        # If set, this is the final complete proof text (including preamble) selected at finish-time.
+        # This allows CLI output to write the same proof that passed final verification.
+        self.final_complete_proof: str | None = None
 
         # Introduce a list of strings to hold the action history
         self.action_history: list[str] = []
@@ -168,6 +178,22 @@ class GoedelsPoetryState:
         theorem_file = os.path.join(self._output_dir, "theorem.txt")
         with open(theorem_file, "w", encoding="utf-8") as f:
             f.write(theorem)
+
+    def __setstate__(self, state: dict) -> None:
+        """
+        Backward-compatible unpickling for older checkpoints.
+        """
+        self.__dict__.update(state)
+
+        # Fields added after earlier releases: set defaults if missing.
+        if not hasattr(self, "proof_validation_result"):
+            self.proof_validation_result = None
+        if not hasattr(self, "reconstruction_attempts"):
+            self.reconstruction_attempts = 0
+        if not hasattr(self, "reconstruction_strategy_used"):
+            self.reconstruction_strategy_used = None
+        if not hasattr(self, "final_complete_proof"):
+            self.final_complete_proof = None
 
     @staticmethod
     def _hash_theorem(theorem: str) -> str:
@@ -1474,11 +1500,172 @@ class GoedelsPoetryStateManager:
         """
         preamble = self._state._root_preamble or DEFAULT_IMPORTS
 
+        # If a final proof override was selected (e.g., via Kimina-guided reconstruction),
+        # prefer it so downstream writers don't recompute a failing variant.
+        final_complete_proof = cast(str | None, getattr(self._state, "final_complete_proof", None))
+        if final_complete_proof is not None:
+            return final_complete_proof
+
         if self._state.formal_theorem_proof is None:
             return combine_preamble_and_body(preamble, "-- No proof available")
 
         proof_without_preamble = self._reconstruct_node_proof(self._state.formal_theorem_proof)
         return combine_preamble_and_body(preamble, proof_without_preamble)
+
+    @dataclasses.dataclass(frozen=True)
+    class ReconstructionVariant:
+        """
+        A parameterization of reconstruction normalization steps.
+
+        These toggles are intentionally coarse-grained: Kimina-guided selection tries a bounded
+        set of variants and selects the first that Kimina marks complete.
+        """
+
+        variant_id: str
+        dedent_common: bool = True
+        snap_indent_levels: bool = True
+        rewrite_trailing_apply: bool = True
+        fix_dangling_closing_tactics_after_comments: bool = True
+        snap_self_reference_closers: bool = True
+        dedent_last_closer_out_of_inner_have_by: bool = True
+
+    def _variant_key(self, v: ReconstructionVariant) -> tuple:
+        return (
+            v.dedent_common,
+            v.snap_indent_levels,
+            v.rewrite_trailing_apply,
+            v.fix_dangling_closing_tactics_after_comments,
+            v.snap_self_reference_closers,
+            v.dedent_last_closer_out_of_inner_have_by,
+        )
+
+    def _get_reconstruction_variants(self, max_candidates: int) -> list[ReconstructionVariant]:
+        """
+        Deterministically generate a bounded list of reconstruction variants to try.
+
+        The exact set is intentionally internal (not configurable) to avoid exposing
+        implementation details in config.
+        """
+        max_candidates = max(1, int(max_candidates))
+
+        baseline = self.ReconstructionVariant("baseline")
+        seed_variants: list[GoedelsPoetryStateManager.ReconstructionVariant] = [
+            baseline,
+            # Directly addresses the partial.log failure mode.
+            dataclasses.replace(
+                baseline, variant_id="no_comment_fixer", fix_dangling_closing_tactics_after_comments=False
+            ),
+            dataclasses.replace(baseline, variant_id="no_indent_snapping", snap_indent_levels=False),
+            dataclasses.replace(
+                baseline,
+                variant_id="no_offset_extras",
+                fix_dangling_closing_tactics_after_comments=False,
+                snap_self_reference_closers=False,
+                dedent_last_closer_out_of_inner_have_by=False,
+            ),
+            dataclasses.replace(
+                baseline,
+                variant_id="dedent_only",
+                snap_indent_levels=False,
+                rewrite_trailing_apply=False,
+                fix_dangling_closing_tactics_after_comments=False,
+                snap_self_reference_closers=False,
+                dedent_last_closer_out_of_inner_have_by=False,
+            ),
+            dataclasses.replace(
+                baseline,
+                variant_id="minimal",
+                dedent_common=False,
+                snap_indent_levels=False,
+                rewrite_trailing_apply=False,
+                fix_dangling_closing_tactics_after_comments=False,
+                snap_self_reference_closers=False,
+                dedent_last_closer_out_of_inner_have_by=False,
+            ),
+        ]
+
+        variants: list[GoedelsPoetryStateManager.ReconstructionVariant] = []
+        seen: set[tuple] = set()
+
+        def add(v: GoedelsPoetryStateManager.ReconstructionVariant) -> None:
+            key = self._variant_key(v)
+            if key in seen:
+                return
+            seen.add(key)
+            variants.append(v)
+
+        for v in seed_variants:
+            add(v)
+            if len(variants) >= max_candidates:
+                return variants[:max_candidates]
+
+        # If the user allows more candidates than the seed set, expand deterministically by
+        # toggling individual flags off (starting from baseline).
+        toggles = [
+            ("no_dedent_common", {"dedent_common": False}),
+            ("no_rewrite_trailing_apply", {"rewrite_trailing_apply": False}),
+            ("no_snap_self_reference_closers", {"snap_self_reference_closers": False}),
+            ("no_dedent_last_closer", {"dedent_last_closer_out_of_inner_have_by": False}),
+        ]
+        for name, changes in toggles:
+            add(dataclasses.replace(baseline, variant_id=name, **changes))
+            if len(variants) >= max_candidates:
+                break
+
+        return variants[:max_candidates]
+
+    def reconstruct_complete_proof_kimina_guided(
+        self, *, server_url: str, server_max_retries: int, max_candidates: int
+    ) -> tuple[str, bool, str]:
+        """
+        Attempt to find a reconstruction variant that Kimina marks complete.
+
+        This is a bounded search over whole-file reconstructions and is intended to run only
+        after a run reports "Proof completed successfully." but final verification fails.
+        """
+        preamble = self._state._root_preamble or DEFAULT_IMPORTS
+        if self._state.formal_theorem_proof is None:
+            proof = combine_preamble_and_body(preamble, "-- No proof available")
+            return proof, False, "No proof available"
+
+        # Lazy import to avoid importing `kimina_client` (and its transitive dependencies)
+        # during test collection on Python < 3.12 where some environments may have incompatible
+        # versions. This function is only invoked in "success-but-final-verification-failed" cases.
+        from goedels_poetry.agents.proof_checker_agent import check_complete_proof
+
+        variants = self._get_reconstruction_variants(max_candidates=max_candidates)
+        last_err = ""
+        for idx, variant in enumerate(variants, start=1):
+            proof_without_preamble = self._reconstruct_node_proof(self._state.formal_theorem_proof, variant=variant)
+            candidate = combine_preamble_and_body(preamble, proof_without_preamble)
+            ok, err = check_complete_proof(candidate, server_url=server_url, server_max_retries=server_max_retries)
+            last_err = err
+
+            if is_debug_enabled():
+                logger.debug(
+                    "Kimina-guided reconstruction attempt %d/%d (%s): %s",
+                    idx,
+                    len(variants),
+                    variant.variant_id,
+                    "passed" if ok else "failed",
+                )
+                if not ok and err:
+                    logger.debug("Kimina-guided reconstruction errors (%s):\n%s", variant.variant_id, err)
+
+            if ok:
+                self._state.reconstruction_attempts = idx
+                self._state.reconstruction_strategy_used = variant.variant_id
+                self._state.final_complete_proof = candidate
+                return candidate, True, ""
+
+        # Record attempts even on failure.
+        self._state.reconstruction_attempts = len(variants)
+        self._state.reconstruction_strategy_used = None
+        return (
+            combine_preamble_and_body(preamble, self._reconstruct_node_proof(self._state.formal_theorem_proof)),
+            False,
+            last_err,
+        )
 
     def _reconstruct_leaf_node_proof(self, formal_proof_state: FormalTheoremProofState) -> str:
         """
@@ -1504,7 +1691,9 @@ class GoedelsPoetryStateManager:
         # No proof yet, return the theorem with sorry
         return f"{formal_proof_state['formal_theorem']} := by sorry\n"
 
-    def _apply_offset_replacements(self, sketch: str, children: list[TreeNode]) -> str:  # noqa: C901
+    def _apply_offset_replacements(  # noqa: C901
+        self, sketch: str, children: list[TreeNode], *, variant: ReconstructionVariant | None = None
+    ) -> str:
         """
         Apply offset-based replacements for children that have hole metadata.
         """
@@ -1512,7 +1701,7 @@ class GoedelsPoetryStateManager:
         missing: list[TreeNode] = []
 
         for child in children:
-            child_proof_body = self._extract_proof_body(child)
+            child_proof_body = self._extract_proof_body(child, variant=variant)
 
             if isinstance(child, dict) and "hole_start" in child and "hole_end" in child:
                 hole_start = cast(int | None, child.get("hole_start"))
@@ -1531,7 +1720,9 @@ class GoedelsPoetryStateManager:
                     ]
                     leading_ws = line[: len(line) - len(line.lstrip(" \t"))]
 
-                    normalized_body = self._normalize_child_proof_body(child_proof_body, offset_insertion=True)
+                    normalized_body = self._normalize_child_proof_body(
+                        child_proof_body, offset_insertion=True, variant=variant
+                    )
                     body_lines = normalized_body.split("\n")
                     if not body_lines:
                         body_lines = ["sorry"]
@@ -1579,7 +1770,9 @@ class GoedelsPoetryStateManager:
             )
         return sketch
 
-    def _reconstruct_decomposed_node_proof(self, decomposed_state: DecomposedFormalTheoremState) -> str:
+    def _reconstruct_decomposed_node_proof(
+        self, decomposed_state: DecomposedFormalTheoremState, *, variant: ReconstructionVariant | None = None
+    ) -> str:
         """
         Reconstruct proof text for an internal `DecomposedFormalTheoremState` by filling holes.
         """
@@ -1590,9 +1783,9 @@ class GoedelsPoetryStateManager:
 
         # Fill holes using absolute offsets recorded during decomposition (hole_start/hole_end).
         # The legacy name/regex-based reconstruction path has been removed.
-        return self._apply_offset_replacements(sketch, decomposed_state["children"])
+        return self._apply_offset_replacements(sketch, decomposed_state["children"], variant=variant)
 
-    def _reconstruct_node_proof(self, node: TreeNode) -> str:
+    def _reconstruct_node_proof(self, node: TreeNode, *, variant: ReconstructionVariant | None = None) -> str:
         """
         Recursively reconstructs the proof for a given node in the proof tree.
 
@@ -1612,12 +1805,12 @@ class GoedelsPoetryStateManager:
 
         # Internal node
         if isinstance(node, dict) and "children" in node:
-            return self._reconstruct_decomposed_node_proof(cast(DecomposedFormalTheoremState, node))
+            return self._reconstruct_decomposed_node_proof(cast(DecomposedFormalTheoremState, node), variant=variant)
 
         # Fallback for unexpected node types
         return "-- Unable to reconstruct proof for this node\n"
 
-    def _extract_proof_body(self, child: TreeNode) -> str:
+    def _extract_proof_body(self, child: TreeNode, *, variant: ReconstructionVariant | None = None) -> str:
         """
         Extracts the proof body (tactics after 'by') from a child node.
 
@@ -1642,7 +1835,7 @@ class GoedelsPoetryStateManager:
         elif isinstance(child, dict) and "children" in child:
             # This is a DecomposedFormalTheoremState (internal)
             # Recursively reconstruct this child first
-            child_complete = self._reconstruct_node_proof(child)
+            child_complete = self._reconstruct_node_proof(child, variant=variant)
             return self._extract_tactics_after_by(child_complete)
         return "sorry"
 
@@ -1968,7 +2161,13 @@ class GoedelsPoetryStateManager:
         lines[last_idx] = f"{base_indent}exact {name}"
         return "\n".join(lines)
 
-    def _normalize_child_proof_body(self, proof_body: str, *, offset_insertion: bool = False) -> str:
+    def _normalize_child_proof_body(
+        self,
+        proof_body: str,
+        *,
+        offset_insertion: bool = False,
+        variant: ReconstructionVariant | None = None,
+    ) -> str:
         """
         Normalize a child proof body to be safe for textual inlining.
 
@@ -1980,18 +2179,28 @@ class GoedelsPoetryStateManager:
            `apply h_main` (which often fails to close the goal). Inlining is more reliable when the
            script ends with `exact h_main`.
         """
-        # First remove any common indentation (helps when the entire proof is shifted right).
-        text = self._dedent_proof_body(proof_body)
-        # Then snap indentation transitions to valid previously-seen indentation levels.
-        text = self._snap_proof_indentation_levels(text)
-        # Finally, rewrite trailing `apply <haveName>` into `exact <haveName>` when applicable.
-        text = self._rewrite_trailing_apply_of_have_to_exact(text)
+        # Default behavior (variant=None) matches historical behavior: apply all normalizations.
+        v = variant or self.ReconstructionVariant("default")
+
+        text = proof_body
+        if v.dedent_common:
+            # First remove any common indentation (helps when the entire proof is shifted right).
+            text = self._dedent_proof_body(text)
+        if v.snap_indent_levels:
+            # Then snap indentation transitions to valid previously-seen indentation levels.
+            text = self._snap_proof_indentation_levels(text)
+        if v.rewrite_trailing_apply:
+            # Finally, rewrite trailing `apply <haveName>` into `exact <haveName>` when applicable.
+            text = self._rewrite_trailing_apply_of_have_to_exact(text)
 
         # Additional normalization is only used for offset-based insertion (AST-guided) paths.
         if offset_insertion:
-            text = self._fix_dangling_closing_tactics_after_comments(text)
-            text = self._snap_self_reference_closers_to_have_indent(text)
-            text = self._dedent_last_closer_out_of_inner_have_by(text)
+            if v.fix_dangling_closing_tactics_after_comments:
+                text = self._fix_dangling_closing_tactics_after_comments(text)
+            if v.snap_self_reference_closers:
+                text = self._snap_self_reference_closers_to_have_indent(text)
+            if v.dedent_last_closer_out_of_inner_have_by:
+                text = self._dedent_last_closer_out_of_inner_have_by(text)
         return text
 
     def _skip_leading_trivia(self, text: str) -> str:

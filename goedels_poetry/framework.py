@@ -22,6 +22,7 @@ from goedels_poetry.agents.sketch_parser_agent import SketchParserAgentFactory
 from goedels_poetry.agents.state import DecomposedFormalTheoremStates, FormalTheoremProofStates, InformalTheoremState
 from goedels_poetry.agents.supervisor_agent import SupervisorAgentFactory
 from goedels_poetry.agents.vector_db_agent import VectorDBAgentFactory
+from goedels_poetry.config.config import PROOF_RECONSTRUCTION
 from goedels_poetry.config.kimina_server import KIMINA_LEAN_SERVER
 from goedels_poetry.config.lean_explore_server import LEAN_EXPLORE_SERVER
 from goedels_poetry.config.llm import (
@@ -70,6 +71,7 @@ class GoedelsPoetryConfig:
         decomposer_agent_llm: BaseChatModel = DECOMPOSER_AGENT_LLM,
         kimina_lean_server_url: str = KIMINA_LEAN_SERVER["url"],
         kimina_lean_server_max_retries: int = KIMINA_LEAN_SERVER["max_retries"],
+        proof_reconstruction_max_candidates: int = PROOF_RECONSTRUCTION["max_candidates"],
     ):
         self.formalizer_agent_llm = formalizer_agent_llm
         self.formalizer_agent_max_retries = formalizer_agent_max_retries
@@ -79,6 +81,7 @@ class GoedelsPoetryConfig:
         self.decomposer_agent_llm = decomposer_agent_llm
         self.kimina_lean_server_url = kimina_lean_server_url
         self.kimina_lean_server_max_retries = kimina_lean_server_max_retries
+        self.proof_reconstruction_max_candidates = proof_reconstruction_max_candidates
 
 
 class GoedelsPoetryFramework:
@@ -375,8 +378,32 @@ class GoedelsPoetryFramework:
                     server_max_retries=self._config.kimina_lean_server_max_retries,
                 )
 
-                # Store validation result in state
+                # If final verification fails, try Kimina-guided reconstruction variants.
+                if not is_valid:
+                    self._console.print(
+                        "[bold yellow]⚠ Final verification failed. Trying Kimina-guided reconstruction variants...[/bold yellow]"
+                    )
+                    guided_proof, guided_ok, guided_err = self._state_manager.reconstruct_complete_proof_kimina_guided(
+                        server_url=self._config.kimina_lean_server_url,
+                        server_max_retries=self._config.kimina_lean_server_max_retries,
+                        max_candidates=self._config.proof_reconstruction_max_candidates,
+                    )
+                    if guided_ok:
+                        complete_proof = guided_proof
+                        is_valid = True
+                        error_msg = ""
+                        self._console.print(
+                            "[bold green]✓ Kimina-guided reconstruction succeeded: Proof is valid[/bold green]"
+                        )
+                    else:
+                        # Keep the original failing proof for display, but show the last guided error.
+                        if guided_err:
+                            error_msg = guided_err
+
+                # Store validation result in state (used by CLI for .proof vs .failed-proof)
                 self._state_manager._state.proof_validation_result = is_valid
+                # Store the final proof so writers don't recompute a failing variant.
+                self._state_manager._state.final_complete_proof = complete_proof
 
                 if is_valid:
                     self._console.print("[bold green]✓ Final verification passed: Proof is valid[/bold green]")

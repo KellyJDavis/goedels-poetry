@@ -40,7 +40,7 @@ try:
     from goedels_poetry.state import GoedelsPoetryStateManager
 
     IMPORTS_AVAILABLE = True
-except (ImportError, TypeError) as e:
+except Exception as e:
     IMPORTS_AVAILABLE = False
     SKIP_REASON = f"Failed to import required modules: {e}"
 
