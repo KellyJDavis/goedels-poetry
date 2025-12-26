@@ -3,6 +3,8 @@ from configparser import ConfigParser
 from pathlib import Path
 from typing import cast, overload
 
+from typing_extensions import Required, TypedDict
+
 # Sentinel value for "no fallback provided" (similar to ConfigParser's _UNSET)
 _UNSET = object()
 
@@ -106,3 +108,16 @@ class ConfigParserWrapper:
 
 # Global config instance
 parsed_config = ConfigParserWrapper()
+
+
+class ProofReconstructionConfig(TypedDict):
+    """
+    Configuration for proof reconstruction.
+    """
+
+    max_candidates: Required[int]
+
+
+PROOF_RECONSTRUCTION = ProofReconstructionConfig(
+    max_candidates=parsed_config.getint(section="PROOF_RECONSTRUCTION", option="max_candidates", fallback=12),
+)
