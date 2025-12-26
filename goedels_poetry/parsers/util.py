@@ -7,6 +7,30 @@ Node = dict[str, Any] | list[Any]
 
 __ANON_HAVE_NAME_PREFIX = "gp_anon_have__"
 
+__DECL_KIND_ALIASES: dict[str, str] = {
+    # Kimina can emit either fully-qualified kinds or unqualified ones for top-level commands.
+    # Normalize both forms so downstream code can match reliably.
+    "theorem": "Lean.Parser.Command.theorem",
+    "lemma": "Lean.Parser.Command.lemma",
+    "def": "Lean.Parser.Command.def",
+}
+
+
+def __normalize_kind(kind: str | None) -> str:
+    if not isinstance(kind, str):
+        return ""
+    return __DECL_KIND_ALIASES.get(kind, kind)
+
+
+def __is_decl_command_kind(kind: str | None) -> bool:
+    k = __normalize_kind(kind)
+    return k in {"Lean.Parser.Command.theorem", "Lean.Parser.Command.lemma", "Lean.Parser.Command.def"}
+
+
+def __is_theorem_or_lemma_kind(kind: str | None) -> bool:
+    k = __normalize_kind(kind)
+    return k in {"Lean.Parser.Command.theorem", "Lean.Parser.Command.lemma"}
+
 
 def __sanitize_lean_ident_fragment(s: str) -> str:
     """
@@ -40,9 +64,9 @@ def __collect_anonymous_haves(ast: Node) -> tuple[dict[int, str], dict[str, dict
 
     def rec(n: Any, current_decl: str | None) -> None:
         if isinstance(n, dict):
-            k = n.get("kind", "")
+            k = __normalize_kind(n.get("kind", ""))
             # Track enclosing decl name for stable per-declaration numbering
-            if k in {"Lean.Parser.Command.theorem", "Lean.Parser.Command.lemma", "Lean.Parser.Command.def"}:
+            if __is_decl_command_kind(k):
                 decl = _extract_decl_id_name(n) or "unknown_decl"
                 current_decl = __sanitize_lean_ident_fragment(decl)
                 counters.setdefault(current_decl, 0)
@@ -230,12 +254,18 @@ def _extract_decl_id_name(node: dict[str, Any]) -> str | None:
     Optional[str]
         The theorem/lemma name, or None if not found
     """
-    # Structure: node["args"][1] = declId, declId["args"][0] = name_node
-    # Based on Lean parser: theorem declId : type := proof
-    name_node = _extract_nested_value(node, ["args", 1, "args", 0])
-    if isinstance(name_node, dict):
-        return name_node.get("val")
-    return None
+    # Kimina AST can represent declarations in multiple shapes.
+    # Robust approach:
+    # - locate the first declId node anywhere in this subtree
+    # - extract the first non-empty `val` string within that declId
+    decl_id = __find_first(node, lambda n: n.get("kind") == "Lean.Parser.Command.declId")
+    if not decl_id:
+        return None
+    val_node = __find_first(decl_id, lambda n: isinstance(n.get("val"), str) and n.get("val") != "")
+    if val_node is None:
+        return None
+    val = val_node.get("val")
+    return str(val) if val is not None else None
 
 
 def _extract_have_id_name(node: dict[str, Any]) -> str | None:
@@ -285,8 +315,8 @@ def _context_after_decl(node: dict[str, Any], context: dict[str, str | None]) ->
 
     Structure documented in _extract_decl_id_name().
     """
-    kind = node.get("kind")
-    if kind in {"Lean.Parser.Command.theorem", "Lean.Parser.Command.lemma"}:
+    kind = __normalize_kind(node.get("kind"))
+    if __is_theorem_or_lemma_kind(kind):
         name = _extract_decl_id_name(node)
         if name:
             return {"theorem": name, "have": None}
@@ -454,11 +484,11 @@ def _get_named_subgoal_ast(node: Node, target_name: str) -> dict[str, Any] | Non
             if found is not None:
                 return found
 
-        kind = node.get("kind")
+        kind = __normalize_kind(node.get("kind"))
 
         # Theorem or lemma
         # Structure documented in _extract_decl_id_name()
-        if kind in {"Lean.Parser.Command.theorem", "Lean.Parser.Command.lemma"}:
+        if __is_theorem_or_lemma_kind(kind):
             name = _extract_decl_id_name(node)
             if name == target_name:
                 return node
@@ -566,9 +596,9 @@ def __collect_named_decls(ast: Node) -> dict[str, dict]:  # noqa: C901
 
     def rec(n: Any) -> None:  # noqa: C901
         if isinstance(n, dict):
-            k = n.get("kind", "")
+            k = __normalize_kind(n.get("kind", ""))
             # Collect theorems, lemmas, and definitions
-            if k in {"Lean.Parser.Command.theorem", "Lean.Parser.Command.lemma", "Lean.Parser.Command.def"}:
+            if __is_decl_command_kind(k):
                 decl_id = __find_first(n, lambda x: x.get("kind") == "Lean.Parser.Command.declId")
                 if decl_id:
                     val_node = __find_first(decl_id, lambda x: isinstance(x.get("val"), str) and x.get("val") != "")
@@ -718,9 +748,9 @@ def __extract_type_ast(node: Any, binding_name: str | None = None) -> dict | Non
     """
     if not isinstance(node, dict):
         return None
-    k = node.get("kind", "")
+    k = __normalize_kind(node.get("kind", ""))
     # top-level decl (common place: args[2] often contains the signature)
-    if k in {"Lean.Parser.Command.theorem", "Lean.Parser.Command.lemma", "Lean.Parser.Command.def"}:
+    if __is_decl_command_kind(k):
         args = node.get("args", [])
         if len(args) > 2 and isinstance(args[2], dict):
             return deepcopy(args[2])
@@ -1293,8 +1323,8 @@ def __find_enclosing_theorem(  # noqa: C901
         """Check if the given node contains the target by name."""
         if isinstance(node, dict):
             # Check for theorem/lemma names
-            kind = node.get("kind", "")
-            if kind in {"Lean.Parser.Command.theorem", "Lean.Parser.Command.lemma"}:
+            kind = __normalize_kind(node.get("kind", ""))
+            if __is_theorem_or_lemma_kind(kind):
                 # Structure documented in _extract_decl_id_name()
                 name = _extract_decl_id_name(node)
                 if name == target_name:
@@ -1320,9 +1350,9 @@ def __find_enclosing_theorem(  # noqa: C901
         return False
 
     if isinstance(ast, dict):
-        kind = ast.get("kind", "")
+        kind = __normalize_kind(ast.get("kind", ""))
         # If this is a theorem/lemma and it contains the target, return it
-        if kind in {"Lean.Parser.Command.theorem", "Lean.Parser.Command.lemma"} and contains_target(ast):
+        if __is_theorem_or_lemma_kind(kind) and contains_target(ast):
             return ast
         # Otherwise, recurse into children
         for v in ast.values():
@@ -1370,7 +1400,15 @@ def __extract_theorem_binders(theorem_node: dict, goal_var_types: dict[str, str]
             for item in node:
                 extract_from_node(item)
 
-    # Extract binders from the theorem signature (stop before the proof body)
+    # Preferred path: many Kimina ASTs contain a declSig node that includes the binder list
+    # (notably the unqualified `{"kind": "lemma", ...}` form observed in partial.log).
+    decl_sig = __find_first(theorem_node, lambda n: n.get("kind") == "Lean.Parser.Command.declSig")
+    if decl_sig is not None:
+        extract_from_node(decl_sig)
+        if binders:
+            return binders
+
+    # Fallback: Extract binders from the theorem signature (stop before the proof body)
     args = theorem_node.get("args", [])
     # Typically: [keyword, declId, signature, colonToken, type, :=, proof]
     # We want to process up to but not including the proof
@@ -2424,7 +2462,7 @@ def _get_named_subgoal_rewritten_ast(  # noqa: C901
     if is_main_body:
         enclosing_theorem_for_main = __find_first(
             ast,
-            lambda n: n.get("kind") in {"Lean.Parser.Command.theorem", "Lean.Parser.Command.lemma"},
+            lambda n: __is_theorem_or_lemma_kind(n.get("kind")),
         )
         if enclosing_theorem_for_main is None:
             raise KeyError("main body target found but no enclosing theorem/lemma in AST")  # noqa: TRY003
@@ -2676,7 +2714,7 @@ def _get_named_subgoal_rewritten_ast(  # noqa: C901
         return lemma_node
 
     # Case: target is already top-level theorem/lemma -> insert binders after name and ensure single colon
-    if target.get("kind") in {"Lean.Parser.Command.theorem", "Lean.Parser.Command.lemma", "Lean.Parser.Command.def"}:
+    if __is_decl_command_kind(target.get("kind")):
         decl_id = __find_first(target, lambda n: n.get("kind") == "Lean.Parser.Command.declId")
         name_leaf = (
             __find_first(decl_id, lambda n: isinstance(n.get("val"), str) and n.get("val") != "") if decl_id else None
@@ -2716,9 +2754,9 @@ def _get_named_subgoal_rewritten_ast(  # noqa: C901
         # keep same keyword (theorem/lemma/def)
         kw = (
             "theorem"
-            if target.get("kind") == "Lean.Parser.Command.theorem"
+            if __normalize_kind(target.get("kind")) == "Lean.Parser.Command.theorem"
             else "lemma"
-            if target.get("kind") == "Lean.Parser.Command.lemma"
+            if __normalize_kind(target.get("kind")) == "Lean.Parser.Command.lemma"
             else "def"
         )
         top_args.append({"val": kw, "info": {"leading": "", "trailing": " "}})
