@@ -25,7 +25,7 @@ try:
     from goedels_poetry.util.tree import TreeNode
 
     IMPORTS_AVAILABLE = True
-except (ImportError, TypeError) as e:
+except Exception as e:
     IMPORTS_AVAILABLE = False
     SKIP_REASON = f"Failed to import required modules: {e}"
 

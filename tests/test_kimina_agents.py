@@ -35,7 +35,7 @@ try:
     from goedels_poetry.agents.util.common import DEFAULT_IMPORTS
 
     IMPORTS_AVAILABLE = True
-except (ImportError, TypeError) as e:
+except Exception as e:
     # Skip tests if imports fail (e.g., Python < 3.10 with kimina-lean-server)
     IMPORTS_AVAILABLE = False
     SKIP_REASON = f"Failed to import required modules: {e}"

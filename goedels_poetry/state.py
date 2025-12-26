@@ -11,7 +11,6 @@ from pathlib import Path
 from shutil import rmtree
 from typing import cast
 
-from goedels_poetry.agents.proof_checker_agent import check_complete_proof
 from goedels_poetry.agents.state import (
     DecomposedFormalTheoremState,
     DecomposedFormalTheoremStates,
@@ -1628,6 +1627,11 @@ class GoedelsPoetryStateManager:
         if self._state.formal_theorem_proof is None:
             proof = combine_preamble_and_body(preamble, "-- No proof available")
             return proof, False, "No proof available"
+
+        # Lazy import to avoid importing `kimina_client` (and its transitive dependencies)
+        # during test collection on Python < 3.12 where some environments may have incompatible
+        # versions. This function is only invoked in "success-but-final-verification-failed" cases.
+        from goedels_poetry.agents.proof_checker_agent import check_complete_proof
 
         variants = self._get_reconstruction_variants(max_candidates=max_candidates)
         last_err = ""
