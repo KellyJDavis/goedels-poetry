@@ -5,6 +5,39 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.0] - 2026-01-10
+
+### Added
+- Kimina-guided proof assembly fallback: when a run finishes with "Proof completed successfully." but final verification fails, the system now attempts a bounded search over reconstruction normalization variants and selects the first whole-file proof that Kimina marks complete
+- `[PROOF_RECONSTRUCTION]` configuration section with `max_candidates` parameter (default 64) to control the maximum number of reconstruction variants to try during Kimina-guided assembly
+- `reconstruction_attempts` and `reconstruction_strategy_used` fields in state persistence to track reconstruction attempts across checkpoints
+- `final_complete_proof` field in state to persist successful reconstruction results, preventing recomputation of failing variants
+- Unit test coverage for deterministic and capped variant generation
+- Kimina-backed integration test for guided reconstruction that fails under baseline reconstruction but passes with guided selection
+
+### Changed
+- Increased default `max_candidates` from 12 to 64 to improve reconstruction success rates
+- Detailed attempt logging for Kimina-guided reconstruction now gated behind `GOEDELS_POETRY_DEBUG` environment variable for consistent debug output
+- Final verification failure handling: when guided reconstruction succeeds after initial verification failure, the run is now treated as successful with `proof_validation_result=True` and `.proof` output is written
+
+### Fixed
+- Fixed anonymous-have decomposition to preserve enclosing binders: Kimina's placeholder have-id `"[anonymous]"` (and `have _`) are now treated as truly anonymous, with decomposition assigning stable synthetic names (`gp_anon_have__...`) instead of emitting `lemma [anonymous] : ...` with missing context
+- Fixed lemma-in-lemma decomposition to preserve enclosing binders: normalized declaration `kind` strings in AST utilities so unqualified `lemma`/`theorem`/`def` (as emitted by Kimina) are treated equivalently to fully-qualified parser kinds
+- Improved `_extract_decl_id_name` robustness by searching for `declId` within the subtree, working with `declModifiers`/`group` wrapper AST shapes
+- Enhanced binder extraction to prefer extracting binders from `Lean.Parser.Command.declSig` to reliably recover parameters/hypotheses for unqualified declaration nodes
+- Fixed CI failures on Python 3.11 by implementing lazy import of `check_complete_proof` inside Kimina-guided reconstruction, avoiding `kimina_client` import crashes during test collection
+- Broadened Kimina integration-test import guards to skip on any import exception, improving robustness across different Python environments
+- Fixed enclosing-theorem lookup to thread anonymous-have map through recursion so anonymous subgoals inherit enclosing parameters/hypotheses reliably across AST shapes
+
+### Removed
+- Removed legacy regex proof reconstruction path: dropped the transitional, regex/name-based proof reconstruction mechanism (v1.1.5-era) and made the v1.1.6 AST-guided, offset-based reconstruction the only supported mechanism
+- Deleted all legacy reconstruction helpers and fallbacks in `goedels_poetry/state.py` including `_replace_*`, `_extract_have_name`, anonymous-have regex matching, main-body regex scanning, and related fallback code
+
+### Tests
+- Added regression test ensuring `"[anonymous]"` is converted to `gp_anon_have__...` and the generated lemma carries enclosing binders
+- Added regression tests covering "lemma-in-lemma" decomposition including qualified/unqualified lemma nodes, anonymous `have`, and `<main body>` extraction
+- Added backward-compatible unpickling defaults for older checkpoints to ensure state persistence works across versions
+
 ## [1.1.6] - 2025-12-25
 
 ### Changed
@@ -312,6 +345,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Typer for CLI
 - Rich for beautiful terminal output
 
+[1.2.0]: https://github.com/KellyJDavis/goedels-poetry/releases/tag/v1.2.0
 [1.1.6]: https://github.com/KellyJDavis/goedels-poetry/releases/tag/v1.1.6
 [1.1.5]: https://github.com/KellyJDavis/goedels-poetry/releases/tag/v1.1.5
 [1.1.4]: https://github.com/KellyJDavis/goedels-poetry/releases/tag/v1.1.4
