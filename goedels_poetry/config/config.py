@@ -119,5 +119,5 @@ class ProofReconstructionConfig(TypedDict):
 
 
 PROOF_RECONSTRUCTION = ProofReconstructionConfig(
-    max_candidates=parsed_config.getint(section="PROOF_RECONSTRUCTION", option="max_candidates", fallback=12),
+    max_candidates=parsed_config.getint(section="PROOF_RECONSTRUCTION", option="max_candidates", fallback=64),
 )
