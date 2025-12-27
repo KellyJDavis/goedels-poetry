@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING
 import typer
 from rich.console import Console
 
-from goedels_poetry.agents.util.common import split_preamble_and_body
+from goedels_poetry.agents.util.common import normalize_escape_sequences, split_preamble_and_body
 
 if TYPE_CHECKING:
     from goedels_poetry.state import GoedelsPoetryStateManager
@@ -28,6 +28,8 @@ def _read_theorem_content(theorem_file: Path) -> str | None:
     if not theorem_content:
         console.print(f"[bold yellow]Warning:[/bold yellow] {theorem_file.name} is empty, skipping")
         return None
+    # Normalize escape sequences (e.g., convert literal \n to actual newline)
+    theorem_content = normalize_escape_sequences(theorem_content)
     return theorem_content
 
 
@@ -106,6 +108,8 @@ def process_single_theorem(
     config = GoedelsPoetryConfig()
 
     if formal_theorem:
+        # Normalize escape sequences (e.g., convert literal \n to actual newline)
+        formal_theorem = normalize_escape_sequences(formal_theorem)
         if not _has_preamble(formal_theorem):
             console.print("[bold red]Error:[/bold red] Formal theorems must include a Lean header (imports/options).")
             raise typer.Exit(code=1)
