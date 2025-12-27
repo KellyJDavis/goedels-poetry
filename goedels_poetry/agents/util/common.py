@@ -86,6 +86,62 @@ _DECLARATION_MODIFIERS: tuple[str, ...] = (
 )
 
 
+def normalize_escape_sequences(content: str) -> str:
+    """
+    Convert literal escape sequences to their actual characters.
+
+    This function converts common escape sequences that appear as literal
+    two-character sequences (e.g., \\n, \\t) in strings to their actual
+    character equivalents (newline, tab, etc.). This is necessary because
+    some input sources may contain escape sequences as literal text rather than
+    actual escape sequences.
+
+    The function handles escaped backslashes (\\\\ -> \\) correctly by
+    processing them appropriately to avoid double conversion.
+
+    Parameters
+    ----------
+    content: str
+        The content that may contain literal escape sequences
+
+    Returns
+    -------
+    str
+        The content with escape sequences converted to actual characters
+    """
+    # Use a character-based approach to handle escaped backslashes correctly
+    # Process character by character to distinguish \\n from \n
+    result = []
+    i = 0
+    while i < len(content):
+        if content[i] == "\\" and i + 1 < len(content):
+            next_char = content[i + 1]
+            if next_char == "\\":
+                # Escaped backslash: preserve as single backslash
+                result.append("\\")
+                i += 2
+            elif next_char == "n":
+                # Literal \n: convert to actual newline
+                result.append("\n")
+                i += 2
+            elif next_char == "t":
+                # Literal \t: convert to actual tab
+                result.append("\t")
+                i += 2
+            elif next_char == "r":
+                # Literal \r: convert to actual carriage return
+                result.append("\r")
+                i += 2
+            else:
+                # Backslash followed by something else: keep as-is
+                result.append(content[i])
+                i += 1
+        else:
+            result.append(content[i])
+            i += 1
+    return "".join(result)
+
+
 def _normalize_block(block: str) -> str:
     """Normalize a multi-line string for comparison."""
     if not block:
