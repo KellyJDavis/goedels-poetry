@@ -1,0 +1,4 @@
+/* Custom CSS to make code font size smaller in h2 headings */
+.md-typeset h2 code {
+  font-size: 0.6em;
+}
