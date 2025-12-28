@@ -673,7 +673,7 @@ wheels = [
 
 [[package]]
 name = "goedels-poetry"
-version = "1.2.3"
+version = "1.2.4"
 source = { editable = "." }
 dependencies = [
     { name = "jinja2" },

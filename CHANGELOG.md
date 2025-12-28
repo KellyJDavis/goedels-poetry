@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.4] - 2025-12-29
+
+### Fixed
+- Fixed sorry type lookup to check target then enclosed context instead of just local context
+- Replaced substring matching with exact key matching when identifying target-specific sorries to prevent false positives.
+
 ## [1.2.3] - 2025-12-29
 
 ### Fixed
@@ -366,6 +372,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Typer for CLI
 - Rich for beautiful terminal output
 
+[1.2.4]: https://github.com/KellyJDavis/goedels-poetry/releases/tag/v1.2.4
 [1.2.3]: https://github.com/KellyJDavis/goedels-poetry/releases/tag/v1.2.3
 [1.2.2]: https://github.com/KellyJDavis/goedels-poetry/releases/tag/v1.2.2
 [1.2.1]: https://github.com/KellyJDavis/goedels-poetry/releases/tag/v1.2.1
