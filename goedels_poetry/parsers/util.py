@@ -2485,29 +2485,42 @@ def _get_named_subgoal_rewritten_ast(  # noqa: C901
 
     # Find the corresponding sorry entry with goal context
     # Collect types from all sorries to get the most complete picture
+    # Single pass: collect types from all sorries, identifying target-specific sorry
     goal_var_types: dict[str, str] = {}
     if sorries:
-        # First pass: try to find a sorry that mentions the target name
-        target_sorry_types: dict[str, str] = {}
-        for sorry in sorries:
-            goal = sorry.get("goal", "")
-            if goal and lookup_name in goal:
-                target_sorry_types = __parse_goal_context(goal)
-                break
-
-        # Second pass: collect types from all sorries, with target-specific types taking precedence
         all_types: dict[str, str] = {}
+        target_sorry_types: dict[str, str] = {}
+        target_sorry_found = False
+
+        # Single pass through all sorries
         for sorry in sorries:
             goal = sorry.get("goal", "")
-            if goal:
-                parsed_types = __parse_goal_context(goal)
-                # Merge, but don't overwrite existing types
+            if not goal:
+                continue
+
+            parsed_types = __parse_goal_context(goal)
+
+            # Check if this sorry mentions the target name
+            # Use exact key matching in parsed_types instead of substring matching in goal
+            # This avoids false positives (e.g., "h1" matching "h10")
+            is_target_sorry = not target_sorry_found and lookup_name in parsed_types
+            if is_target_sorry:
+                target_sorry_types = parsed_types
+                target_sorry_found = True
+
+            # Merge types from this sorry into all_types (don't overwrite existing)
+            # Skip adding target-specific sorry types here - we'll merge them with priority later
+            if not is_target_sorry:
                 for name, typ in parsed_types.items():
                     if name not in all_types:
                         all_types[name] = typ
 
-        # Use target-specific types if available, otherwise use collected types
-        goal_var_types = target_sorry_types if target_sorry_types else all_types
+        # Merge target-specific types with all types, giving priority to target-specific types
+        # This ensures we have types from the target-specific sorry (most relevant) but also
+        # includes types from other sorries (e.g., set_with_hypothesis bindings from earlier sorries)
+        goal_var_types = all_types.copy()
+        # Overwrite with target-specific types to give them priority
+        goal_var_types.update(target_sorry_types)
 
     # Find enclosing theorem/lemma and extract its parameters/hypotheses
     enclosing_theorem = __find_enclosing_theorem(ast, lookup_name, anon_have_by_id)

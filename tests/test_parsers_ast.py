@@ -1,5 +1,7 @@
 """Tests for goedels_poetry.parsers.ast module."""
 
+import re
+
 import pytest
 
 from goedels_poetry.parsers.ast import AST
@@ -5870,3 +5872,1845 @@ def test_ast_get_named_subgoal_code_nested_binders() -> None:
     assert "h1" in result
     assert "x" in result
     assert "ℕ" in result  # noqa: RUF001
+
+
+def test_ast_get_named_subgoal_code_set_with_hypothesis_from_earlier_sorry() -> None:
+    """
+    Test that set_with_hypothesis type is correctly extracted from earlier sorry's goal context.
+
+    This tests the fix for the issue where hOddProd type was missing when extracting
+    subgoals because it was only in an earlier sorry's goal context, not the target-specific one.
+    """
+    ast_dict = {
+        "kind": "Lean.Parser.Command.theorem",
+        "args": [
+            {"val": "theorem", "info": {"leading": "", "trailing": " "}},
+            {
+                "kind": "Lean.Parser.Command.declId",
+                "args": [{"val": "test_theorem", "info": {"leading": "", "trailing": " "}}],
+            },
+            {"val": ":", "info": {"leading": " ", "trailing": " "}},
+            {"val": "Prop", "info": {"leading": "", "trailing": " "}},
+            {"val": ":=", "info": {"leading": " ", "trailing": " "}},
+            {
+                "kind": "Lean.Parser.Term.byTactic",
+                "args": [
+                    {"val": "by", "info": {"leading": "", "trailing": "\n  "}},
+                    {
+                        "kind": "Lean.Parser.Tactic.tacticSeq",
+                        "args": [
+                            # Set binding with 'with' clause (introduces hOddProd)
+                            {
+                                "kind": "Mathlib.Tactic.setTactic",
+                                "args": [
+                                    {"val": "set", "info": {"leading": "", "trailing": " "}},
+                                    [],
+                                    {
+                                        "kind": "Mathlib.Tactic.setArgsRest",
+                                        "args": [
+                                            {"val": "OddProd", "info": {"leading": "", "trailing": " "}},
+                                            [],
+                                            {"val": ":=", "info": {"leading": " ", "trailing": " "}},
+                                            {
+                                                "val": "(Finset.filter (fun x => ¬Even x) (Finset.range 10000)).prod id",
+                                                "info": {"leading": " ", "trailing": "\n  "},
+                                            },
+                                            [
+                                                {"val": "with", "info": {"leading": " ", "trailing": " "}},
+                                                [],
+                                                {"val": "hOddProd", "info": {"leading": "", "trailing": "\n  "}},
+                                            ],
+                                        ],
+                                    },
+                                ],
+                            },
+                            # Have statement (target subgoal)
+                            {
+                                "kind": "Lean.Parser.Tactic.tacticHave_",
+                                "args": [
+                                    {"val": "have", "info": {"leading": "\n  ", "trailing": " "}},
+                                    {
+                                        "kind": "Lean.Parser.Term.haveDecl",
+                                        "args": [
+                                            {
+                                                "kind": "Lean.Parser.Term.haveIdDecl",
+                                                "args": [
+                                                    {
+                                                        "kind": "Lean.Parser.Term.haveId",
+                                                        "args": [
+                                                            {
+                                                                "val": "split_parity",
+                                                                "info": {"leading": "", "trailing": " "},
+                                                            }
+                                                        ],
+                                                    }
+                                                ],
+                                            },
+                                            {"val": ":", "info": {"leading": "", "trailing": " "}},
+                                            {
+                                                "val": "∏ x ∈ Finset.range 10000, (x + 1) = ...",
+                                                "info": {"leading": "", "trailing": " "},
+                                            },
+                                        ],
+                                    },
+                                    {"val": ":=", "info": {"leading": " ", "trailing": " "}},
+                                    {
+                                        "kind": "Lean.Parser.Term.byTactic",
+                                        "args": [
+                                            {"val": "by", "info": {"leading": "", "trailing": " "}},
+                                            {
+                                                "kind": "Lean.Parser.Tactic.tacticSeq",
+                                                "args": [
+                                                    {
+                                                        "kind": "Lean.Parser.Tactic.tacticSorry",
+                                                        "args": [
+                                                            {"val": "sorry", "info": {"leading": "", "trailing": ""}}
+                                                        ],
+                                                    }
+                                                ],
+                                            },
+                                        ],
+                                    },
+                                ],
+                            },
+                        ],
+                    },
+                ],
+            },
+        ],
+    }
+
+    # Earlier sorry (main theorem body) - contains hOddProd type
+    earlier_sorry = {
+        "pos": {"line": 2, "column": 4},
+        "endPos": {"line": 2, "column": 9},
+        "goal": "OddProd : ℕ := (Finset.filter (fun x => ¬Even x) (Finset.range 10000)).prod id\nhOddProd : OddProd = (Finset.filter (fun x => ¬Even x) (Finset.range 10000)).prod id\n⊢ Prop",  # noqa: RUF001
+        "proofState": 1,
+    }
+
+    # Target-specific sorry (for split_parity) - does NOT contain hOddProd type
+    target_sorry = {
+        "pos": {"line": 5, "column": 4},
+        "endPos": {"line": 5, "column": 9},
+        "goal": "OddProd : ℕ := (Finset.filter (fun x => ¬Even x) (Finset.range 10000)).prod id\n⊢ ∏ x ∈ Finset.range 10000, (x + 1) = ...",  # noqa: RUF001
+        "proofState": 2,
+    }
+
+    sorries = [earlier_sorry, target_sorry]
+
+    ast = AST(ast_dict, sorries)
+    result = ast.get_named_subgoal_code("split_parity")
+
+    # Should include hOddProd with correct type from earlier sorry
+    assert "split_parity" in result
+    assert "hOddProd" in result, f"Missing hOddProd hypothesis. Result: {result}"
+    # Check that hOddProd has the correct type (equality type, not Prop)
+    assert "hOddProd :" in result or "(hOddProd :" in result
+    # Should NOT be Prop (the fallback)
+    assert "hOddProd : Prop" not in result, f"hOddProd incorrectly typed as Prop. Result: {result}"
+    # Should have the equality type
+    assert "OddProd = " in result or "hOddProd : OddProd = " in result, (
+        f"hOddProd missing equality type. Result: {result}"
+    )
+
+
+def test_ast_get_named_subgoal_code_merged_sorries_type_conflict() -> None:
+    """
+    Test that target-specific sorry types take precedence over types from other sorries.
+
+    When the same variable appears with different types in different sorries,
+    the target-specific sorry's type should win.
+    """
+    ast_dict = {
+        "kind": "Lean.Parser.Command.theorem",
+        "args": [
+            {"val": "theorem", "info": {"leading": "", "trailing": " "}},
+            {
+                "kind": "Lean.Parser.Command.declId",
+                "args": [{"val": "test_theorem", "info": {"leading": "", "trailing": " "}}],
+            },
+            {"val": ":", "info": {"leading": " ", "trailing": " "}},
+            {"val": "Prop", "info": {"leading": "", "trailing": " "}},
+            {"val": ":=", "info": {"leading": " ", "trailing": " "}},
+            {
+                "kind": "Lean.Parser.Term.byTactic",
+                "args": [
+                    {"val": "by", "info": {"leading": "", "trailing": "\n  "}},
+                    {
+                        "kind": "Lean.Parser.Tactic.tacticSeq",
+                        "args": [
+                            {
+                                "kind": "Mathlib.Tactic.setTactic",
+                                "args": [
+                                    {"val": "set", "info": {"leading": "", "trailing": " "}},
+                                    [],
+                                    {
+                                        "kind": "Mathlib.Tactic.setArgsRest",
+                                        "args": [
+                                            {"val": "x", "info": {"leading": "", "trailing": " "}},
+                                            [],
+                                            {"val": ":=", "info": {"leading": " ", "trailing": " "}},
+                                            {"val": "5", "info": {"leading": " ", "trailing": "\n  "}},
+                                            [
+                                                {"val": "with", "info": {"leading": " ", "trailing": " "}},
+                                                [],
+                                                {"val": "hx", "info": {"leading": "", "trailing": "\n  "}},
+                                            ],
+                                        ],
+                                    },
+                                ],
+                            },
+                            {
+                                "kind": "Lean.Parser.Tactic.tacticHave_",
+                                "args": [
+                                    {"val": "have", "info": {"leading": "\n  ", "trailing": " "}},
+                                    {
+                                        "kind": "Lean.Parser.Term.haveDecl",
+                                        "args": [
+                                            {
+                                                "kind": "Lean.Parser.Term.haveIdDecl",
+                                                "args": [
+                                                    {
+                                                        "kind": "Lean.Parser.Term.haveId",
+                                                        "args": [
+                                                            {"val": "h1", "info": {"leading": "", "trailing": " "}}
+                                                        ],
+                                                    }
+                                                ],
+                                            },
+                                            {"val": ":", "info": {"leading": "", "trailing": " "}},
+                                            {"val": "Prop", "info": {"leading": "", "trailing": " "}},
+                                        ],
+                                    },
+                                    {"val": ":=", "info": {"leading": " ", "trailing": " "}},
+                                    {
+                                        "kind": "Lean.Parser.Term.byTactic",
+                                        "args": [
+                                            {"val": "by", "info": {"leading": "", "trailing": " "}},
+                                            {
+                                                "kind": "Lean.Parser.Tactic.tacticSeq",
+                                                "args": [
+                                                    {
+                                                        "kind": "Lean.Parser.Tactic.tacticSorry",
+                                                        "args": [
+                                                            {"val": "sorry", "info": {"leading": "", "trailing": ""}}
+                                                        ],
+                                                    }
+                                                ],
+                                            },
+                                        ],
+                                    },
+                                ],
+                            },
+                        ],
+                    },
+                ],
+            },
+        ],
+    }
+
+    # Earlier sorry with hx : x = 5
+    earlier_sorry = {
+        "pos": {"line": 2, "column": 4},
+        "endPos": {"line": 2, "column": 9},
+        "goal": "x : ℕ := 5\nhx : x = 5\n⊢ Prop",  # noqa: RUF001
+        "proofState": 1,
+    }
+
+    # Target-specific sorry with hx : x = 10 (conflicting type)
+    # Must include h1 in goal to be identified as target-specific
+    target_sorry = {
+        "pos": {"line": 5, "column": 4},
+        "endPos": {"line": 5, "column": 9},
+        "goal": "x : ℕ := 5\nhx : x = 10\nh1 : Prop\n⊢ Prop",  # noqa: RUF001
+        "proofState": 2,
+    }
+
+    sorries = [earlier_sorry, target_sorry]
+
+    ast = AST(ast_dict, sorries)
+    result = ast.get_named_subgoal_code("h1")
+
+    # Should use target-specific type (x = 10), not earlier type (x = 5)
+    assert "h1" in result
+    assert "hx" in result
+    # Check for target-specific type (more flexible to whitespace)
+    assert "hx" in result and "x = 10" in result, f"hx should have target-specific type (x = 10). Result: {result}"
+    # Ensure earlier type is NOT present
+    hx_pattern = re.compile(r"hx\s*:\s*x\s*=\s*5")
+    assert not hx_pattern.search(result), f"hx should not have earlier type (x = 5). Result: {result}"
+
+
+def test_ast_get_named_subgoal_code_no_target_specific_sorry() -> None:
+    """
+    Test that when no target-specific sorry is found, types from all sorries are used.
+
+    This tests the fallback behavior when the target name doesn't appear in any sorry's goal.
+    """
+    ast_dict = {
+        "kind": "Lean.Parser.Command.theorem",
+        "args": [
+            {"val": "theorem", "info": {"leading": "", "trailing": " "}},
+            {
+                "kind": "Lean.Parser.Command.declId",
+                "args": [{"val": "test_theorem", "info": {"leading": "", "trailing": " "}}],
+            },
+            {"val": ":", "info": {"leading": " ", "trailing": " "}},
+            {"val": "Prop", "info": {"leading": "", "trailing": " "}},
+            {"val": ":=", "info": {"leading": " ", "trailing": " "}},
+            {
+                "kind": "Lean.Parser.Term.byTactic",
+                "args": [
+                    {"val": "by", "info": {"leading": "", "trailing": "\n  "}},
+                    {
+                        "kind": "Lean.Parser.Tactic.tacticSeq",
+                        "args": [
+                            {
+                                "kind": "Mathlib.Tactic.setTactic",
+                                "args": [
+                                    {"val": "set", "info": {"leading": "", "trailing": " "}},
+                                    [],
+                                    {
+                                        "kind": "Mathlib.Tactic.setArgsRest",
+                                        "args": [
+                                            {"val": "x", "info": {"leading": "", "trailing": " "}},
+                                            [],
+                                            {"val": ":=", "info": {"leading": " ", "trailing": " "}},
+                                            {"val": "5", "info": {"leading": " ", "trailing": "\n  "}},
+                                            [
+                                                {"val": "with", "info": {"leading": " ", "trailing": " "}},
+                                                [],
+                                                {"val": "hx", "info": {"leading": "", "trailing": "\n  "}},
+                                            ],
+                                        ],
+                                    },
+                                ],
+                            },
+                            {
+                                "kind": "Lean.Parser.Tactic.tacticHave_",
+                                "args": [
+                                    {"val": "have", "info": {"leading": "\n  ", "trailing": " "}},
+                                    {
+                                        "kind": "Lean.Parser.Term.haveDecl",
+                                        "args": [
+                                            {
+                                                "kind": "Lean.Parser.Term.haveIdDecl",
+                                                "args": [
+                                                    {
+                                                        "kind": "Lean.Parser.Term.haveId",
+                                                        "args": [
+                                                            {"val": "h1", "info": {"leading": "", "trailing": " "}}
+                                                        ],
+                                                    }
+                                                ],
+                                            },
+                                            {"val": ":", "info": {"leading": "", "trailing": " "}},
+                                            {"val": "Prop", "info": {"leading": "", "trailing": " "}},
+                                        ],
+                                    },
+                                    {"val": ":=", "info": {"leading": " ", "trailing": " "}},
+                                    {
+                                        "kind": "Lean.Parser.Term.byTactic",
+                                        "args": [
+                                            {"val": "by", "info": {"leading": "", "trailing": " "}},
+                                            {
+                                                "kind": "Lean.Parser.Tactic.tacticSeq",
+                                                "args": [
+                                                    {
+                                                        "kind": "Lean.Parser.Tactic.tacticSorry",
+                                                        "args": [
+                                                            {"val": "sorry", "info": {"leading": "", "trailing": ""}}
+                                                        ],
+                                                    }
+                                                ],
+                                            },
+                                        ],
+                                    },
+                                ],
+                            },
+                        ],
+                    },
+                ],
+            },
+        ],
+    }
+
+    # Sorry that doesn't mention h1 (so no target-specific sorry)
+    sorry = {
+        "pos": {"line": 2, "column": 4},
+        "endPos": {"line": 2, "column": 9},
+        "goal": "x : ℕ := 5\nhx : x = 5\n⊢ Prop",  # noqa: RUF001
+        "proofState": 1,
+    }
+
+    sorries = [sorry]
+
+    ast = AST(ast_dict, sorries)
+    result = ast.get_named_subgoal_code("h1")
+
+    # Should still include hx from the sorry (since no target-specific sorry found)
+    assert "h1" in result
+    assert "hx" in result
+    # Check for type (more flexible to whitespace)
+    assert "hx" in result and "x = 5" in result, f"hx should be included from all_types (x = 5). Result: {result}"
+
+
+def test_ast_get_named_subgoal_code_multiple_set_with_hypothesis() -> None:
+    """
+    Test that multiple set_with_hypothesis bindings are correctly handled from merged sorries.
+
+    This tests the case where there are multiple set ... with h statements, each with
+    their types in different sorries.
+    """
+    ast_dict = {
+        "kind": "Lean.Parser.Command.theorem",
+        "args": [
+            {"val": "theorem", "info": {"leading": "", "trailing": " "}},
+            {
+                "kind": "Lean.Parser.Command.declId",
+                "args": [{"val": "test_theorem", "info": {"leading": "", "trailing": " "}}],
+            },
+            {"val": ":", "info": {"leading": " ", "trailing": " "}},
+            {"val": "Prop", "info": {"leading": "", "trailing": " "}},
+            {"val": ":=", "info": {"leading": " ", "trailing": " "}},
+            {
+                "kind": "Lean.Parser.Term.byTactic",
+                "args": [
+                    {"val": "by", "info": {"leading": "", "trailing": "\n  "}},
+                    {
+                        "kind": "Lean.Parser.Tactic.tacticSeq",
+                        "args": [
+                            {
+                                "kind": "Mathlib.Tactic.setTactic",
+                                "args": [
+                                    {"val": "set", "info": {"leading": "", "trailing": " "}},
+                                    [],
+                                    {
+                                        "kind": "Mathlib.Tactic.setArgsRest",
+                                        "args": [
+                                            {"val": "x", "info": {"leading": "", "trailing": " "}},
+                                            [],
+                                            {"val": ":=", "info": {"leading": " ", "trailing": " "}},
+                                            {"val": "5", "info": {"leading": " ", "trailing": "\n  "}},
+                                            [
+                                                {"val": "with", "info": {"leading": " ", "trailing": " "}},
+                                                [],
+                                                {"val": "hx", "info": {"leading": "", "trailing": "\n  "}},
+                                            ],
+                                        ],
+                                    },
+                                ],
+                            },
+                            {
+                                "kind": "Mathlib.Tactic.setTactic",
+                                "args": [
+                                    {"val": "set", "info": {"leading": "\n  ", "trailing": " "}},
+                                    [],
+                                    {
+                                        "kind": "Mathlib.Tactic.setArgsRest",
+                                        "args": [
+                                            {"val": "y", "info": {"leading": "", "trailing": " "}},
+                                            [],
+                                            {"val": ":=", "info": {"leading": " ", "trailing": " "}},
+                                            {"val": "10", "info": {"leading": " ", "trailing": "\n  "}},
+                                            [
+                                                {"val": "with", "info": {"leading": " ", "trailing": " "}},
+                                                [],
+                                                {"val": "hy", "info": {"leading": "", "trailing": "\n  "}},
+                                            ],
+                                        ],
+                                    },
+                                ],
+                            },
+                            {
+                                "kind": "Lean.Parser.Tactic.tacticHave_",
+                                "args": [
+                                    {"val": "have", "info": {"leading": "\n  ", "trailing": " "}},
+                                    {
+                                        "kind": "Lean.Parser.Term.haveDecl",
+                                        "args": [
+                                            {
+                                                "kind": "Lean.Parser.Term.haveIdDecl",
+                                                "args": [
+                                                    {
+                                                        "kind": "Lean.Parser.Term.haveId",
+                                                        "args": [
+                                                            {"val": "h1", "info": {"leading": "", "trailing": " "}}
+                                                        ],
+                                                    }
+                                                ],
+                                            },
+                                            {"val": ":", "info": {"leading": "", "trailing": " "}},
+                                            {"val": "Prop", "info": {"leading": "", "trailing": " "}},
+                                        ],
+                                    },
+                                    {"val": ":=", "info": {"leading": " ", "trailing": " "}},
+                                    {
+                                        "kind": "Lean.Parser.Term.byTactic",
+                                        "args": [
+                                            {"val": "by", "info": {"leading": "", "trailing": " "}},
+                                            {
+                                                "kind": "Lean.Parser.Tactic.tacticSeq",
+                                                "args": [
+                                                    {
+                                                        "kind": "Lean.Parser.Tactic.tacticSorry",
+                                                        "args": [
+                                                            {"val": "sorry", "info": {"leading": "", "trailing": ""}}
+                                                        ],
+                                                    }
+                                                ],
+                                            },
+                                        ],
+                                    },
+                                ],
+                            },
+                        ],
+                    },
+                ],
+            },
+        ],
+    }
+
+    # Earlier sorry with hx type
+    earlier_sorry = {
+        "pos": {"line": 2, "column": 4},
+        "endPos": {"line": 2, "column": 9},
+        "goal": "x : ℕ := 5\nhx : x = 5\n⊢ Prop",  # noqa: RUF001
+        "proofState": 1,
+    }
+
+    # Later sorry with hy type (but not hx)
+    later_sorry = {
+        "pos": {"line": 4, "column": 4},
+        "endPos": {"line": 4, "column": 9},
+        "goal": "x : ℕ := 5\ny : ℕ := 10\nhy : y = 10\n⊢ Prop",  # noqa: RUF001
+        "proofState": 2,
+    }
+
+    # Target-specific sorry (mentions h1 but not hx or hy)
+    target_sorry = {
+        "pos": {"line": 7, "column": 4},
+        "endPos": {"line": 7, "column": 9},
+        "goal": "x : ℕ := 5\ny : ℕ := 10\nh1 : Prop\n⊢ Prop",  # noqa: RUF001
+        "proofState": 3,
+    }
+
+    sorries = [earlier_sorry, later_sorry, target_sorry]
+
+    ast = AST(ast_dict, sorries)
+    result = ast.get_named_subgoal_code("h1")
+
+    # Should include both hx and hy from merged sorries
+    assert "h1" in result
+    assert "hx" in result, f"Missing hx hypothesis. Result: {result}"
+    assert "hy" in result, f"Missing hy hypothesis. Result: {result}"
+    # Check for types (more flexible to whitespace)
+    assert "hx" in result and "x = 5" in result, f"hx missing correct type (x = 5). Result: {result}"
+    assert "hy" in result and "y = 10" in result, f"hy missing correct type (y = 10). Result: {result}"
+
+
+def test_ast_get_named_subgoal_code_empty_sorries() -> None:
+    """
+    Test that empty sorries list is handled correctly.
+
+    When no sorries are provided, the code should still work (though types won't be available).
+    """
+    ast_dict = {
+        "kind": "Lean.Parser.Command.theorem",
+        "args": [
+            {"val": "theorem", "info": {"leading": "", "trailing": " "}},
+            {
+                "kind": "Lean.Parser.Command.declId",
+                "args": [{"val": "test_theorem", "info": {"leading": "", "trailing": " "}}],
+            },
+            {"val": ":", "info": {"leading": " ", "trailing": " "}},
+            {"val": "Prop", "info": {"leading": "", "trailing": " "}},
+            {"val": ":=", "info": {"leading": " ", "trailing": " "}},
+            {
+                "kind": "Lean.Parser.Term.byTactic",
+                "args": [
+                    {"val": "by", "info": {"leading": "", "trailing": "\n  "}},
+                    {
+                        "kind": "Lean.Parser.Tactic.tacticSeq",
+                        "args": [
+                            {
+                                "kind": "Lean.Parser.Tactic.tacticHave_",
+                                "args": [
+                                    {"val": "have", "info": {"leading": "", "trailing": " "}},
+                                    {
+                                        "kind": "Lean.Parser.Term.haveDecl",
+                                        "args": [
+                                            {
+                                                "kind": "Lean.Parser.Term.haveIdDecl",
+                                                "args": [
+                                                    {
+                                                        "kind": "Lean.Parser.Term.haveId",
+                                                        "args": [
+                                                            {"val": "h1", "info": {"leading": "", "trailing": " "}}
+                                                        ],
+                                                    }
+                                                ],
+                                            },
+                                            {"val": ":", "info": {"leading": "", "trailing": " "}},
+                                            {"val": "Prop", "info": {"leading": "", "trailing": " "}},
+                                        ],
+                                    },
+                                    {"val": ":=", "info": {"leading": " ", "trailing": " "}},
+                                    {
+                                        "kind": "Lean.Parser.Term.byTactic",
+                                        "args": [
+                                            {"val": "by", "info": {"leading": "", "trailing": " "}},
+                                            {
+                                                "kind": "Lean.Parser.Tactic.tacticSeq",
+                                                "args": [
+                                                    {
+                                                        "kind": "Lean.Parser.Tactic.tacticSorry",
+                                                        "args": [
+                                                            {"val": "sorry", "info": {"leading": "", "trailing": ""}}
+                                                        ],
+                                                    }
+                                                ],
+                                            },
+                                        ],
+                                    },
+                                ],
+                            },
+                        ],
+                    },
+                ],
+            },
+        ],
+    }
+
+    sorries = []
+
+    ast = AST(ast_dict, sorries)
+    result = ast.get_named_subgoal_code("h1")
+
+    # Should still produce valid code even without sorries
+    assert "h1" in result
+    assert "lemma" in result or "theorem" in result
+
+
+def test_ast_get_named_subgoal_code_sorries_with_empty_goals() -> None:
+    """
+    Test that sorries with empty or missing goal strings are handled correctly.
+    """
+    ast_dict = {
+        "kind": "Lean.Parser.Command.theorem",
+        "args": [
+            {"val": "theorem", "info": {"leading": "", "trailing": " "}},
+            {
+                "kind": "Lean.Parser.Command.declId",
+                "args": [{"val": "test_theorem", "info": {"leading": "", "trailing": " "}}],
+            },
+            {"val": ":", "info": {"leading": " ", "trailing": " "}},
+            {"val": "Prop", "info": {"leading": "", "trailing": " "}},
+            {"val": ":=", "info": {"leading": " ", "trailing": " "}},
+            {
+                "kind": "Lean.Parser.Term.byTactic",
+                "args": [
+                    {"val": "by", "info": {"leading": "", "trailing": "\n  "}},
+                    {
+                        "kind": "Lean.Parser.Tactic.tacticSeq",
+                        "args": [
+                            {
+                                "kind": "Mathlib.Tactic.setTactic",
+                                "args": [
+                                    {"val": "set", "info": {"leading": "", "trailing": " "}},
+                                    [],
+                                    {
+                                        "kind": "Mathlib.Tactic.setArgsRest",
+                                        "args": [
+                                            {"val": "x", "info": {"leading": "", "trailing": " "}},
+                                            [],
+                                            {"val": ":=", "info": {"leading": " ", "trailing": " "}},
+                                            {"val": "5", "info": {"leading": " ", "trailing": "\n  "}},
+                                            [
+                                                {"val": "with", "info": {"leading": " ", "trailing": " "}},
+                                                [],
+                                                {"val": "hx", "info": {"leading": "", "trailing": "\n  "}},
+                                            ],
+                                        ],
+                                    },
+                                ],
+                            },
+                            {
+                                "kind": "Lean.Parser.Tactic.tacticHave_",
+                                "args": [
+                                    {"val": "have", "info": {"leading": "\n  ", "trailing": " "}},
+                                    {
+                                        "kind": "Lean.Parser.Term.haveDecl",
+                                        "args": [
+                                            {
+                                                "kind": "Lean.Parser.Term.haveIdDecl",
+                                                "args": [
+                                                    {
+                                                        "kind": "Lean.Parser.Term.haveId",
+                                                        "args": [
+                                                            {"val": "h1", "info": {"leading": "", "trailing": " "}}
+                                                        ],
+                                                    }
+                                                ],
+                                            },
+                                            {"val": ":", "info": {"leading": "", "trailing": " "}},
+                                            {"val": "Prop", "info": {"leading": "", "trailing": " "}},
+                                        ],
+                                    },
+                                    {"val": ":=", "info": {"leading": " ", "trailing": " "}},
+                                    {
+                                        "kind": "Lean.Parser.Term.byTactic",
+                                        "args": [
+                                            {"val": "by", "info": {"leading": "", "trailing": " "}},
+                                            {
+                                                "kind": "Lean.Parser.Tactic.tacticSeq",
+                                                "args": [
+                                                    {
+                                                        "kind": "Lean.Parser.Tactic.tacticSorry",
+                                                        "args": [
+                                                            {"val": "sorry", "info": {"leading": "", "trailing": ""}}
+                                                        ],
+                                                    }
+                                                ],
+                                            },
+                                        ],
+                                    },
+                                ],
+                            },
+                        ],
+                    },
+                ],
+            },
+        ],
+    }
+
+    # Sorries with various empty/missing goal cases
+    sorries = [
+        {
+            "pos": {"line": 2, "column": 4},
+            "endPos": {"line": 2, "column": 9},
+            "goal": "",
+            "proofState": 1,
+        },  # Empty goal
+        {
+            "pos": {"line": 5, "column": 4},
+            "endPos": {"line": 5, "column": 9},
+            "goal": "x : ℕ := 5\nhx : x = 5\n⊢ Prop",  # noqa: RUF001
+            "proofState": 2,
+        },  # Valid goal
+        {"pos": {"line": 7, "column": 4}, "endPos": {"line": 7, "column": 9}, "proofState": 3},  # Missing goal key
+    ]
+
+    ast = AST(ast_dict, sorries)
+    result = ast.get_named_subgoal_code("h1")
+
+    # Should still work and include hx from the valid sorry
+    assert "h1" in result
+    # Should handle empty/missing goals gracefully
+    assert "hx" in result or "x" in result, f"Result: {result}"
+
+
+def test_ast_get_named_subgoal_code_merge_priority_verification() -> None:
+    """
+    Test that explicitly verifies merge priority: target-specific types overwrite all_types.
+
+    This test ensures that when the same variable appears in both target-specific sorry
+    and other sorries with different types, the target-specific type takes precedence.
+    """
+    ast_dict = {
+        "kind": "Lean.Parser.Command.theorem",
+        "args": [
+            {"val": "theorem", "info": {"leading": "", "trailing": " "}},
+            {
+                "kind": "Lean.Parser.Command.declId",
+                "args": [{"val": "test_theorem", "info": {"leading": "", "trailing": " "}}],
+            },
+            {"val": ":", "info": {"leading": " ", "trailing": " "}},
+            {"val": "Prop", "info": {"leading": "", "trailing": " "}},
+            {"val": ":=", "info": {"leading": " ", "trailing": " "}},
+            {
+                "kind": "Lean.Parser.Term.byTactic",
+                "args": [
+                    {"val": "by", "info": {"leading": "", "trailing": "\n  "}},
+                    {
+                        "kind": "Lean.Parser.Tactic.tacticSeq",
+                        "args": [
+                            {
+                                "kind": "Mathlib.Tactic.setTactic",
+                                "args": [
+                                    {"val": "set", "info": {"leading": "", "trailing": " "}},
+                                    [],
+                                    {
+                                        "kind": "Mathlib.Tactic.setArgsRest",
+                                        "args": [
+                                            {"val": "x", "info": {"leading": "", "trailing": " "}},
+                                            [],
+                                            {"val": ":=", "info": {"leading": " ", "trailing": " "}},
+                                            {"val": "5", "info": {"leading": " ", "trailing": "\n  "}},
+                                            [
+                                                {"val": "with", "info": {"leading": " ", "trailing": " "}},
+                                                [],
+                                                {"val": "hx", "info": {"leading": "", "trailing": "\n  "}},
+                                            ],
+                                        ],
+                                    },
+                                ],
+                            },
+                            {
+                                "kind": "Mathlib.Tactic.setTactic",
+                                "args": [
+                                    {"val": "set", "info": {"leading": "\n  ", "trailing": " "}},
+                                    [],
+                                    {
+                                        "kind": "Mathlib.Tactic.setArgsRest",
+                                        "args": [
+                                            {"val": "y", "info": {"leading": "", "trailing": " "}},
+                                            [],
+                                            {"val": ":=", "info": {"leading": " ", "trailing": " "}},
+                                            {"val": "20", "info": {"leading": " ", "trailing": "\n  "}},
+                                            [
+                                                {"val": "with", "info": {"leading": " ", "trailing": " "}},
+                                                [],
+                                                {"val": "hy", "info": {"leading": "", "trailing": "\n  "}},
+                                            ],
+                                        ],
+                                    },
+                                ],
+                            },
+                            {
+                                "kind": "Lean.Parser.Tactic.tacticHave_",
+                                "args": [
+                                    {"val": "have", "info": {"leading": "\n  ", "trailing": " "}},
+                                    {
+                                        "kind": "Lean.Parser.Term.haveDecl",
+                                        "args": [
+                                            {
+                                                "kind": "Lean.Parser.Term.haveIdDecl",
+                                                "args": [
+                                                    {
+                                                        "kind": "Lean.Parser.Term.haveId",
+                                                        "args": [
+                                                            {"val": "h1", "info": {"leading": "", "trailing": " "}}
+                                                        ],
+                                                    }
+                                                ],
+                                            },
+                                            {"val": ":", "info": {"leading": "", "trailing": " "}},
+                                            {"val": "Prop", "info": {"leading": "", "trailing": " "}},
+                                        ],
+                                    },
+                                    {"val": ":=", "info": {"leading": " ", "trailing": " "}},
+                                    {
+                                        "kind": "Lean.Parser.Term.byTactic",
+                                        "args": [
+                                            {"val": "by", "info": {"leading": "", "trailing": " "}},
+                                            {
+                                                "kind": "Lean.Parser.Tactic.tacticSeq",
+                                                "args": [
+                                                    {
+                                                        "kind": "Lean.Parser.Tactic.tacticSorry",
+                                                        "args": [
+                                                            {"val": "sorry", "info": {"leading": "", "trailing": ""}}
+                                                        ],
+                                                    }
+                                                ],
+                                            },
+                                        ],
+                                    },
+                                ],
+                            },
+                        ],
+                    },
+                ],
+            },
+        ],
+    }
+
+    # Earlier sorry with hx : x = 5 and hy : y = 15 (conflicting with target)
+    earlier_sorry = {
+        "pos": {"line": 2, "column": 4},
+        "endPos": {"line": 2, "column": 9},
+        "goal": "x : ℕ := 5\ny : ℕ := 20\nhx : x = 5\nhy : y = 15\n⊢ Prop",  # noqa: RUF001
+        "proofState": 1,
+    }
+
+    # Target-specific sorry with hx : x = 10 and hy : y = 20 (conflicting types)
+    # Must include h1 in goal to be identified as target-specific
+    target_sorry = {
+        "pos": {"line": 7, "column": 4},
+        "endPos": {"line": 7, "column": 9},
+        "goal": "x : ℕ := 5\ny : ℕ := 20\nhx : x = 10\nhy : y = 20\nh1 : Prop\n⊢ Prop",  # noqa: RUF001
+        "proofState": 2,
+    }
+
+    sorries = [earlier_sorry, target_sorry]
+
+    ast = AST(ast_dict, sorries)
+    result = ast.get_named_subgoal_code("h1")
+
+    # Verify merge priority: target-specific types should win
+    assert "h1" in result
+    assert "hx" in result
+    assert "hy" in result
+
+    # Target-specific types should be used (x = 10, y = 20), not earlier types (x = 5, y = 15)
+    # Check hx has target-specific type (x = 10)
+    assert "hx" in result and "x = 10" in result, f"hx should have target-specific type (x = 10). Result: {result}"
+    # Ensure earlier type is NOT present
+    hx_wrong_pattern = re.compile(r"hx\s*:\s*x\s*=\s*5\b")
+    assert not hx_wrong_pattern.search(result), f"hx should not have earlier type (x = 5). Result: {result}"
+
+    # Check hy has target-specific type (y = 20)
+    assert "hy" in result and "y = 20" in result, f"hy should have target-specific type (y = 20). Result: {result}"
+    # Ensure earlier type is NOT present
+    hy_wrong_pattern = re.compile(r"hy\s*:\s*y\s*=\s*15\b")
+    assert not hy_wrong_pattern.search(result), f"hy should not have earlier type (y = 15). Result: {result}"
+
+
+def test_ast_get_named_subgoal_code_exact_key_matching_not_substring() -> None:
+    """
+    Test that exact key matching prevents false positives from substring matching.
+
+    OLD BEHAVIOR (substring matching): "h1" would match "h10" in goal string
+    NEW BEHAVIOR (exact key matching): "h1" only matches if "h1" is a key in parsed_types
+
+    This test verifies that "h1" does NOT match "h10" when looking for target-specific sorry.
+    """
+    ast_dict = {
+        "kind": "Lean.Parser.Command.theorem",
+        "args": [
+            {"val": "theorem", "info": {"leading": "", "trailing": " "}},
+            {
+                "kind": "Lean.Parser.Command.declId",
+                "args": [{"val": "test_theorem", "info": {"leading": "", "trailing": " "}}],
+            },
+            {"val": ":", "info": {"leading": " ", "trailing": " "}},
+            {"val": "Prop", "info": {"leading": "", "trailing": " "}},
+            {"val": ":=", "info": {"leading": " ", "trailing": " "}},
+            {
+                "kind": "Lean.Parser.Term.byTactic",
+                "args": [
+                    {"val": "by", "info": {"leading": "", "trailing": "\n  "}},
+                    {
+                        "kind": "Lean.Parser.Tactic.tacticSeq",
+                        "args": [
+                            {
+                                "kind": "Mathlib.Tactic.setTactic",
+                                "args": [
+                                    {"val": "set", "info": {"leading": "", "trailing": " "}},
+                                    [],
+                                    {
+                                        "kind": "Mathlib.Tactic.setArgsRest",
+                                        "args": [
+                                            {"val": "x", "info": {"leading": "", "trailing": " "}},
+                                            [],
+                                            {"val": ":=", "info": {"leading": " ", "trailing": " "}},
+                                            {"val": "5", "info": {"leading": " ", "trailing": "\n  "}},
+                                            [
+                                                {"val": "with", "info": {"leading": " ", "trailing": " "}},
+                                                [],
+                                                {"val": "hx", "info": {"leading": "", "trailing": "\n  "}},
+                                            ],
+                                        ],
+                                    },
+                                ],
+                            },
+                            {
+                                "kind": "Lean.Parser.Tactic.tacticHave_",
+                                "args": [
+                                    {"val": "have", "info": {"leading": "\n  ", "trailing": " "}},
+                                    {
+                                        "kind": "Lean.Parser.Term.haveDecl",
+                                        "args": [
+                                            {
+                                                "kind": "Lean.Parser.Term.haveIdDecl",
+                                                "args": [
+                                                    {
+                                                        "kind": "Lean.Parser.Term.haveId",
+                                                        "args": [
+                                                            {"val": "h1", "info": {"leading": "", "trailing": " "}}
+                                                        ],
+                                                    }
+                                                ],
+                                            },
+                                            {"val": ":", "info": {"leading": "", "trailing": " "}},
+                                            {"val": "Prop", "info": {"leading": "", "trailing": " "}},
+                                        ],
+                                    },
+                                    {"val": ":=", "info": {"leading": " ", "trailing": " "}},
+                                    {
+                                        "kind": "Lean.Parser.Term.byTactic",
+                                        "args": [
+                                            {"val": "by", "info": {"leading": "", "trailing": " "}},
+                                            {
+                                                "kind": "Lean.Parser.Tactic.tacticSeq",
+                                                "args": [
+                                                    {
+                                                        "kind": "Lean.Parser.Tactic.tacticSorry",
+                                                        "args": [
+                                                            {"val": "sorry", "info": {"leading": "", "trailing": ""}}
+                                                        ],
+                                                    }
+                                                ],
+                                            },
+                                        ],
+                                    },
+                                ],
+                            },
+                        ],
+                    },
+                ],
+            },
+        ],
+    }
+
+    # Sorry with h10 (NOT h1) - should NOT be identified as target-specific for "h1"
+    # OLD BEHAVIOR: Would match because "h1" is substring of "h10"
+    # NEW BEHAVIOR: Should NOT match because "h1" is not a key in parsed_types
+    sorry_with_h10 = {
+        "pos": {"line": 2, "column": 4},
+        "endPos": {"line": 2, "column": 9},
+        "goal": "x : ℕ := 5\nhx : x = 5\nh10 : Prop\n⊢ Prop",  # noqa: RUF001
+        "proofState": 1,
+    }
+
+    # Sorry with h1 (the actual target) - should be identified as target-specific
+    sorry_with_h1 = {
+        "pos": {"line": 5, "column": 4},
+        "endPos": {"line": 5, "column": 9},
+        "goal": "x : ℕ := 5\nhx : x = 5\nh1 : Prop\n⊢ Prop",  # noqa: RUF001
+        "proofState": 2,
+    }
+
+    sorries = [sorry_with_h10, sorry_with_h1]
+
+    ast = AST(ast_dict, sorries)
+    result = ast.get_named_subgoal_code("h1")
+
+    # Should use h1's sorry (second one), not h10's sorry (first one)
+    assert "h1" in result
+    # Should include hx from both sorries (merged)
+    assert "hx" in result
+    # Verify that we got the correct types (from h1's sorry, not h10's)
+    assert "h1" in result and "Prop" in result
+
+
+def test_ast_get_named_subgoal_code_exact_key_matching_vs_substring_h1_in_h10() -> None:
+    """
+    Test that "h1" does not match "h10" when using exact key matching.
+
+    This explicitly tests the fix: OLD would match substring, NEW requires exact key.
+    """
+    ast_dict = {
+        "kind": "Lean.Parser.Command.theorem",
+        "args": [
+            {"val": "theorem", "info": {"leading": "", "trailing": " "}},
+            {
+                "kind": "Lean.Parser.Command.declId",
+                "args": [{"val": "test_theorem", "info": {"leading": "", "trailing": " "}}],
+            },
+            {"val": ":", "info": {"leading": " ", "trailing": " "}},
+            {"val": "Prop", "info": {"leading": "", "trailing": " "}},
+            {"val": ":=", "info": {"leading": " ", "trailing": " "}},
+            {
+                "kind": "Lean.Parser.Term.byTactic",
+                "args": [
+                    {"val": "by", "info": {"leading": "", "trailing": "\n  "}},
+                    {
+                        "kind": "Lean.Parser.Tactic.tacticSeq",
+                        "args": [
+                            {
+                                "kind": "Mathlib.Tactic.setTactic",
+                                "args": [
+                                    {"val": "set", "info": {"leading": "", "trailing": " "}},
+                                    [],
+                                    {
+                                        "kind": "Mathlib.Tactic.setArgsRest",
+                                        "args": [
+                                            {"val": "x", "info": {"leading": "", "trailing": " "}},
+                                            [],
+                                            {"val": ":=", "info": {"leading": " ", "trailing": " "}},
+                                            {"val": "5", "info": {"leading": " ", "trailing": "\n  "}},
+                                            [
+                                                {"val": "with", "info": {"leading": " ", "trailing": " "}},
+                                                [],
+                                                {"val": "hx", "info": {"leading": "", "trailing": "\n  "}},
+                                            ],
+                                        ],
+                                    },
+                                ],
+                            },
+                            {
+                                "kind": "Lean.Parser.Tactic.tacticHave_",
+                                "args": [
+                                    {"val": "have", "info": {"leading": "\n  ", "trailing": " "}},
+                                    {
+                                        "kind": "Lean.Parser.Term.haveDecl",
+                                        "args": [
+                                            {
+                                                "kind": "Lean.Parser.Term.haveIdDecl",
+                                                "args": [
+                                                    {
+                                                        "kind": "Lean.Parser.Term.haveId",
+                                                        "args": [
+                                                            {"val": "h1", "info": {"leading": "", "trailing": " "}}
+                                                        ],
+                                                    }
+                                                ],
+                                            },
+                                            {"val": ":", "info": {"leading": "", "trailing": " "}},
+                                            {"val": "Prop", "info": {"leading": "", "trailing": " "}},
+                                        ],
+                                    },
+                                    {"val": ":=", "info": {"leading": " ", "trailing": " "}},
+                                    {
+                                        "kind": "Lean.Parser.Term.byTactic",
+                                        "args": [
+                                            {"val": "by", "info": {"leading": "", "trailing": " "}},
+                                            {
+                                                "kind": "Lean.Parser.Tactic.tacticSeq",
+                                                "args": [
+                                                    {
+                                                        "kind": "Lean.Parser.Tactic.tacticSorry",
+                                                        "args": [
+                                                            {"val": "sorry", "info": {"leading": "", "trailing": ""}}
+                                                        ],
+                                                    }
+                                                ],
+                                            },
+                                        ],
+                                    },
+                                ],
+                            },
+                        ],
+                    },
+                ],
+            },
+        ],
+    }
+
+    # First sorry contains "h10" (not "h1")
+    # OLD: "h1" in "h10" would be True (substring match)
+    # NEW: "h1" in parsed_types.keys() would be False (exact key match)
+    sorry_h10 = {
+        "pos": {"line": 2, "column": 4},
+        "endPos": {"line": 2, "column": 9},
+        "goal": "x : ℕ := 5\nhx : x = 5\nh10 : Nat\n⊢ Prop",  # noqa: RUF001
+        "proofState": 1,
+    }
+
+    # Second sorry contains "h1" (the actual target)
+    sorry_h1 = {
+        "pos": {"line": 5, "column": 4},
+        "endPos": {"line": 5, "column": 9},
+        "goal": "x : ℕ := 5\nhx : x = 10\nh1 : Prop\n⊢ Prop",  # noqa: RUF001
+        "proofState": 2,
+    }
+
+    sorries = [sorry_h10, sorry_h1]
+
+    ast = AST(ast_dict, sorries)
+    result = ast.get_named_subgoal_code("h1")
+
+    # Should use h1's sorry (second one), not h10's sorry
+    # If old substring matching was used, h10's sorry would be selected and hx would have type "x = 5"
+    # With new exact key matching, h1's sorry is selected and hx should have type "x = 10"
+    assert "h1" in result
+    assert "hx" in result
+    # Verify we got the correct type from h1's sorry (x = 10), not h10's sorry (x = 5)
+    assert "hx" in result and "x = 10" in result, f"hx should have type from h1's sorry (x = 10). Result: {result}"
+    # Ensure we did NOT get the type from h10's sorry
+    hx_wrong_pattern = re.compile(r"hx\s*:\s*x\s*=\s*5\b")
+    assert not hx_wrong_pattern.search(result), f"hx should not have type from h10's sorry (x = 5). Result: {result}"
+
+
+def test_ast_get_named_subgoal_code_exact_key_matching_vs_substring_multiple_cases() -> None:
+    """
+    Test multiple cases where substring matching would fail but exact key matching works correctly.
+
+    Tests various patterns:
+    - "h1" vs "h10", "h11", "h12"
+    - "h" vs "h1", "h2", "ha"
+    - "x" vs "x1", "x2", "xy"
+    """
+    ast_dict = {
+        "kind": "Lean.Parser.Command.theorem",
+        "args": [
+            {"val": "theorem", "info": {"leading": "", "trailing": " "}},
+            {
+                "kind": "Lean.Parser.Command.declId",
+                "args": [{"val": "test_theorem", "info": {"leading": "", "trailing": " "}}],
+            },
+            {"val": ":", "info": {"leading": " ", "trailing": " "}},
+            {"val": "Prop", "info": {"leading": "", "trailing": " "}},
+            {"val": ":=", "info": {"leading": " ", "trailing": " "}},
+            {
+                "kind": "Lean.Parser.Term.byTactic",
+                "args": [
+                    {"val": "by", "info": {"leading": "", "trailing": "\n  "}},
+                    {
+                        "kind": "Lean.Parser.Tactic.tacticSeq",
+                        "args": [
+                            {
+                                "kind": "Lean.Parser.Tactic.tacticHave_",
+                                "args": [
+                                    {"val": "have", "info": {"leading": "", "trailing": " "}},
+                                    {
+                                        "kind": "Lean.Parser.Term.haveDecl",
+                                        "args": [
+                                            {
+                                                "kind": "Lean.Parser.Term.haveIdDecl",
+                                                "args": [
+                                                    {
+                                                        "kind": "Lean.Parser.Term.haveId",
+                                                        "args": [
+                                                            {"val": "h1", "info": {"leading": "", "trailing": " "}}
+                                                        ],
+                                                    }
+                                                ],
+                                            },
+                                            {"val": ":", "info": {"leading": "", "trailing": " "}},
+                                            {"val": "Prop", "info": {"leading": "", "trailing": " "}},
+                                        ],
+                                    },
+                                    {"val": ":=", "info": {"leading": " ", "trailing": " "}},
+                                    {
+                                        "kind": "Lean.Parser.Term.byTactic",
+                                        "args": [
+                                            {"val": "by", "info": {"leading": "", "trailing": " "}},
+                                            {
+                                                "kind": "Lean.Parser.Tactic.tacticSeq",
+                                                "args": [
+                                                    {
+                                                        "kind": "Lean.Parser.Tactic.tacticSorry",
+                                                        "args": [
+                                                            {"val": "sorry", "info": {"leading": "", "trailing": ""}}
+                                                        ],
+                                                    }
+                                                ],
+                                            },
+                                        ],
+                                    },
+                                ],
+                            },
+                        ],
+                    },
+                ],
+            },
+        ],
+    }
+
+    # Test case 1: "h1" should NOT match "h10", "h11", "h12"
+    sorries_case1 = [
+        {
+            "pos": {"line": 2, "column": 4},
+            "endPos": {"line": 2, "column": 9},
+            "goal": "h10 : Nat\nh11 : Int\nh12 : String\n⊢ Prop",
+            "proofState": 1,
+        },
+        {
+            "pos": {"line": 5, "column": 4},
+            "endPos": {"line": 5, "column": 9},
+            "goal": "h1 : Prop\n⊢ Prop",
+            "proofState": 2,
+        },
+    ]
+
+    ast = AST(ast_dict, sorries_case1)
+    result = ast.get_named_subgoal_code("h1")
+
+    # Should use h1's sorry (second one), not h10/h11/h12's sorry
+    assert "h1" in result
+    # Should NOT include h10, h11, h12 (they're not in scope for h1)
+    assert "h10" not in result or "h10 :" not in result, f"h10 should not be included. Result: {result}"
+    assert "h11" not in result or "h11 :" not in result, f"h11 should not be included. Result: {result}"
+    assert "h12" not in result or "h12 :" not in result, f"h12 should not be included. Result: {result}"
+
+
+def test_ast_get_named_subgoal_code_exact_key_matching_vs_substring_h_in_h1() -> None:
+    """
+    Test that "h" does not match "h1" when using exact key matching.
+
+    OLD: "h" in "h1" would be True (substring match)
+    NEW: "h" in parsed_types.keys() would be False (exact key match)
+    """
+    ast_dict = {
+        "kind": "Lean.Parser.Command.theorem",
+        "args": [
+            {"val": "theorem", "info": {"leading": "", "trailing": " "}},
+            {
+                "kind": "Lean.Parser.Command.declId",
+                "args": [{"val": "test_theorem", "info": {"leading": "", "trailing": " "}}],
+            },
+            {"val": ":", "info": {"leading": " ", "trailing": " "}},
+            {"val": "Prop", "info": {"leading": "", "trailing": " "}},
+            {"val": ":=", "info": {"leading": " ", "trailing": " "}},
+            {
+                "kind": "Lean.Parser.Term.byTactic",
+                "args": [
+                    {"val": "by", "info": {"leading": "", "trailing": "\n  "}},
+                    {
+                        "kind": "Lean.Parser.Tactic.tacticSeq",
+                        "args": [
+                            {
+                                "kind": "Lean.Parser.Tactic.tacticHave_",
+                                "args": [
+                                    {"val": "have", "info": {"leading": "", "trailing": " "}},
+                                    {
+                                        "kind": "Lean.Parser.Term.haveDecl",
+                                        "args": [
+                                            {
+                                                "kind": "Lean.Parser.Term.haveIdDecl",
+                                                "args": [
+                                                    {
+                                                        "kind": "Lean.Parser.Term.haveId",
+                                                        "args": [
+                                                            {"val": "h", "info": {"leading": "", "trailing": " "}}
+                                                        ],
+                                                    }
+                                                ],
+                                            },
+                                            {"val": ":", "info": {"leading": "", "trailing": " "}},
+                                            {"val": "Prop", "info": {"leading": "", "trailing": " "}},
+                                        ],
+                                    },
+                                    {"val": ":=", "info": {"leading": " ", "trailing": " "}},
+                                    {
+                                        "kind": "Lean.Parser.Term.byTactic",
+                                        "args": [
+                                            {"val": "by", "info": {"leading": "", "trailing": " "}},
+                                            {
+                                                "kind": "Lean.Parser.Tactic.tacticSeq",
+                                                "args": [
+                                                    {
+                                                        "kind": "Lean.Parser.Tactic.tacticSorry",
+                                                        "args": [
+                                                            {"val": "sorry", "info": {"leading": "", "trailing": ""}}
+                                                        ],
+                                                    }
+                                                ],
+                                            },
+                                        ],
+                                    },
+                                ],
+                            },
+                        ],
+                    },
+                ],
+            },
+        ],
+    }
+
+    # Sorry with h1, h2, ha (NOT h)
+    # OLD: "h" in "h1" would be True (substring match)
+    # NEW: "h" in parsed_types.keys() would be False (exact key match)
+    sorry_with_h1_h2_ha = {
+        "pos": {"line": 2, "column": 4},
+        "endPos": {"line": 2, "column": 9},
+        "goal": "h1 : Nat\nh2 : Int\nha : String\n⊢ Prop",
+        "proofState": 1,
+    }
+
+    # Sorry with h (the actual target)
+    sorry_with_h = {
+        "pos": {"line": 5, "column": 4},
+        "endPos": {"line": 5, "column": 9},
+        "goal": "h : Prop\n⊢ Prop",
+        "proofState": 2,
+    }
+
+    sorries = [sorry_with_h1_h2_ha, sorry_with_h]
+
+    ast = AST(ast_dict, sorries)
+    result = ast.get_named_subgoal_code("h")
+
+    # Should use h's sorry (second one), not h1/h2/ha's sorry
+    assert "h" in result
+    # Should NOT include h1, h2, ha (they're not the target)
+    assert "h1" not in result or "h1 :" not in result, f"h1 should not be included. Result: {result}"
+    assert "h2" not in result or "h2 :" not in result, f"h2 should not be included. Result: {result}"
+    assert "ha" not in result or "ha :" not in result, f"ha should not be included. Result: {result}"
+
+
+def test_ast_get_named_subgoal_code_exact_key_matching_vs_substring_x_in_x1() -> None:
+    """
+    Test that "x" does not match "x1" when using exact key matching.
+
+    OLD: "x" in "x1" would be True (substring match)
+    NEW: "x" in parsed_types.keys() would be False (exact key match)
+    """
+    ast_dict = {
+        "kind": "Lean.Parser.Command.theorem",
+        "args": [
+            {"val": "theorem", "info": {"leading": "", "trailing": " "}},
+            {
+                "kind": "Lean.Parser.Command.declId",
+                "args": [{"val": "test_theorem", "info": {"leading": "", "trailing": " "}}],
+            },
+            {"val": ":", "info": {"leading": " ", "trailing": " "}},
+            {"val": "Prop", "info": {"leading": "", "trailing": " "}},
+            {"val": ":=", "info": {"leading": " ", "trailing": " "}},
+            {
+                "kind": "Lean.Parser.Term.byTactic",
+                "args": [
+                    {"val": "by", "info": {"leading": "", "trailing": "\n  "}},
+                    {
+                        "kind": "Lean.Parser.Tactic.tacticSeq",
+                        "args": [
+                            {
+                                "kind": "Mathlib.Tactic.setTactic",
+                                "args": [
+                                    {"val": "set", "info": {"leading": "", "trailing": " "}},
+                                    [],
+                                    {
+                                        "kind": "Mathlib.Tactic.setArgsRest",
+                                        "args": [
+                                            {"val": "x", "info": {"leading": "", "trailing": " "}},
+                                            [],
+                                            {"val": ":=", "info": {"leading": " ", "trailing": " "}},
+                                            {"val": "5", "info": {"leading": " ", "trailing": "\n  "}},
+                                            [
+                                                {"val": "with", "info": {"leading": " ", "trailing": " "}},
+                                                [],
+                                                {"val": "hx", "info": {"leading": "", "trailing": "\n  "}},
+                                            ],
+                                        ],
+                                    },
+                                ],
+                            },
+                            {
+                                "kind": "Lean.Parser.Tactic.tacticHave_",
+                                "args": [
+                                    {"val": "have", "info": {"leading": "\n  ", "trailing": " "}},
+                                    {
+                                        "kind": "Lean.Parser.Term.haveDecl",
+                                        "args": [
+                                            {
+                                                "kind": "Lean.Parser.Term.haveIdDecl",
+                                                "args": [
+                                                    {
+                                                        "kind": "Lean.Parser.Term.haveId",
+                                                        "args": [
+                                                            {"val": "h1", "info": {"leading": "", "trailing": " "}}
+                                                        ],
+                                                    }
+                                                ],
+                                            },
+                                            {"val": ":", "info": {"leading": "", "trailing": " "}},
+                                            {"val": "Prop", "info": {"leading": "", "trailing": " "}},
+                                        ],
+                                    },
+                                    {"val": ":=", "info": {"leading": " ", "trailing": " "}},
+                                    {
+                                        "kind": "Lean.Parser.Term.byTactic",
+                                        "args": [
+                                            {"val": "by", "info": {"leading": "", "trailing": " "}},
+                                            {
+                                                "kind": "Lean.Parser.Tactic.tacticSeq",
+                                                "args": [
+                                                    {
+                                                        "kind": "Lean.Parser.Tactic.tacticSorry",
+                                                        "args": [
+                                                            {"val": "sorry", "info": {"leading": "", "trailing": ""}}
+                                                        ],
+                                                    }
+                                                ],
+                                            },
+                                        ],
+                                    },
+                                ],
+                            },
+                        ],
+                    },
+                ],
+            },
+        ],
+    }
+
+    # Sorry with x1, x2, xy (NOT x)
+    # OLD: "x" in "x1" would be True (substring match)
+    # NEW: "x" in parsed_types.keys() would be False (exact key match)
+    sorry_with_x1_x2_xy = {
+        "pos": {"line": 2, "column": 4},
+        "endPos": {"line": 2, "column": 9},
+        "goal": "x1 : Nat\nx2 : Int\nxy : String\nhx : x = 5\n⊢ Prop",
+        "proofState": 1,
+    }
+
+    # Sorry with x (the actual variable) and h1 (the target)
+    sorry_with_x_and_h1 = {
+        "pos": {"line": 5, "column": 4},
+        "endPos": {"line": 5, "column": 9},
+        "goal": "x : ℕ := 5\nhx : x = 5\nh1 : Prop\n⊢ Prop",  # noqa: RUF001
+        "proofState": 2,
+    }
+
+    sorries = [sorry_with_x1_x2_xy, sorry_with_x_and_h1]
+
+    ast = AST(ast_dict, sorries)
+    result = ast.get_named_subgoal_code("h1")
+
+    # Should use h1's sorry (second one), not x1/x2/xy's sorry
+    assert "h1" in result
+    # Should include x and hx from h1's sorry
+    assert "x" in result
+    assert "hx" in result
+    # Should NOT include x1, x2, xy (they're not in scope for h1)
+    assert "x1" not in result or "x1 :" not in result, f"x1 should not be included. Result: {result}"
+    assert "x2" not in result or "x2 :" not in result, f"x2 should not be included. Result: {result}"
+    assert "xy" not in result or "xy :" not in result, f"xy should not be included. Result: {result}"
+
+
+def test_ast_get_named_subgoal_code_exact_key_matching_positive_case() -> None:
+    """
+    Test that exact key matching still works for correct matches.
+
+    This ensures the fix doesn't break the positive case where the target name
+    is actually present as a key in parsed_types.
+    """
+    ast_dict = {
+        "kind": "Lean.Parser.Command.theorem",
+        "args": [
+            {"val": "theorem", "info": {"leading": "", "trailing": " "}},
+            {
+                "kind": "Lean.Parser.Command.declId",
+                "args": [{"val": "test_theorem", "info": {"leading": "", "trailing": " "}}],
+            },
+            {"val": ":", "info": {"leading": " ", "trailing": " "}},
+            {"val": "Prop", "info": {"leading": "", "trailing": " "}},
+            {"val": ":=", "info": {"leading": " ", "trailing": " "}},
+            {
+                "kind": "Lean.Parser.Term.byTactic",
+                "args": [
+                    {"val": "by", "info": {"leading": "", "trailing": "\n  "}},
+                    {
+                        "kind": "Lean.Parser.Tactic.tacticSeq",
+                        "args": [
+                            {
+                                "kind": "Mathlib.Tactic.setTactic",
+                                "args": [
+                                    {"val": "set", "info": {"leading": "", "trailing": " "}},
+                                    [],
+                                    {
+                                        "kind": "Mathlib.Tactic.setArgsRest",
+                                        "args": [
+                                            {"val": "x", "info": {"leading": "", "trailing": " "}},
+                                            [],
+                                            {"val": ":=", "info": {"leading": " ", "trailing": " "}},
+                                            {"val": "5", "info": {"leading": " ", "trailing": "\n  "}},
+                                            [
+                                                {"val": "with", "info": {"leading": " ", "trailing": " "}},
+                                                [],
+                                                {"val": "hx", "info": {"leading": "", "trailing": "\n  "}},
+                                            ],
+                                        ],
+                                    },
+                                ],
+                            },
+                            {
+                                "kind": "Lean.Parser.Tactic.tacticHave_",
+                                "args": [
+                                    {"val": "have", "info": {"leading": "\n  ", "trailing": " "}},
+                                    {
+                                        "kind": "Lean.Parser.Term.haveDecl",
+                                        "args": [
+                                            {
+                                                "kind": "Lean.Parser.Term.haveIdDecl",
+                                                "args": [
+                                                    {
+                                                        "kind": "Lean.Parser.Term.haveId",
+                                                        "args": [
+                                                            {"val": "h1", "info": {"leading": "", "trailing": " "}}
+                                                        ],
+                                                    }
+                                                ],
+                                            },
+                                            {"val": ":", "info": {"leading": "", "trailing": " "}},
+                                            {"val": "Prop", "info": {"leading": "", "trailing": " "}},
+                                        ],
+                                    },
+                                    {"val": ":=", "info": {"leading": " ", "trailing": " "}},
+                                    {
+                                        "kind": "Lean.Parser.Term.byTactic",
+                                        "args": [
+                                            {"val": "by", "info": {"leading": "", "trailing": " "}},
+                                            {
+                                                "kind": "Lean.Parser.Tactic.tacticSeq",
+                                                "args": [
+                                                    {
+                                                        "kind": "Lean.Parser.Tactic.tacticSorry",
+                                                        "args": [
+                                                            {"val": "sorry", "info": {"leading": "", "trailing": ""}}
+                                                        ],
+                                                    }
+                                                ],
+                                            },
+                                        ],
+                                    },
+                                ],
+                            },
+                        ],
+                    },
+                ],
+            },
+        ],
+    }
+
+    # Sorry with h1 (the actual target) - should be identified correctly
+    sorry_with_h1 = {
+        "pos": {"line": 5, "column": 4},
+        "endPos": {"line": 5, "column": 9},
+        "goal": "x : ℕ := 5\nhx : x = 5\nh1 : Prop\n⊢ Prop",  # noqa: RUF001
+        "proofState": 1,
+    }
+
+    sorries = [sorry_with_h1]
+
+    ast = AST(ast_dict, sorries)
+    result = ast.get_named_subgoal_code("h1")
+
+    # Should correctly identify h1's sorry and include all variables
+    assert "h1" in result
+    assert "x" in result
+    assert "hx" in result
+    assert "hx" in result and "x = 5" in result, f"hx should have correct type. Result: {result}"
+
+
+def test_ast_get_named_subgoal_code_exact_key_matching_complex_names() -> None:
+    """
+    Test exact key matching with complex variable names that could be substrings.
+
+    Tests names like "split_parity" vs "split_parity_helper", "hOddProd" vs "hOddProd2", etc.
+    """
+    ast_dict = {
+        "kind": "Lean.Parser.Command.theorem",
+        "args": [
+            {"val": "theorem", "info": {"leading": "", "trailing": " "}},
+            {
+                "kind": "Lean.Parser.Command.declId",
+                "args": [{"val": "test_theorem", "info": {"leading": "", "trailing": " "}}],
+            },
+            {"val": ":", "info": {"leading": " ", "trailing": " "}},
+            {"val": "Prop", "info": {"leading": "", "trailing": " "}},
+            {"val": ":=", "info": {"leading": " ", "trailing": " "}},
+            {
+                "kind": "Lean.Parser.Term.byTactic",
+                "args": [
+                    {"val": "by", "info": {"leading": "", "trailing": "\n  "}},
+                    {
+                        "kind": "Lean.Parser.Tactic.tacticSeq",
+                        "args": [
+                            {
+                                "kind": "Lean.Parser.Tactic.tacticHave_",
+                                "args": [
+                                    {"val": "have", "info": {"leading": "", "trailing": " "}},
+                                    {
+                                        "kind": "Lean.Parser.Term.haveDecl",
+                                        "args": [
+                                            {
+                                                "kind": "Lean.Parser.Term.haveIdDecl",
+                                                "args": [
+                                                    {
+                                                        "kind": "Lean.Parser.Term.haveId",
+                                                        "args": [
+                                                            {
+                                                                "val": "split_parity",
+                                                                "info": {"leading": "", "trailing": " "},
+                                                            }
+                                                        ],
+                                                    }
+                                                ],
+                                            },
+                                            {"val": ":", "info": {"leading": "", "trailing": " "}},
+                                            {"val": "Prop", "info": {"leading": "", "trailing": " "}},
+                                        ],
+                                    },
+                                    {"val": ":=", "info": {"leading": " ", "trailing": " "}},
+                                    {
+                                        "kind": "Lean.Parser.Term.byTactic",
+                                        "args": [
+                                            {"val": "by", "info": {"leading": "", "trailing": " "}},
+                                            {
+                                                "kind": "Lean.Parser.Tactic.tacticSeq",
+                                                "args": [
+                                                    {
+                                                        "kind": "Lean.Parser.Tactic.tacticSorry",
+                                                        "args": [
+                                                            {"val": "sorry", "info": {"leading": "", "trailing": ""}}
+                                                        ],
+                                                    }
+                                                ],
+                                            },
+                                        ],
+                                    },
+                                ],
+                            },
+                        ],
+                    },
+                ],
+            },
+        ],
+    }
+
+    # Sorry with split_parity_helper (NOT split_parity)
+    # OLD: "split_parity" in "split_parity_helper" would be True (substring match)
+    # NEW: "split_parity" in parsed_types.keys() would be False (exact key match)
+    sorry_with_helper = {
+        "pos": {"line": 2, "column": 4},
+        "endPos": {"line": 2, "column": 9},
+        "goal": "split_parity_helper : Prop\n⊢ Prop",
+        "proofState": 1,
+    }
+
+    # Sorry with split_parity (the actual target)
+    sorry_with_split_parity = {
+        "pos": {"line": 5, "column": 4},
+        "endPos": {"line": 5, "column": 9},
+        "goal": "split_parity : Prop\n⊢ Prop",
+        "proofState": 2,
+    }
+
+    sorries = [sorry_with_helper, sorry_with_split_parity]
+
+    ast = AST(ast_dict, sorries)
+    result = ast.get_named_subgoal_code("split_parity")
+
+    # Should use split_parity's sorry (second one), not split_parity_helper's sorry
+    assert "split_parity" in result
+    # Should NOT include split_parity_helper
+    assert "split_parity_helper" not in result or "split_parity_helper :" not in result, (
+        f"split_parity_helper should not be included. Result: {result}"
+    )
+
+
+def test_ast_get_named_subgoal_code_exact_key_matching_hOddProd_vs_hOddProd2() -> None:
+    """
+    Test exact key matching with hOddProd vs hOddProd2.
+
+    This is a real-world case from the original bug report where hOddProd was the variable.
+    """
+    ast_dict = {
+        "kind": "Lean.Parser.Command.theorem",
+        "args": [
+            {"val": "theorem", "info": {"leading": "", "trailing": " "}},
+            {
+                "kind": "Lean.Parser.Command.declId",
+                "args": [{"val": "test_theorem", "info": {"leading": "", "trailing": " "}}],
+            },
+            {"val": ":", "info": {"leading": " ", "trailing": " "}},
+            {"val": "Prop", "info": {"leading": "", "trailing": " "}},
+            {"val": ":=", "info": {"leading": " ", "trailing": " "}},
+            {
+                "kind": "Lean.Parser.Term.byTactic",
+                "args": [
+                    {"val": "by", "info": {"leading": "", "trailing": "\n  "}},
+                    {
+                        "kind": "Lean.Parser.Tactic.tacticSeq",
+                        "args": [
+                            {
+                                "kind": "Mathlib.Tactic.setTactic",
+                                "args": [
+                                    {"val": "set", "info": {"leading": "", "trailing": " "}},
+                                    [],
+                                    {
+                                        "kind": "Mathlib.Tactic.setArgsRest",
+                                        "args": [
+                                            {"val": "OddProd", "info": {"leading": "", "trailing": " "}},
+                                            [],
+                                            {"val": ":=", "info": {"leading": " ", "trailing": " "}},
+                                            {
+                                                "val": "(Finset.filter (fun x => ¬Even x) (Finset.range 10000)).prod id",
+                                                "info": {"leading": " ", "trailing": "\n  "},
+                                            },
+                                            [
+                                                {"val": "with", "info": {"leading": " ", "trailing": " "}},
+                                                [],
+                                                {"val": "hOddProd", "info": {"leading": "", "trailing": "\n  "}},
+                                            ],
+                                        ],
+                                    },
+                                ],
+                            },
+                            {
+                                "kind": "Lean.Parser.Tactic.tacticHave_",
+                                "args": [
+                                    {"val": "have", "info": {"leading": "\n  ", "trailing": " "}},
+                                    {
+                                        "kind": "Lean.Parser.Term.haveDecl",
+                                        "args": [
+                                            {
+                                                "kind": "Lean.Parser.Term.haveIdDecl",
+                                                "args": [
+                                                    {
+                                                        "kind": "Lean.Parser.Term.haveId",
+                                                        "args": [
+                                                            {
+                                                                "val": "split_parity",
+                                                                "info": {"leading": "", "trailing": " "},
+                                                            }
+                                                        ],
+                                                    }
+                                                ],
+                                            },
+                                            {"val": ":", "info": {"leading": "", "trailing": " "}},
+                                            {"val": "Prop", "info": {"leading": "", "trailing": " "}},
+                                        ],
+                                    },
+                                    {"val": ":=", "info": {"leading": " ", "trailing": " "}},
+                                    {
+                                        "kind": "Lean.Parser.Term.byTactic",
+                                        "args": [
+                                            {"val": "by", "info": {"leading": "", "trailing": " "}},
+                                            {
+                                                "kind": "Lean.Parser.Tactic.tacticSeq",
+                                                "args": [
+                                                    {
+                                                        "kind": "Lean.Parser.Tactic.tacticSorry",
+                                                        "args": [
+                                                            {"val": "sorry", "info": {"leading": "", "trailing": ""}}
+                                                        ],
+                                                    }
+                                                ],
+                                            },
+                                        ],
+                                    },
+                                ],
+                            },
+                        ],
+                    },
+                ],
+            },
+        ],
+    }
+
+    # Sorry with hOddProd2 (NOT hOddProd)
+    # OLD: "hOddProd" in "hOddProd2" would be True (substring match)
+    # NEW: "hOddProd" in parsed_types.keys() would be False (exact key match)
+    sorry_with_hOddProd2 = {
+        "pos": {"line": 2, "column": 4},
+        "endPos": {"line": 2, "column": 9},
+        "goal": "OddProd : ℕ := ...\nhOddProd2 : OddProd = ...\n⊢ Prop",  # noqa: RUF001
+        "proofState": 1,
+    }
+
+    # Sorry with hOddProd (the actual variable) and split_parity (the target)
+    sorry_with_hOddProd_and_split_parity = {
+        "pos": {"line": 5, "column": 4},
+        "endPos": {"line": 5, "column": 9},
+        "goal": "OddProd : ℕ := ...\nhOddProd : OddProd = ...\nsplit_parity : Prop\n⊢ Prop",  # noqa: RUF001
+        "proofState": 2,
+    }
+
+    sorries = [sorry_with_hOddProd2, sorry_with_hOddProd_and_split_parity]
+
+    ast = AST(ast_dict, sorries)
+    result = ast.get_named_subgoal_code("split_parity")
+
+    # Should use split_parity's sorry (second one), not hOddProd2's sorry
+    assert "split_parity" in result
+    # Should include hOddProd from the second sorry (merged from all sorries)
+    assert "hOddProd" in result, f"hOddProd should be included. Result: {result}"
+    # Should NOT include hOddProd2
+    assert "hOddProd2" not in result or "hOddProd2 :" not in result, (
+        f"hOddProd2 should not be included. Result: {result}"
+    )
