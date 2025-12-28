@@ -117,12 +117,12 @@ def process_single_theorem(
     if formal_theorem:
         # Normalize escape sequences (e.g., convert literal \n to actual newline)
         formal_theorem = normalize_escape_sequences(formal_theorem)
-        if not _has_preamble(formal_theorem):
-            console.print("[bold red]Error:[/bold red] Formal theorems must include a Lean header (imports/options).")
-            raise typer.Exit(code=1)
         initial_state = GoedelsPoetryState(formal_theorem=formal_theorem)
         console.print("[bold blue]Processing formal theorem...[/bold blue]")
     else:
+        # Normalize escape sequences (e.g., convert literal \n to actual newline)
+        # informal_theorem is guaranteed to be non-None by calling code (main function logic)
+        informal_theorem = normalize_escape_sequences(informal_theorem)  # type: ignore[arg-type]
         initial_state = GoedelsPoetryState(informal_theorem=informal_theorem)
         console.print("[bold blue]Processing informal theorem...[/bold blue]")
 
