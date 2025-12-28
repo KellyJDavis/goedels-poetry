@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.2] - 2025-12-28
+
+### Fixed
+- Fixed proof reset routing: when proofs reach `max_self_correction_attempts` and `pass_attempts < max_pass`, they are now correctly routed to the `proof_prove_queue` instead of the `proof_correct_queue`. This ensures reset proofs use the initial prompt (via prover agent) rather than the correction prompt, and eliminates misleading log messages showing "Round -1" and error "None".
+
+### Changed
+- Documentation styling: decreased h2 code font size to 0.6em in documentation stylesheets for improved readability.
+
+### Tests
+- Added comprehensive test suite (`test_proof_reset_routing.py`) with 5 tests verifying correct routing for reset proofs, correction proofs, max_pass proofs, successful proofs, and mixed scenarios.
+
 ## [1.2.1] - 2026-01-10
 
 ### Fixed
@@ -350,6 +361,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Typer for CLI
 - Rich for beautiful terminal output
 
+[1.2.2]: https://github.com/KellyJDavis/goedels-poetry/releases/tag/v1.2.2
 [1.2.1]: https://github.com/KellyJDavis/goedels-poetry/releases/tag/v1.2.1
 [1.2.0]: https://github.com/KellyJDavis/goedels-poetry/releases/tag/v1.2.0
 [1.1.6]: https://github.com/KellyJDavis/goedels-poetry/releases/tag/v1.1.6
