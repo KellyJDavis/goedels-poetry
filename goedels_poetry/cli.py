@@ -4,12 +4,18 @@ os.environ["TQDM_DISABLE"] = "1"
 
 import traceback
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 import typer
 from rich.console import Console
 
-from goedels_poetry.agents.util.common import normalize_escape_sequences, split_preamble_and_body
+from goedels_poetry.agents.state import DecomposedFormalTheoremState
+from goedels_poetry.agents.util.common import (
+    ensure_mandatory_preamble,
+    normalize_escape_sequences,
+    split_preamble_and_body,
+)
+from goedels_poetry.util.tree import TreeNode
 
 if TYPE_CHECKING:
     from goedels_poetry.state import GoedelsPoetryStateManager
@@ -98,6 +104,7 @@ def _write_proof_result(theorem_file: Path, state_manager: "GoedelsPoetryStateMa
 def process_single_theorem(
     formal_theorem: str | None = None,
     informal_theorem: str | None = None,
+    decompose_only: bool = False,
 ) -> None:
     """
     Process a single theorem (either formal or informal) and output proof to stdout.
@@ -123,6 +130,37 @@ def process_single_theorem(
     framework = GoedelsPoetryFramework(config, state_manager, console)
 
     try:
+        if formal_theorem and decompose_only:
+            preamble, body = split_preamble_and_body(formal_theorem)
+            preamble = ensure_mandatory_preamble(preamble)
+            decomposed_state = DecomposedFormalTheoremState(
+                parent=None,
+                children=[],
+                depth=0,
+                formal_theorem=body,
+                preamble=preamble,
+                proof_sketch=None,
+                syntactic=False,
+                errors=None,
+                ast=None,
+                self_correction_attempts=0,
+                decomposition_history=[],
+                search_queries=None,
+                search_results=None,
+                hole_name=None,
+                hole_start=None,
+                hole_end=None,
+            )
+            # Clear proof queues to avoid running prove pipeline
+            state_manager._state.proof_syntax_queue.clear()
+            state_manager._state.proof_prove_queue.clear()
+            state_manager._state.proof_validate_queue.clear()
+            state_manager._state.proof_correct_queue.clear()
+            state_manager._state.proof_ast_queue.clear()
+            # Seed decomposition queue
+            state_manager._state.formal_theorem_proof = cast(TreeNode, decomposed_state)
+            state_manager._state.decomposition_search_queue.append(decomposed_state)
+
         framework.run()
     except Exception as e:
         console.print(f"[bold red]Error during proof process:[/bold red] {e}")
@@ -133,6 +171,7 @@ def process_theorems_from_directory(
     directory: Path,
     file_extension: str,
     is_formal: bool,
+    decompose_only: bool = False,
 ) -> None:
     """
     Process all theorem files from a directory and write proofs to .proof files.
@@ -187,10 +226,44 @@ def process_theorems_from_directory(
             state_manager = GoedelsPoetryStateManager(initial_state)
             file_console = Console()
             framework = GoedelsPoetryFramework(config, state_manager, file_console)
+
+            if decompose_only and is_formal:
+                preamble, body = split_preamble_and_body(theorem_content)
+                preamble = ensure_mandatory_preamble(preamble)
+                decomposed_state = DecomposedFormalTheoremState(
+                    parent=None,
+                    children=[],
+                    depth=0,
+                    formal_theorem=body,
+                    preamble=preamble,
+                    proof_sketch=None,
+                    syntactic=False,
+                    errors=None,
+                    ast=None,
+                    self_correction_attempts=0,
+                    decomposition_history=[],
+                    search_queries=None,
+                    search_results=None,
+                    hole_name=None,
+                    hole_start=None,
+                    hole_end=None,
+                )
+                # Clear proof queues to avoid running prove pipeline
+                state_manager._state.proof_syntax_queue.clear()
+                state_manager._state.proof_prove_queue.clear()
+                state_manager._state.proof_validate_queue.clear()
+                state_manager._state.proof_correct_queue.clear()
+                state_manager._state.proof_ast_queue.clear()
+                # Seed decomposition queue
+                state_manager._state.formal_theorem_proof = cast(TreeNode, decomposed_state)
+                state_manager._state.decomposition_search_queue.append(decomposed_state)
+
             framework.run()
 
-            # Write proof result to appropriate file
-            _write_proof_result(theorem_file, state_manager, console)
+            # Skip writing proof files in decompose-only mode
+            if not decompose_only:
+                # Write proof result to appropriate file
+                _write_proof_result(theorem_file, state_manager, console)
 
         except Exception as e:
             _handle_processing_error(theorem_file, e)
@@ -200,12 +273,19 @@ def process_theorems_from_directory(
 
 
 @app.command()
-def main(
+def main(  # noqa: C901
     formal_theorem: str | None = typer.Option(
         None,
         "--formal-theorem",
         "-ft",
         help="A single formal theorem to prove (e.g., 'theorem example : 1 + 1 = 2 := by sorry')",
+    ),
+    decompose_formal_theorem: str | None = typer.Option(
+        None,
+        "--decompose-formal-theorem",
+        "-dtf",
+        help="(debug) A single formal theorem to decompose",
+        hidden=not bool(os.getenv("GOEDELS_POETRY_DEBUG")),
     ),
     informal_theorem: str | None = typer.Option(
         None,
@@ -219,6 +299,13 @@ def main(
         "-fts",
         help="Directory containing .lean files with formal theorems to prove",
     ),
+    decompose_formal_theorems: Path | None = typer.Option(
+        None,
+        "--decompose-formal-theorems",
+        "-dfts",
+        help="(debug) Directory containing .lean files with formal theorems to decompose",
+        hidden=not bool(os.getenv("GOEDELS_POETRY_DEBUG")),
+    ),
     informal_theorems: Path | None = typer.Option(
         None,
         "--informal-theorems",
@@ -231,11 +318,15 @@ def main(
 
     Provide exactly one of the four options to process theorems.
     """
+    debug = bool(os.getenv("GOEDELS_POETRY_DEBUG"))
+
     # Count how many options were provided
     options_provided = sum([
         formal_theorem is not None,
+        decompose_formal_theorem is not None if debug else False,
         informal_theorem is not None,
         formal_theorems is not None,
+        decompose_formal_theorems is not None if debug else False,
         informal_theorems is not None,
     ])
 
@@ -243,8 +334,12 @@ def main(
     if options_provided == 0:
         console.print("[bold red]Error:[/bold red] You must provide exactly one of the following options:")
         console.print("  --formal-theorem (-ft): A single formal theorem")
+        if debug:
+            console.print("  --decompose-formal-theorem (-dtf): A single formal theorem to decompose")
         console.print("  --informal-theorem (-ift): A single informal theorem")
         console.print("  --formal-theorems (-fts): Directory of formal theorems")
+        if debug:
+            console.print("  --decompose-formal-theorems (-dfts): Directory of formal theorems to decompose")
         console.print("  --informal-theorems (-ifts): Directory of informal theorems")
         raise typer.Exit(code=1)
 
@@ -253,7 +348,17 @@ def main(
         raise typer.Exit(code=1)
 
     # Process based on which option was provided
-    if formal_theorem:
+    if decompose_formal_theorem:
+        if not debug:
+            console.print("[bold red]Error:[/bold red] Decompose options are only available in debug mode.")
+            raise typer.Exit(code=1)
+        process_single_theorem(formal_theorem=decompose_formal_theorem, decompose_only=True)
+    elif decompose_formal_theorems:
+        if not debug:
+            console.print("[bold red]Error:[/bold red] Decompose options are only available in debug mode.")
+            raise typer.Exit(code=1)
+        process_theorems_from_directory(decompose_formal_theorems, ".lean", is_formal=True, decompose_only=True)
+    elif formal_theorem:
         process_single_theorem(formal_theorem=formal_theorem)
     elif informal_theorem:
         process_single_theorem(informal_theorem=informal_theorem)
