@@ -727,6 +727,10 @@ class GoedelsPoetryStateManager:
         validated FormalTheoremProofState. Each list item's proof is marked as being valid or
         invalid.
 
+        When a proof reaches max_self_correction_attempts and pass_attempts < max_pass,
+        it is reset and routed to the prover queue (not corrector queue) to start a fresh
+        proof attempt with the initial prompt.
+
         Parameters
         ---------
         validated_proofs: FormalTheoremProofStates
@@ -748,17 +752,18 @@ class GoedelsPoetryStateManager:
 
         proofs_too_difficult = []
         proofs_to_correct = []
+        proofs_to_restart = []  # Proofs that have been reset and should bypass corrector
 
         for up in unsuccessful_proofs:
-            # Note: We use >= because self_correction_attempts was incremented above (line 653)
+            # Note: We use >= because self_correction_attempts was incremented above
             # before this check. When attempts == max, we've exhausted the allowed attempts
             # (e.g., with max=2: 0->1 allows correction 1, 1->2 allows correction 2, 2->3 exhausts).
             if up["self_correction_attempts"] >= PROVER_AGENT_MAX_SELF_CORRECTION_ATTEMPTS:
                 up["pass_attempts"] += 1
                 if up["pass_attempts"] < PROVER_AGENT_MAX_PASS:
-                    # Restart self-correction loop: reset state, requeue for correction
+                    # Restart self-correction loop: reset state, requeue for fresh proof attempt
                     self._reset_self_correction_state(up)
-                    proofs_to_correct.append(up)
+                    proofs_to_restart.append(up)  # Route to prover, not corrector
                 else:
                     # Hit max_pass: queue for decomposition
                     proofs_too_difficult.append(up)
@@ -770,6 +775,8 @@ class GoedelsPoetryStateManager:
         self._queue_proofs_for_decomposition(proofs_too_difficult)
         # Queue proofs to correct for correction
         self._state.proof_correct_queue += proofs_to_correct
+        # Queue reset proofs for fresh proof attempt (bypass corrector)
+        self._state.proof_prove_queue += proofs_to_restart
 
         # Queue all successful proofs to have their ASTs generated
         successful_proofs = [vp for vp in validated_proofs_outputs if vp["proved"]]
@@ -778,6 +785,9 @@ class GoedelsPoetryStateManager:
     def _reset_self_correction_state(self, proof: FormalTheoremProofState) -> None:
         """
         Resets the self-correction state for a proof so that a new self-correction pass starts cleanly.
+
+        After resetting, the proof will be routed to the prover queue (not corrector queue)
+        to start a fresh proof attempt with the initial prompt.
         """
         proof["self_correction_attempts"] = 0
         proof["errors"] = None
