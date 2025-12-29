@@ -5555,3 +5555,268 @@ def test_handle_set_let_binding_all_fallbacks_fail() -> None:
     # Should not be handled
     assert not was_handled
     assert binder is None
+
+
+# ============================================================================
+# Tests for __construct_set_with_hypothesis_type (Commit 3)
+# ============================================================================
+
+
+def test_construct_set_with_hypothesis_type_basic() -> None:
+    """Test constructing type for basic set_with_hypothesis."""
+    from goedels_poetry.parsers.util import __construct_set_with_hypothesis_type
+
+    set_node = {
+        "kind": "Mathlib.Tactic.setTactic",
+        "args": [
+            {"val": "set"},
+            [],
+            {
+                "kind": "Mathlib.Tactic.setArgsRest",
+                "args": [
+                    {"val": "S"},
+                    [],
+                    {"val": ":="},
+                    {"val": "Finset.range 10000"},
+                    [
+                        {"val": "with"},
+                        [],
+                        {"val": "hS"},
+                    ],
+                ],
+            },
+        ],
+    }
+
+    result = __construct_set_with_hypothesis_type(set_node, "hS")
+    assert result is not None
+    assert result["kind"] == "__equality_expr"
+    assert len(result["args"]) >= 3
+    # Check that it contains variable name, "=", and value
+    assert result["args"][0]["val"] == "S"
+    assert result["args"][1]["val"] == "="
+
+
+def test_construct_set_with_hypothesis_type_complex_value() -> None:
+    """Test constructing type with complex value expression."""
+    from goedels_poetry.parsers.util import __construct_set_with_hypothesis_type
+
+    set_node = {
+        "kind": "Mathlib.Tactic.setTactic",
+        "args": [
+            {"val": "set"},
+            [],
+            {
+                "kind": "Mathlib.Tactic.setArgsRest",
+                "args": [
+                    {"val": "x"},
+                    [],
+                    {"val": ":="},
+                    {"val": "(Finset.filter (fun n => n > 0) (Finset.range 100)).prod id"},
+                    [
+                        {"val": "with"},
+                        [],
+                        {"val": "hx"},
+                    ],
+                ],
+            },
+        ],
+    }
+
+    result = __construct_set_with_hypothesis_type(set_node, "hx")
+    assert result is not None
+    assert result["kind"] == "__equality_expr"
+    assert result["args"][0]["val"] == "x"
+    assert result["args"][1]["val"] == "="
+
+
+def test_construct_set_with_hypothesis_type_no_with_clause() -> None:
+    """Test that function returns None when no 'with' clause is present."""
+    from goedels_poetry.parsers.util import __construct_set_with_hypothesis_type
+
+    set_node = {
+        "kind": "Mathlib.Tactic.setTactic",
+        "args": [
+            {"val": "set"},
+            [],
+            {
+                "kind": "Mathlib.Tactic.setArgsRest",
+                "args": [
+                    {"val": "S"},
+                    [],
+                    {"val": ":="},
+                    {"val": "Finset.range 10000"},
+                    # No 'with' clause
+                ],
+            },
+        ],
+    }
+
+    result = __construct_set_with_hypothesis_type(set_node, "hS")
+    assert result is None
+
+
+def test_construct_set_with_hypothesis_type_name_mismatch() -> None:
+    """Test that function returns None when hypothesis name doesn't match."""
+    from goedels_poetry.parsers.util import __construct_set_with_hypothesis_type
+
+    set_node = {
+        "kind": "Mathlib.Tactic.setTactic",
+        "args": [
+            {"val": "set"},
+            [],
+            {
+                "kind": "Mathlib.Tactic.setArgsRest",
+                "args": [
+                    {"val": "S"},
+                    [],
+                    {"val": ":="},
+                    {"val": "Finset.range 10000"},
+                    [
+                        {"val": "with"},
+                        [],
+                        {"val": "hS"},
+                    ],
+                ],
+            },
+        ],
+    }
+
+    # Request different hypothesis name
+    result = __construct_set_with_hypothesis_type(set_node, "hT")
+    assert result is None
+
+
+def test_construct_set_with_hypothesis_type_name_extraction_fails() -> None:
+    """Test that function returns None when variable name extraction fails."""
+    from goedels_poetry.parsers.util import __construct_set_with_hypothesis_type
+
+    # Set node without proper variable name structure
+    set_node = {
+        "kind": "Mathlib.Tactic.setTactic",
+        "args": [
+            {"val": "set"},
+            [],
+            {
+                "kind": "Mathlib.Tactic.setArgsRest",
+                "args": [
+                    # Missing variable name
+                    {"val": ":="},
+                    {"val": "Finset.range 10000"},
+                    [
+                        {"val": "with"},
+                        [],
+                        {"val": "hS"},
+                    ],
+                ],
+            },
+        ],
+    }
+
+    result = __construct_set_with_hypothesis_type(set_node, "hS")
+    assert result is None
+
+
+def test_construct_set_with_hypothesis_type_value_extraction_fails() -> None:
+    """Test that function returns None when value extraction fails."""
+    from goedels_poetry.parsers.util import __construct_set_with_hypothesis_type
+
+    # Set node without proper value structure
+    set_node = {
+        "kind": "Mathlib.Tactic.setTactic",
+        "args": [
+            {"val": "set"},
+            [],
+            {
+                "kind": "Mathlib.Tactic.setArgsRest",
+                "args": [
+                    {"val": "S"},
+                    [],
+                    # Missing := and value
+                    [
+                        {"val": "with"},
+                        [],
+                        {"val": "hS"},
+                    ],
+                ],
+            },
+        ],
+    }
+
+    result = __construct_set_with_hypothesis_type(set_node, "hS")
+    assert result is None
+
+
+def test_construct_set_with_hypothesis_type_lean_parser_structure() -> None:
+    """Test constructing type with Lean.Parser.Tactic structure."""
+    from goedels_poetry.parsers.util import __construct_set_with_hypothesis_type
+
+    set_node = {
+        "kind": "Lean.Parser.Tactic.tacticSet_",
+        "args": [
+            {"val": "set"},
+            {
+                "kind": "Lean.Parser.Term.setDecl",
+                "args": [
+                    {
+                        "kind": "Lean.Parser.Term.setIdDecl",
+                        "args": [{"val": "x"}],
+                    },
+                    {"val": ":="},
+                    {"val": "42"},
+                ],
+            },
+            {
+                "kind": "Lean.Parser.Tactic.setArgsRest",
+                "args": [
+                    [
+                        {"val": "with"},
+                        [],
+                        {"val": "hx"},
+                    ],
+                ],
+            },
+        ],
+    }
+
+    result = __construct_set_with_hypothesis_type(set_node, "hx")
+    assert result is not None
+    assert result["kind"] == "__equality_expr"
+    assert result["args"][0]["val"] == "x"
+    assert result["args"][1]["val"] == "="
+
+
+def test_construct_set_with_hypothesis_type_ast_serialization() -> None:
+    """Test that constructed AST can be serialized to code."""
+    from goedels_poetry.parsers.util import __construct_set_with_hypothesis_type, _ast_to_code
+
+    set_node = {
+        "kind": "Mathlib.Tactic.setTactic",
+        "args": [
+            {"val": "set"},
+            [],
+            {
+                "kind": "Mathlib.Tactic.setArgsRest",
+                "args": [
+                    {"val": "S"},
+                    [],
+                    {"val": ":="},
+                    {"val": "Finset.range 10000"},
+                    [
+                        {"val": "with"},
+                        [],
+                        {"val": "hS"},
+                    ],
+                ],
+            },
+        ],
+    }
+
+    result = __construct_set_with_hypothesis_type(set_node, "hS")
+    assert result is not None
+
+    # Serialize to code
+    code = _ast_to_code(result)
+    assert "S" in code
+    assert "=" in code
+    assert "Finset.range 10000" in code
