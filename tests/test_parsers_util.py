@@ -5221,3 +5221,337 @@ def test_extract_set_with_hypothesis_name_with_not_first_element() -> None:
     }
     result = __extract_set_with_hypothesis_name(set_node)
     assert result is None  # 'with' is not first, so not recognized
+
+
+# ============================================================================
+# Edge case tests for value extraction robustness (Commit 2)
+# ============================================================================
+
+
+def test_extract_let_value_missing_let_decl() -> None:
+    """Test extracting value when letDecl is missing."""
+    let_node = {
+        "kind": "Lean.Parser.Tactic.tacticLet_",
+        "args": [{"val": "let"}],  # No letDecl
+    }
+    result = __extract_let_value(let_node)
+    assert result is None
+
+
+def test_extract_let_value_no_let_id_decl() -> None:
+    """Test extracting value when no letIdDecl is found."""
+    let_node = {
+        "kind": "Lean.Parser.Tactic.tacticLet_",
+        "args": [
+            {"val": "let"},
+            {
+                "kind": "Lean.Parser.Term.letDecl",
+                "args": [{"val": "something_else"}],  # Not a letIdDecl
+            },
+        ],
+    }
+    result = __extract_let_value(let_node)
+    assert result is None
+
+
+def test_extract_let_value_no_assign_token() -> None:
+    """Test extracting value when := token is missing."""
+    let_node = {
+        "kind": "Lean.Parser.Tactic.tacticLet_",
+        "args": [
+            {"val": "let"},
+            {
+                "kind": "Lean.Parser.Term.letDecl",
+                "args": [
+                    {
+                        "kind": "Lean.Parser.Term.letIdDecl",
+                        "args": [
+                            {"val": "x"},
+                            [],
+                            [],
+                            # Missing := token
+                            {"val": "42"},
+                        ],
+                    }
+                ],
+            },
+        ],
+    }
+    result = __extract_let_value(let_node, binding_name="x")
+    assert result is None
+
+
+def test_extract_let_value_empty_value_tokens() -> None:
+    """Test extracting value when := is found but no value tokens after it."""
+    let_node = {
+        "kind": "Lean.Parser.Tactic.tacticLet_",
+        "args": [
+            {"val": "let"},
+            {
+                "kind": "Lean.Parser.Term.letDecl",
+                "args": [
+                    {
+                        "kind": "Lean.Parser.Term.letIdDecl",
+                        "args": [
+                            {"val": "x"},
+                            [],
+                            [],
+                            {"val": ":="},
+                            # No value after :=
+                        ],
+                    }
+                ],
+            },
+        ],
+    }
+    result = __extract_let_value(let_node, binding_name="x")
+    assert result is None
+
+
+def test_extract_let_value_assign_token_as_string() -> None:
+    """Test extracting value when := is a string token instead of dict."""
+    let_node = {
+        "kind": "Lean.Parser.Tactic.tacticLet_",
+        "args": [
+            {"val": "let"},
+            {
+                "kind": "Lean.Parser.Term.letDecl",
+                "args": [
+                    {
+                        "kind": "Lean.Parser.Term.letIdDecl",
+                        "args": [
+                            {"val": "x"},
+                            [],
+                            [],
+                            ":=",  # String instead of dict
+                            {"val": "42"},
+                        ],
+                    }
+                ],
+            },
+        ],
+    }
+    result = __extract_let_value(let_node, binding_name="x")
+    assert result is not None
+    assert result["args"][0]["val"] == "42"
+
+
+def test_extract_set_value_missing_set_decl() -> None:
+    """Test extracting value when setDecl is missing."""
+    set_node = {
+        "kind": "Lean.Parser.Tactic.tacticSet_",
+        "args": [{"val": "set"}],  # No setDecl
+    }
+    result = __extract_set_value(set_node)
+    assert result is None
+
+
+def test_extract_set_value_no_set_id_decl() -> None:
+    """Test extracting value when no setIdDecl is found."""
+    set_node = {
+        "kind": "Lean.Parser.Tactic.tacticSet_",
+        "args": [
+            {"val": "set"},
+            {
+                "kind": "Lean.Parser.Term.setDecl",
+                "args": [{"val": "something_else"}],  # Not a setIdDecl
+            },
+        ],
+    }
+    result = __extract_set_value(set_node)
+    assert result is None
+
+
+def test_extract_set_value_no_assign_token() -> None:
+    """Test extracting value when := token is missing."""
+    set_node = {
+        "kind": "Lean.Parser.Tactic.tacticSet_",
+        "args": [
+            {"val": "set"},
+            {
+                "kind": "Lean.Parser.Term.setDecl",
+                "args": [
+                    {
+                        "kind": "Lean.Parser.Term.setIdDecl",
+                        "args": [{"val": "x"}],
+                    },
+                    # Missing := token
+                    {"val": "42"},
+                ],
+            },
+        ],
+    }
+    result = __extract_set_value(set_node, binding_name="x")
+    assert result is None
+
+
+def test_extract_set_value_empty_value_tokens() -> None:
+    """Test extracting value when := is found but no value tokens after it."""
+    set_node = {
+        "kind": "Lean.Parser.Tactic.tacticSet_",
+        "args": [
+            {"val": "set"},
+            {
+                "kind": "Lean.Parser.Term.setDecl",
+                "args": [
+                    {
+                        "kind": "Lean.Parser.Term.setIdDecl",
+                        "args": [{"val": "x"}],
+                    },
+                    {"val": ":="},
+                    # No value after :=
+                ],
+            },
+        ],
+    }
+    result = __extract_set_value(set_node, binding_name="x")
+    assert result is None
+
+
+def test_extract_set_value_assign_token_as_string() -> None:
+    """Test extracting value when := is a string token instead of dict."""
+    set_node = {
+        "kind": "Lean.Parser.Tactic.tacticSet_",
+        "args": [
+            {"val": "set"},
+            {
+                "kind": "Lean.Parser.Term.setDecl",
+                "args": [
+                    {
+                        "kind": "Lean.Parser.Term.setIdDecl",
+                        "args": [{"val": "x"}],
+                    },
+                    ":=",  # String instead of dict
+                    {"val": "42"},
+                ],
+            },
+        ],
+    }
+    result = __extract_set_value(set_node, binding_name="x")
+    assert result is not None
+    assert result["args"][0]["val"] == "42"
+
+
+def test_handle_set_let_binding_fallback_to_type() -> None:
+    """Test that __handle_set_let_binding_as_equality falls back to type when value extraction fails."""
+    from goedels_poetry.parsers.util import __handle_set_let_binding_as_equality
+
+    # Create a let binding node where value extraction will fail (no := token)
+    let_node = {
+        "kind": "Lean.Parser.Tactic.tacticLet_",
+        "args": [
+            {"val": "let"},
+            {
+                "kind": "Lean.Parser.Term.letDecl",
+                "args": [
+                    {
+                        "kind": "Lean.Parser.Term.letIdDecl",
+                        "args": [
+                            {"val": "x"},
+                            [],
+                            [
+                                {
+                                    "kind": "Lean.Parser.Term.typeSpec",
+                                    "args": [{"val": ":"}, {"val": "ℕ"}],  # noqa: RUF001
+                                }
+                            ],
+                            # Missing := and value
+                        ],
+                    }
+                ],
+            },
+        ],
+    }
+
+    existing_names: set[str] = set()
+    variables_in_equality_hypotheses: set[str] = set()
+    goal_var_types: dict[str, str] = {}
+
+    # Should fall back to type extraction
+    binder, was_handled = __handle_set_let_binding_as_equality(
+        "x", "let", let_node, existing_names, variables_in_equality_hypotheses, goal_var_types=goal_var_types
+    )
+
+    # Should be handled (using type as fallback)
+    assert was_handled
+    assert binder is not None
+
+
+def test_handle_set_let_binding_fallback_to_goal_context() -> None:
+    """Test that __handle_set_let_binding_as_equality falls back to goal context when value and type extraction fail."""
+    from goedels_poetry.parsers.util import __handle_set_let_binding_as_equality
+
+    # Create a let binding node where both value and type extraction will fail
+    let_node = {
+        "kind": "Lean.Parser.Tactic.tacticLet_",
+        "args": [
+            {"val": "let"},
+            {
+                "kind": "Lean.Parser.Term.letDecl",
+                "args": [
+                    {
+                        "kind": "Lean.Parser.Term.letIdDecl",
+                        "args": [
+                            {"val": "x"},
+                            [],
+                            [],  # No type
+                            # Missing := and value
+                        ],
+                    }
+                ],
+            },
+        ],
+    }
+
+    existing_names: set[str] = set()
+    variables_in_equality_hypotheses: set[str] = set()
+    goal_var_types: dict[str, str] = {"x": "ℕ"}  # noqa: RUF001
+
+    # Should fall back to goal context
+    binder, was_handled = __handle_set_let_binding_as_equality(
+        "x", "let", let_node, existing_names, variables_in_equality_hypotheses, goal_var_types=goal_var_types
+    )
+
+    # Should be handled (using goal context as fallback)
+    assert was_handled
+    assert binder is not None
+
+
+def test_handle_set_let_binding_all_fallbacks_fail() -> None:
+    """Test that __handle_set_let_binding_as_equality returns failure when all fallbacks fail."""
+    from goedels_poetry.parsers.util import __handle_set_let_binding_as_equality
+
+    # Create a let binding node where all extraction will fail
+    let_node = {
+        "kind": "Lean.Parser.Tactic.tacticLet_",
+        "args": [
+            {"val": "let"},
+            {
+                "kind": "Lean.Parser.Term.letDecl",
+                "args": [
+                    {
+                        "kind": "Lean.Parser.Term.letIdDecl",
+                        "args": [
+                            {"val": "x"},
+                            [],
+                            [],  # No type
+                            # Missing := and value
+                        ],
+                    }
+                ],
+            },
+        ],
+    }
+
+    existing_names: set[str] = set()
+    variables_in_equality_hypotheses: set[str] = set()
+    goal_var_types: dict[str, str] = {}  # No goal context either
+
+    # All fallbacks should fail
+    binder, was_handled = __handle_set_let_binding_as_equality(
+        "x", "let", let_node, existing_names, variables_in_equality_hypotheses, goal_var_types=goal_var_types
+    )
+
+    # Should not be handled
+    assert not was_handled
+    assert binder is None
