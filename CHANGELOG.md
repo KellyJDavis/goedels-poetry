@@ -5,6 +5,24 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.5] - 2025-12-29
+
+### Fixed
+- Fixed type extraction for `set_with_hypothesis` bindings from earlier sorries: improved type collection from multiple sorries by merging types from all sorries and using exact key matching instead of substring matching to prevent false positives (e.g., "h1" matching "h10")
+- Fixed value extraction failures for `let` and `set` bindings: enhanced error detection, added comprehensive fallback strategies (AST extraction → type extraction → goal context types), and improved error messages with context about what went wrong
+- Fixed missing types for `set_with_hypothesis` bindings: now constructs equality types directly from the set statement AST when goal context is unavailable (e.g., for `set S := Finset.range 10000 with hS`, constructs type `S = Finset.range 10000`)
+- Fixed type determination warnings for general bindings (`have`, `obtain`, `choose`, `generalize`, `match`, `suffices`): reduced frequency of Prop fallbacks through improved type determination with binding-type-specific handling
+
+### Changed
+- Improved type determination for general bindings: refactored and consolidated type determination logic, removed redundant `goal_var_types` checks, and added binding-type-specific handling that matches the characteristics of each binding type
+- Enhanced goal context parsing: added support for assignment syntax (`name : type := value`) and improved handling of multiple variables with same type declaration
+- Improved fallback chain for `set_with_hypothesis` bindings: primary uses goal context types, fallback constructs type from AST, final fallback uses Prop only when all methods fail
+
+### Added
+- New helper function `__construct_set_with_hypothesis_type` for constructing equality type AST for `set_with_hypothesis` bindings when goal context is unavailable
+- New helper function `__determine_general_binding_type` for binding-type-specific type determination with appropriate fallback strategies
+- Comprehensive test coverage: added 14+ unit tests for type determination, 8 unit tests for `set_with_hypothesis` type construction, 15+ edge case tests for value extraction, and multiple integration tests verifying improvements work in full context
+
 ## [1.2.4] - 2025-12-29
 
 ### Fixed
@@ -372,6 +390,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Typer for CLI
 - Rich for beautiful terminal output
 
+[1.2.5]: https://github.com/KellyJDavis/goedels-poetry/releases/tag/v1.2.5
 [1.2.4]: https://github.com/KellyJDavis/goedels-poetry/releases/tag/v1.2.4
 [1.2.3]: https://github.com/KellyJDavis/goedels-poetry/releases/tag/v1.2.3
 [1.2.2]: https://github.com/KellyJDavis/goedels-poetry/releases/tag/v1.2.2
