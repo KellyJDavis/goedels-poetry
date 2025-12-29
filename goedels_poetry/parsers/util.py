@@ -1194,14 +1194,72 @@ def __make_equality_binder(hypothesis_name: str, var_name: str, value_ast: dict)
 # ---------------------------
 
 
-def __parse_goal_context(goal: str) -> dict[str, str]:
+def __parse_goal_context_line(line: str) -> dict[str, str] | None:
     """
+    Parse a single line from goal context to extract variable type declarations.
+
+    Parameters
+    ----------
+    line: str
+        A single line from the goal context (already stripped)
+
+    Returns
+    -------
+    Optional[dict[str, str]]
+        Dictionary mapping variable names to their types, or None if line doesn't contain a declaration
+    """
+    # Check if line contains a type declaration (has colon)
+    if ":" not in line:
+        return None
+
+    # Handle assignment syntax (name : type := value)
+    # Split at ":=" first if present, then extract type
+    if " := " in line:
+        # For assignments, we want the type part before ":="
+        # Format: "name : type := value"
+        # Split at ":=" to separate declaration from value
+        assign_parts = line.split(" := ", 1)
+        if len(assign_parts) == 2:
+            # Take the part before ":=" which contains "name : type"
+            line = assign_parts[0].strip()
+
+    # Split at the last colon to separate name(s) from type
+    # Using rsplit(":", 1) handles cases where type might contain colons
+    # (though this is rare in Lean goal context, it's defensive)
+    parts = line.rsplit(":", 1)
+    if len(parts) != 2:
+        return None
+
+    names_part = parts[0].strip()
+    type_part = parts[1].strip()
+
+    # Skip if no names or no type
+    if not names_part or not type_part:
+        return None
+
+    # Handle multiple variables with same type (e.g., "O A C B D : Complex")
+    # Filter out empty strings and whitespace-only strings
+    # Also filter out ":" tokens that might appear if parsing went wrong
+    names = [n.strip() for n in names_part.split() if n.strip() and n.strip() != ":"]
+
+    # Validate names are non-empty after filtering
+    if not names:
+        return None
+
+    # Return dictionary mapping names to type
+    return dict.fromkeys(names, type_part)
+
+
+def __parse_goal_context(goal: str) -> dict[str, str]:
+    r"""
     Parse the goal string to extract variable type declarations.
 
     Example goal string:
         "O A C B D : Complex
         hd₁ : ¬B = D
         hd₂ : ¬C = D
+        OddProd : Nat := (Finset.filter ...).prod id
+        hOddProd : OddProd = (Finset.filter ...).prod id
         ⊢ some_goal"
 
     Returns a dict mapping variable names to their types.
@@ -1210,6 +1268,8 @@ def __parse_goal_context(goal: str) -> dict[str, str]:
     - Uses rsplit(":", 1) to handle types that may contain colons (though rare in goal context)
     - Filters out empty and whitespace-only names
     - Validates that names are non-empty after processing
+    - Handles both type declarations (name : type) and assignments (name : type := value)
+    - For assignments, extracts the type part before ":="
     """
     var_types: dict[str, str] = {}
     if not isinstance(goal, str):
@@ -1227,36 +1287,10 @@ def __parse_goal_context(goal: str) -> dict[str, str]:
         if not line:
             continue
 
-        # Check if line contains a type declaration (has colon)
-        if ":" not in line:
-            continue
-
-        # Split at the last colon to separate name(s) from type
-        # Using rsplit(":", 1) handles cases where type might contain colons
-        # (though this is rare in Lean goal context, it's defensive)
-        parts = line.rsplit(":", 1)
-        if len(parts) != 2:
-            continue
-
-        names_part = parts[0].strip()
-        type_part = parts[1].strip()
-
-        # Skip if no names or no type
-        if not names_part or not type_part:
-            continue
-
-        # Handle multiple variables with same type (e.g., "O A C B D : Complex")
-        # Filter out empty strings and whitespace-only strings
-        names = [n.strip() for n in names_part.split() if n.strip()]
-
-        # Validate names are non-empty after filtering
-        if not names:
-            continue
-
-        # Add each valid name with its type
-        # Names are already validated (non-empty, non-whitespace) from the list comprehension above
-        for name in names:
-            var_types[name] = type_part
+        # Parse the line
+        line_types = __parse_goal_context_line(line)
+        if line_types:
+            var_types.update(line_types)
 
     return var_types
 
@@ -2486,6 +2520,16 @@ def _get_named_subgoal_rewritten_ast(  # noqa: C901
     # Find the corresponding sorry entry with goal context
     # Collect types from all sorries to get the most complete picture
     # Single pass: collect types from all sorries, identifying target-specific sorry
+    #
+    # Strategy:
+    # 1. Collect types from all non-target sorries into all_types (first occurrence wins)
+    # 2. Identify target-specific sorry (first sorry containing lookup_name as a key)
+    # 3. Merge: all_types (from non-target sorries) + target_sorry_types (with priority)
+    #
+    # This ensures:
+    # - Types from earlier sorries are available (e.g., set_with_hypothesis bindings)
+    # - Target-specific types take precedence when there are conflicts
+    # - All relevant type information is collected from the complete proof context
     goal_var_types: dict[str, str] = {}
     if sorries:
         all_types: dict[str, str] = {}
@@ -2510,6 +2554,7 @@ def _get_named_subgoal_rewritten_ast(  # noqa: C901
 
             # Merge types from this sorry into all_types (don't overwrite existing)
             # Skip adding target-specific sorry types here - we'll merge them with priority later
+            # This ensures types from earlier sorries (including set_with_hypothesis) are collected
             if not is_target_sorry:
                 for name, typ in parsed_types.items():
                     if name not in all_types:
