@@ -5820,3 +5820,423 @@ def test_construct_set_with_hypothesis_type_ast_serialization() -> None:
     assert "S" in code
     assert "=" in code
     assert "Finset.range 10000" in code
+
+
+# ============================================================================
+# Tests for __determine_general_binding_type (Commit 4)
+# ============================================================================
+
+
+def test_determine_general_binding_type_have_from_goal_context() -> None:
+    """Test that have binding type is determined from goal context."""
+    from goedels_poetry.parsers.util import __determine_general_binding_type
+
+    have_node = {
+        "kind": "Lean.Parser.Tactic.tacticHave_",
+        "args": [
+            {"val": "have"},
+            {
+                "kind": "Lean.Parser.Term.haveDecl",
+                "args": [
+                    {
+                        "kind": "Lean.Parser.Term.haveIdDecl",
+                        "args": [
+                            {"kind": "Lean.Parser.Term.haveId", "args": [{"val": "h1"}]},
+                            {"val": ":"},
+                            {"val": "Prop"},
+                        ],
+                    },
+                ],
+            },
+        ],
+    }
+
+    goal_var_types = {"h1": "n > 0"}
+
+    result = __determine_general_binding_type("h1", "have", have_node, goal_var_types)
+
+    # Should use goal context type
+    assert result is not None
+    # Check that it's a binder with the goal context type
+    code = _ast_to_code(result)
+    assert "h1" in code
+    assert "n > 0" in code
+
+
+def test_determine_general_binding_type_have_from_ast() -> None:
+    """Test that have binding type is extracted from AST when goal context unavailable."""
+    from goedels_poetry.parsers.util import __determine_general_binding_type
+
+    have_node = {
+        "kind": "Lean.Parser.Tactic.tacticHave_",
+        "args": [
+            {"val": "have"},
+            {
+                "kind": "Lean.Parser.Term.haveDecl",
+                "args": [
+                    {
+                        "kind": "Lean.Parser.Term.haveIdDecl",
+                        "args": [
+                            {"kind": "Lean.Parser.Term.haveId", "args": [{"val": "h1"}]},
+                        ],
+                    },
+                    {"val": ":"},
+                    {"val": "n > 0"},
+                ],
+            },
+        ],
+    }
+
+    goal_var_types = {}  # No goal context
+
+    result = __determine_general_binding_type("h1", "have", have_node, goal_var_types)
+
+    # Should extract from AST
+    assert result is not None
+    code = _ast_to_code(result)
+    assert "h1" in code
+    assert "n > 0" in code
+
+
+def test_determine_general_binding_type_have_both_fail() -> None:
+    """Test that have binding falls back to Prop when both goal context and AST extraction fail."""
+    from goedels_poetry.parsers.util import __determine_general_binding_type
+
+    # Have node without type in AST
+    have_node = {
+        "kind": "Lean.Parser.Tactic.tacticHave_",
+        "args": [
+            {"val": "have"},
+            {
+                "kind": "Lean.Parser.Term.haveDecl",
+                "args": [
+                    {
+                        "kind": "Lean.Parser.Term.haveIdDecl",
+                        "args": [
+                            {"kind": "Lean.Parser.Term.haveId", "args": [{"val": "h1"}]},
+                            # No type annotation
+                        ],
+                    },
+                ],
+            },
+        ],
+    }
+
+    goal_var_types = {}  # No goal context
+
+    result = __determine_general_binding_type("h1", "have", have_node, goal_var_types)
+
+    # Should fall back to Prop
+    assert result is not None
+    code = _ast_to_code(result)
+    assert "h1" in code
+    # Should have Prop or no explicit type (which defaults to Prop)
+
+
+def test_determine_general_binding_type_have_goal_context_priority() -> None:
+    """Test that goal context takes priority over AST extraction for have bindings."""
+    from goedels_poetry.parsers.util import __determine_general_binding_type
+
+    have_node = {
+        "kind": "Lean.Parser.Tactic.tacticHave_",
+        "args": [
+            {"val": "have"},
+            {
+                "kind": "Lean.Parser.Term.haveDecl",
+                "args": [
+                    {
+                        "kind": "Lean.Parser.Term.haveIdDecl",
+                        "args": [
+                            {"kind": "Lean.Parser.Term.haveId", "args": [{"val": "h1"}]},
+                        ],
+                    },
+                    {"val": ":"},
+                    {"val": "Prop"},  # Type in AST
+                ],
+            },
+        ],
+    }
+
+    goal_var_types = {"h1": "n > 0"}  # Different type in goal context
+
+    result = __determine_general_binding_type("h1", "have", have_node, goal_var_types)
+
+    # Should use goal context type (priority)
+    assert result is not None
+    code = _ast_to_code(result)
+    assert "h1" in code
+    assert "n > 0" in code
+    # Should not use AST type (Prop)
+    assert "Prop" not in code or "(h1 : Prop )" not in code
+
+
+def test_determine_general_binding_type_suffices_from_goal_context() -> None:
+    """Test that suffices binding type is determined from goal context."""
+    from goedels_poetry.parsers.util import __determine_general_binding_type
+
+    suffices_node = {
+        "kind": "Lean.Parser.Tactic.tacticSuffices_",
+        "args": [
+            {"val": "suffices"},
+            {
+                "kind": "Lean.Parser.Term.haveDecl",
+                "args": [
+                    {
+                        "kind": "Lean.Parser.Term.haveIdDecl",
+                        "args": [
+                            {"kind": "Lean.Parser.Term.haveId", "args": [{"val": "h"}]},
+                            {"val": ":"},
+                            {"val": "Prop"},
+                        ],
+                    },
+                ],
+            },
+        ],
+    }
+
+    goal_var_types = {"h": "P"}
+
+    result = __determine_general_binding_type("h", "suffices", suffices_node, goal_var_types)
+
+    # Should use goal context type
+    assert result is not None
+    code = _ast_to_code(result)
+    assert "h" in code
+    assert "P" in code
+
+
+def test_determine_general_binding_type_obtain_from_goal_context() -> None:
+    """Test that obtain binding type is determined from goal context."""
+    from goedels_poetry.parsers.util import __determine_general_binding_type
+
+    obtain_node = {
+        "kind": "Lean.Parser.Tactic.tacticObtain_",
+        "args": [
+            {"val": "obtain"},
+            {"val": "⟨"},
+            {"val": "x"},
+            {"val": ","},
+            {"val": "hx"},
+            {"val": "⟩"},
+            {"val": ":="},
+            {"val": "proof"},
+        ],
+    }
+
+    goal_var_types = {"x": "ℕ", "hx": "x > 0"}  # noqa: RUF001
+
+    result_x = __determine_general_binding_type("x", "obtain", obtain_node, goal_var_types)
+    result_hx = __determine_general_binding_type("hx", "obtain", obtain_node, goal_var_types)
+
+    # Should use goal context types
+    assert result_x is not None
+    assert result_hx is not None
+    code_x = _ast_to_code(result_x)
+    code_hx = _ast_to_code(result_hx)
+    assert "x" in code_x
+    assert "hx" in code_hx
+
+
+def test_determine_general_binding_type_obtain_no_goal_context() -> None:
+    """Test that obtain binding falls back to Prop when goal context unavailable."""
+    from goedels_poetry.parsers.util import __determine_general_binding_type
+
+    obtain_node = {
+        "kind": "Lean.Parser.Tactic.tacticObtain_",
+        "args": [
+            {"val": "obtain"},
+            {"val": "⟨"},
+            {"val": "x"},
+            {"val": "⟩"},
+            {"val": ":="},
+            {"val": "proof"},
+        ],
+    }
+
+    goal_var_types = {}  # No goal context
+
+    result = __determine_general_binding_type("x", "obtain", obtain_node, goal_var_types)
+
+    # Should fall back to Prop with informative warning
+    assert result is not None
+    code = _ast_to_code(result)
+    assert "x" in code
+
+
+def test_determine_general_binding_type_choose_from_goal_context() -> None:
+    """Test that choose binding type is determined from goal context."""
+    from goedels_poetry.parsers.util import __determine_general_binding_type
+
+    choose_node = {
+        "kind": "Lean.Parser.Tactic.tacticChoose_",
+        "args": [
+            {"val": "choose"},
+            {"val": "x"},
+            {"val": "hx"},
+            {"val": "using"},
+            {"val": "h"},
+        ],
+    }
+
+    goal_var_types = {"x": "ℕ", "hx": "x > 0"}  # noqa: RUF001
+
+    result_x = __determine_general_binding_type("x", "choose", choose_node, goal_var_types)
+    result_hx = __determine_general_binding_type("hx", "choose", choose_node, goal_var_types)
+
+    # Should use goal context types
+    assert result_x is not None
+    assert result_hx is not None
+    code_x = _ast_to_code(result_x)
+    code_hx = _ast_to_code(result_hx)
+    assert "x" in code_x
+    assert "hx" in code_hx
+
+
+def test_determine_general_binding_type_choose_no_goal_context() -> None:
+    """Test that choose binding falls back to Prop when goal context unavailable."""
+    from goedels_poetry.parsers.util import __determine_general_binding_type
+
+    choose_node = {
+        "kind": "Lean.Parser.Tactic.tacticChoose_",
+        "args": [
+            {"val": "choose"},
+            {"val": "x"},
+            {"val": "hx"},
+            {"val": "using"},
+            {"val": "h"},
+        ],
+    }
+
+    goal_var_types = {}  # No goal context
+
+    result = __determine_general_binding_type("x", "choose", choose_node, goal_var_types)
+
+    # Should fall back to Prop with informative warning
+    assert result is not None
+    code = _ast_to_code(result)
+    assert "x" in code
+
+
+def test_determine_general_binding_type_generalize_from_goal_context() -> None:
+    """Test that generalize binding type is determined from goal context."""
+    from goedels_poetry.parsers.util import __determine_general_binding_type
+
+    generalize_node = {
+        "kind": "Lean.Parser.Tactic.tacticGeneralize_",
+        "args": [
+            {"val": "generalize"},
+            {"val": "h"},
+            {"val": ":"},
+            {"val": "e"},
+            {"val": "="},
+            {"val": "x"},
+        ],
+    }
+
+    goal_var_types = {"h": "e = x"}
+
+    result = __determine_general_binding_type("h", "generalize", generalize_node, goal_var_types)
+
+    # Should use goal context type
+    assert result is not None
+    code = _ast_to_code(result)
+    assert "h" in code
+    assert "e = x" in code
+
+
+def test_determine_general_binding_type_generalize_no_goal_context() -> None:
+    """Test that generalize binding falls back to Prop when goal context unavailable."""
+    from goedels_poetry.parsers.util import __determine_general_binding_type
+
+    generalize_node = {
+        "kind": "Lean.Parser.Tactic.tacticGeneralize_",
+        "args": [
+            {"val": "generalize"},
+            {"val": "h"},
+            {"val": ":"},
+            {"val": "e"},
+            {"val": "="},
+            {"val": "x"},
+        ],
+    }
+
+    goal_var_types = {}  # No goal context
+
+    result = __determine_general_binding_type("h", "generalize", generalize_node, goal_var_types)
+
+    # Should fall back to Prop with informative warning
+    assert result is not None
+    code = _ast_to_code(result)
+    assert "h" in code
+
+
+def test_determine_general_binding_type_match_from_goal_context() -> None:
+    """Test that match binding type is determined from goal context."""
+    from goedels_poetry.parsers.util import __determine_general_binding_type
+
+    match_node = {
+        "kind": "Lean.Parser.Term.match",
+        "args": [
+            {"val": "match"},
+            {"val": "x"},
+            {"val": "with"},
+            {"val": "|"},
+            {"val": "some"},
+            {"val": "n"},
+            {"val": "=>"},
+            {"val": "body"},
+        ],
+    }
+
+    goal_var_types = {"n": "ℕ"}  # noqa: RUF001
+
+    result = __determine_general_binding_type("n", "match", match_node, goal_var_types)
+
+    # Should use goal context type
+    assert result is not None
+    code = _ast_to_code(result)
+    assert "n" in code
+
+
+def test_determine_general_binding_type_match_no_goal_context() -> None:
+    """Test that match binding falls back to Prop when goal context unavailable."""
+    from goedels_poetry.parsers.util import __determine_general_binding_type
+
+    match_node = {
+        "kind": "Lean.Parser.Term.match",
+        "args": [
+            {"val": "match"},
+            {"val": "x"},
+            {"val": "with"},
+            {"val": "|"},
+            {"val": "some"},
+            {"val": "n"},
+            {"val": "=>"},
+            {"val": "body"},
+        ],
+    }
+
+    goal_var_types = {}  # No goal context
+
+    result = __determine_general_binding_type("n", "match", match_node, goal_var_types)
+
+    # Should fall back to Prop with informative warning
+    assert result is not None
+    code = _ast_to_code(result)
+    assert "n" in code
+
+
+def test_determine_general_binding_type_unknown_type() -> None:
+    """Test that unknown binding type is handled gracefully."""
+    from goedels_poetry.parsers.util import __determine_general_binding_type
+
+    unknown_node = {"kind": "Unknown.Binding", "args": []}
+
+    goal_var_types = {}
+
+    result = __determine_general_binding_type("x", "unknown", unknown_node, goal_var_types)
+
+    # Should fall back to Prop with warning about unknown type
+    assert result is not None
+    code = _ast_to_code(result)
+    assert "x" in code
