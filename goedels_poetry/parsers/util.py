@@ -2238,6 +2238,82 @@ def __construct_set_with_hypothesis_type(set_node: dict, hypothesis_name: str) -
     return equality_type_ast
 
 
+def __determine_general_binding_type(
+    binding_name: str,
+    binding_type: str,
+    binding_node: dict,
+    goal_var_types: dict[str, str],
+) -> dict:
+    """
+    Determine the type for a general binding (have, obtain, choose, generalize, match, suffices).
+
+    Uses a fallback chain appropriate for each binding type:
+    - have/suffices: goal context → AST extraction → Prop
+    - obtain/choose/generalize/match: goal context → Prop (types not in AST)
+
+    Parameters
+    ----------
+    binding_name: str
+        The name of the binding
+    binding_type: str
+        The type of binding ("have", "obtain", "choose", "generalize", "match", "suffices")
+    binding_node: dict
+        The AST node for the binding
+    goal_var_types: dict[str, str]
+        Dictionary mapping variable names to their types from goal context
+
+    Returns
+    -------
+    dict
+        A binder AST node with the determined type, or Prop if all methods fail
+    """
+    # Binding types that have types in AST (can extract from AST)
+    ast_extractable_types = {"have", "suffices"}
+
+    # Binding types that rely solely on goal context (types inferred, not in AST)
+    goal_context_only_types = {"obtain", "choose", "generalize", "match"}
+
+    # Try goal context first (most accurate for all binding types)
+    if binding_name in goal_var_types:
+        logging.debug(
+            f"__determine_general_binding_type: Found type for {binding_type} '{binding_name}' in goal context"
+        )
+        return __make_binder_from_type_string(binding_name, goal_var_types[binding_name])
+
+    # For have and suffices, try AST extraction as fallback
+    if binding_type in ast_extractable_types:
+        logging.debug(
+            f"__determine_general_binding_type: Goal context unavailable for {binding_type} '{binding_name}', "
+            "trying AST extraction"
+        )
+        binding_type_ast = __extract_type_ast(binding_node, binding_name=binding_name)
+        if binding_type_ast is not None:
+            logging.debug(
+                f"__determine_general_binding_type: Successfully extracted type from AST for {binding_type} '{binding_name}'"
+            )
+            return __make_binder(binding_name, binding_type_ast)
+        else:
+            logging.warning(
+                f"Could not determine type for {binding_type} binding '{binding_name}': "
+                "goal context unavailable and AST extraction failed, using Prop"
+            )
+            return __make_binder(binding_name, None)
+
+    # For obtain, choose, generalize, match: types must come from goal context
+    if binding_type in goal_context_only_types:
+        logging.warning(
+            f"Could not determine type for {binding_type} binding '{binding_name}': "
+            "types are inferred and not in AST, goal context unavailable, using Prop"
+        )
+        return __make_binder(binding_name, None)
+
+    # Unknown binding type (shouldn't happen, but handle gracefully)
+    logging.warning(
+        f"Could not determine type for binding '{binding_name}' (unknown type '{binding_type}'): using Prop as fallback"
+    )
+    return __make_binder(binding_name, None)
+
+
 def __extract_let_value(let_node: dict, binding_name: str | None = None) -> dict | None:  # noqa: C901
     """
     Extract the value expression from a let binding node.
@@ -2943,26 +3019,8 @@ def _get_named_subgoal_rewritten_ast(  # noqa: C901
             binders.append(binder)
             existing_names.add(binding_name)
         else:
-            # For have, obtain, choose, generalize, match: use type annotations
-            # Extract the type/conclusion of the binding
-            if binding_name in goal_var_types:
-                # Prioritize goal context types as they're most accurate
-                binder = __make_binder_from_type_string(binding_name, goal_var_types[binding_name])
-            else:
-                # Try to extract type from AST
-                # Pass binding_name to ensure we extract from the correct binding if multiple exist
-                binding_type_ast = __extract_type_ast(binding_node, binding_name=binding_name)
-                if binding_type_ast is not None:
-                    binder = __make_binder(binding_name, binding_type_ast)
-                else:
-                    # For obtain or untyped bindings, we need goal context
-                    # If not available, try to infer or skip
-                    if binding_name in goal_var_types:
-                        binder = __make_binder_from_type_string(binding_name, goal_var_types[binding_name])
-                    else:
-                        # Last resort: use Prop as placeholder (better than nothing)
-                        logging.warning(f"Could not determine type for binding '{binding_name}', using Prop")
-                        binder = __make_binder(binding_name, None)
+            # For have, obtain, choose, generalize, match, suffices: use improved type determination
+            binder = __determine_general_binding_type(binding_name, binding_type, binding_node, goal_var_types)
             binders.append(binder)
             # Track the binding name in existing_names (it's already there, but this ensures consistency)
             existing_names.add(binding_name)
