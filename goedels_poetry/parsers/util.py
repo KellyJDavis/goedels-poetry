@@ -2112,6 +2112,132 @@ def __extract_set_with_hypothesis_name(set_node: dict) -> str | None:
     return None
 
 
+def __construct_set_with_hypothesis_type(set_node: dict, hypothesis_name: str) -> dict | None:  # noqa: C901
+    """
+    Construct the type AST for a set_with_hypothesis binding from the set statement.
+
+    For `set S := Finset.range 10000 with hS`, the hypothesis `hS` has type `S = Finset.range 10000`.
+    This function constructs that equality type from the set statement AST.
+
+    Parameters
+    ----------
+    set_node: dict
+        The set statement AST node
+    hypothesis_name: str
+        The hypothesis name from the `with` clause (e.g., "hS")
+
+    Returns
+    -------
+    Optional[dict]
+        The equality type AST (e.g., representing "S = Finset.range 10000"), or None if construction fails.
+
+    Notes
+    -----
+    The constructed type AST uses the `__equality_expr` kind, which serializes as "var_name = value".
+    This can be used directly as a type_ast in `__make_binder`.
+
+    This function handles two AST structures:
+    1. Mathlib.Tactic.setTactic with Mathlib.Tactic.setArgsRest (extracts directly from setArgsRest)
+    2. Lean.Parser.Tactic.tacticSet_ with Lean.Parser.Term.setDecl (uses __extract_set_name/__extract_set_value)
+    """
+    if not isinstance(set_node, dict):
+        logging.debug("__construct_set_with_hypothesis_type: set_node is not a dict")
+        return None
+
+    # Verify the set node has a 'with' clause matching the hypothesis name
+    extracted_hypothesis_name = __extract_set_with_hypothesis_name(set_node)
+    if not extracted_hypothesis_name or extracted_hypothesis_name != hypothesis_name:
+        logging.debug(
+            f"__construct_set_with_hypothesis_type: Hypothesis name mismatch or no 'with' clause. "
+            f"Expected: {hypothesis_name}, Got: {extracted_hypothesis_name}"
+        )
+        return None
+
+    var_name: str | None = None
+    value_args: list = []
+
+    # Check if this is a Mathlib.Tactic.setTactic structure (setArgsRest format)
+    set_args_rest = __find_first(
+        set_node,
+        lambda n: n.get("kind")
+        in {
+            "Mathlib.Tactic.setArgsRest",
+            "Lean.Parser.Tactic.setArgsRest",
+            "Lean.Parser.Term.setArgsRest",
+        },
+    )
+
+    if set_args_rest and isinstance(set_args_rest, dict):
+        # Handle Mathlib.Tactic.setTactic structure: setArgsRest.args = [var_name, [], ":=", value, ["with", [], h]]
+        sar_args = set_args_rest.get("args", [])
+        if len(sar_args) >= 4:
+            # Extract variable name (first arg)
+            var_name_node = sar_args[0]
+            if isinstance(var_name_node, dict) and var_name_node.get("val"):
+                var_name = var_name_node.get("val")
+            elif isinstance(var_name_node, str):
+                var_name = var_name_node
+
+            # Find ":=" token and extract value after it
+            assign_idx = None
+            for i, arg in enumerate(sar_args):
+                if (isinstance(arg, dict) and arg.get("val") == ":=") or (isinstance(arg, str) and arg == ":="):
+                    assign_idx = i
+                    break
+
+            if assign_idx is not None and assign_idx + 1 < len(sar_args):
+                # Extract value tokens, stopping at "with" clause
+                value_tokens = []
+                for i in range(assign_idx + 1, len(sar_args)):
+                    arg = sar_args[i]
+                    # Stop at "with" clause (list starting with "with")
+                    if (
+                        isinstance(arg, list)
+                        and len(arg) > 0
+                        and (
+                            (isinstance(arg[0], dict) and arg[0].get("val") == "with")
+                            or (isinstance(arg[0], str) and arg[0] == "with")
+                        )
+                    ):
+                        break
+                    value_tokens.append(arg)
+                if value_tokens:
+                    value_args = value_tokens
+
+    # If we didn't extract from setArgsRest, try using existing extraction functions
+    if not var_name or not value_args:
+        var_name = __extract_set_name(set_node)
+        value_ast = __extract_set_value(set_node)
+        if value_ast:
+            value_args = value_ast.get("args", []) if value_ast.get("kind") == "__value_container" else [value_ast]
+
+    if not var_name:
+        logging.debug(
+            f"__construct_set_with_hypothesis_type: Could not extract variable name from set statement "
+            f"for hypothesis '{hypothesis_name}'"
+        )
+        return None
+
+    if not value_args:
+        logging.debug(
+            f"__construct_set_with_hypothesis_type: Could not extract value from set statement "
+            f"for hypothesis '{hypothesis_name}' (variable: {var_name})"
+        )
+        return None
+
+    # Construct the equality type AST: var_name = value
+    # This uses the same structure as __equality_expr for consistency
+    var_node = {"val": var_name, "info": {"leading": "", "trailing": " "}}
+    eq_node = {"val": "=", "info": {"leading": " ", "trailing": " "}}
+
+    equality_type_ast = {
+        "kind": "__equality_expr",
+        "args": [var_node, eq_node, *value_args],
+    }
+
+    return equality_type_ast
+
+
 def __extract_let_value(let_node: dict, binding_name: str | None = None) -> dict | None:  # noqa: C901
     """
     Extract the value expression from a let binding node.
@@ -2797,19 +2923,22 @@ def _get_named_subgoal_rewritten_ast(  # noqa: C901
                 # Prioritize goal context types as they're most accurate
                 binder = __make_binder_from_type_string(binding_name, goal_var_types[binding_name])
             else:
-                # Try to extract type from AST (though set_with_hypothesis may not have explicit type in AST)
+                # Try to construct the type from the set statement AST
                 # The type should be something like "S = Finset.range 10000"
-                # We can try to construct it from the set statement, but goal context is more reliable
-                logging.warning(
+                # We construct it from: variable name + "=" + value expression
+                logging.debug(
                     f"Could not find type for set_with_hypothesis '{binding_name}' in goal context, "
-                    "trying to infer from AST"
+                    "trying to construct from AST"
                 )
-                binding_type_ast = __extract_type_ast(binding_node, binding_name=binding_name)
+                binding_type_ast = __construct_set_with_hypothesis_type(binding_node, binding_name)
                 if binding_type_ast is not None:
                     binder = __make_binder(binding_name, binding_type_ast)
                 else:
                     # Last resort: use Prop as placeholder
-                    logging.warning(f"Could not determine type for set_with_hypothesis '{binding_name}', using Prop")
+                    logging.warning(
+                        f"Could not determine type for set_with_hypothesis '{binding_name}': "
+                        "goal context unavailable and AST construction failed, using Prop"
+                    )
                     binder = __make_binder(binding_name, None)
             binders.append(binder)
             existing_names.add(binding_name)

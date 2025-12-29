@@ -8402,3 +8402,318 @@ def test_ast_get_named_subgoal_code_exact_key_matching_hOddProd_vs_hOddProd2() -
     assert "hOddProd2" not in result or "hOddProd2 :" not in result, (
         f"hOddProd2 should not be included. Result: {result}"
     )
+
+
+# ============================================================================
+# Integration tests for set_with_hypothesis type construction (Commit 3)
+# ============================================================================
+
+
+def test_ast_get_named_subgoal_set_with_hypothesis_constructed_type() -> None:
+    """
+    Test that set_with_hypothesis type is constructed from AST when goal context unavailable.
+    """
+    ast_dict = {
+        "kind": "Lean.Parser.Command.theorem",
+        "args": [
+            {"val": "theorem", "info": {"leading": "", "trailing": " "}},
+            {
+                "kind": "Lean.Parser.Command.declId",
+                "args": [{"val": "test_theorem", "info": {"leading": "", "trailing": " "}}],
+            },
+            {"val": ":", "info": {"leading": " ", "trailing": " "}},
+            {"val": "Prop", "info": {"leading": "", "trailing": " "}},
+            {"val": ":=", "info": {"leading": " ", "trailing": " "}},
+            {
+                "kind": "Lean.Parser.Term.byTactic",
+                "args": [
+                    {"val": "by", "info": {"leading": "", "trailing": "\n  "}},
+                    {
+                        "kind": "Lean.Parser.Tactic.tacticSeq",
+                        "args": [
+                            {
+                                "kind": "Mathlib.Tactic.setTactic",
+                                "args": [
+                                    {"val": "set", "info": {"leading": "", "trailing": " "}},
+                                    [],
+                                    {
+                                        "kind": "Mathlib.Tactic.setArgsRest",
+                                        "args": [
+                                            {"val": "S", "info": {"leading": "", "trailing": " "}},
+                                            [],
+                                            {"val": ":=", "info": {"leading": " ", "trailing": " "}},
+                                            {"val": "Finset.range 10000", "info": {"leading": " ", "trailing": "\n  "}},
+                                            [
+                                                {"val": "with", "info": {"leading": " ", "trailing": " "}},
+                                                [],
+                                                {"val": "hS", "info": {"leading": "", "trailing": "\n  "}},
+                                            ],
+                                        ],
+                                    },
+                                ],
+                            },
+                            {
+                                "kind": "Lean.Parser.Tactic.tacticHave_",
+                                "args": [
+                                    {"val": "have", "info": {"leading": "", "trailing": " "}},
+                                    {
+                                        "kind": "Lean.Parser.Term.haveDecl",
+                                        "args": [
+                                            {
+                                                "kind": "Lean.Parser.Term.haveIdDecl",
+                                                "args": [
+                                                    {
+                                                        "kind": "Lean.Parser.Term.haveId",
+                                                        "args": [
+                                                            {"val": "h1", "info": {"leading": "", "trailing": " "}}
+                                                        ],
+                                                    },
+                                                    {"val": ":", "info": {"leading": " ", "trailing": " "}},
+                                                    {"val": "Prop", "info": {"leading": "", "trailing": " "}},
+                                                ],
+                                            },
+                                            {"val": ":=", "info": {"leading": " ", "trailing": " "}},
+                                            {"val": "sorry", "info": {"leading": " ", "trailing": ""}},
+                                        ],
+                                    },
+                                ],
+                            },
+                        ],
+                    },
+                ],
+            },
+        ],
+    }
+
+    # Sorries without hS type in goal context (to force AST construction)
+    sorries = [
+        {
+            "pos": {"line": 5, "column": 4},
+            "endPos": {"line": 5, "column": 9},
+            "goal": "S : Finset ℕ := Finset.range 10000\n⊢ Prop",  # noqa: RUF001
+            "proofState": 1,
+        },
+        {
+            "pos": {"line": 6, "column": 4},
+            "endPos": {"line": 6, "column": 9},
+            "goal": "h1 : Prop\n⊢ Prop",
+            "proofState": 2,
+        },
+    ]
+
+    ast = AST(ast_dict, sorries)
+    result = ast.get_named_subgoal_code("h1")
+
+    # Should include hS with constructed type (S = Finset.range 10000)
+    assert "h1" in result
+    assert "hS" in result, f"Missing hS hypothesis. Result: {result}"
+    # Should have the equality type constructed from AST
+    assert "S" in result and "=" in result and "Finset.range 10000" in result, (
+        f"hS should have equality type constructed from AST. Result: {result}"
+    )
+    # Should NOT be Prop (the fallback)
+    assert "hS : Prop" not in result, f"hS incorrectly typed as Prop. Result: {result}"
+
+
+def test_ast_get_named_subgoal_set_with_hypothesis_goal_context_priority() -> None:
+    """
+    Test that goal context types take priority over constructed types.
+    """
+    ast_dict = {
+        "kind": "Lean.Parser.Command.theorem",
+        "args": [
+            {"val": "theorem", "info": {"leading": "", "trailing": " "}},
+            {
+                "kind": "Lean.Parser.Command.declId",
+                "args": [{"val": "test_theorem", "info": {"leading": "", "trailing": " "}}],
+            },
+            {"val": ":", "info": {"leading": " ", "trailing": " "}},
+            {"val": "Prop", "info": {"leading": "", "trailing": " "}},
+            {"val": ":=", "info": {"leading": " ", "trailing": " "}},
+            {
+                "kind": "Lean.Parser.Term.byTactic",
+                "args": [
+                    {"val": "by", "info": {"leading": "", "trailing": "\n  "}},
+                    {
+                        "kind": "Lean.Parser.Tactic.tacticSeq",
+                        "args": [
+                            {
+                                "kind": "Mathlib.Tactic.setTactic",
+                                "args": [
+                                    {"val": "set", "info": {"leading": "", "trailing": " "}},
+                                    [],
+                                    {
+                                        "kind": "Mathlib.Tactic.setArgsRest",
+                                        "args": [
+                                            {"val": "S", "info": {"leading": "", "trailing": " "}},
+                                            [],
+                                            {"val": ":=", "info": {"leading": " ", "trailing": " "}},
+                                            {"val": "Finset.range 10000", "info": {"leading": " ", "trailing": "\n  "}},
+                                            [
+                                                {"val": "with", "info": {"leading": " ", "trailing": " "}},
+                                                [],
+                                                {"val": "hS", "info": {"leading": "", "trailing": "\n  "}},
+                                            ],
+                                        ],
+                                    },
+                                ],
+                            },
+                            {
+                                "kind": "Lean.Parser.Tactic.tacticHave_",
+                                "args": [
+                                    {"val": "have", "info": {"leading": "", "trailing": " "}},
+                                    {
+                                        "kind": "Lean.Parser.Term.haveDecl",
+                                        "args": [
+                                            {
+                                                "kind": "Lean.Parser.Term.haveIdDecl",
+                                                "args": [
+                                                    {
+                                                        "kind": "Lean.Parser.Term.haveId",
+                                                        "args": [
+                                                            {"val": "h1", "info": {"leading": "", "trailing": " "}}
+                                                        ],
+                                                    },
+                                                    {"val": ":", "info": {"leading": " ", "trailing": " "}},
+                                                    {"val": "Prop", "info": {"leading": "", "trailing": " "}},
+                                                ],
+                                            },
+                                            {"val": ":=", "info": {"leading": " ", "trailing": " "}},
+                                            {"val": "sorry", "info": {"leading": " ", "trailing": ""}},
+                                        ],
+                                    },
+                                ],
+                            },
+                        ],
+                    },
+                ],
+            },
+        ],
+    }
+
+    # Sorries WITH hS type in goal context (should take priority)
+    sorries = [
+        {
+            "pos": {"line": 2, "column": 4},
+            "endPos": {"line": 2, "column": 9},
+            "goal": "S : Finset ℕ := Finset.range 10000\nhS : S = Finset.range 10000\n⊢ Prop",  # noqa: RUF001
+            "proofState": 1,
+        },
+        {
+            "pos": {"line": 5, "column": 4},
+            "endPos": {"line": 5, "column": 9},
+            "goal": "h1 : Prop\n⊢ Prop",
+            "proofState": 2,
+        },
+    ]
+
+    ast = AST(ast_dict, sorries)
+    result = ast.get_named_subgoal_code("h1")
+
+    # Should include hS with type from goal context
+    assert "h1" in result
+    assert "hS" in result, f"Missing hS hypothesis. Result: {result}"
+    # Should have the equality type from goal context
+    assert "hS" in result and "S = Finset.range 10000" in result, (
+        f"hS should have equality type from goal context. Result: {result}"
+    )
+
+
+def test_ast_get_named_subgoal_set_with_hypothesis_fallback_to_construction() -> None:
+    """
+    Test that falls back to AST construction when goal context unavailable.
+    """
+    ast_dict = {
+        "kind": "Lean.Parser.Command.theorem",
+        "args": [
+            {"val": "theorem", "info": {"leading": "", "trailing": " "}},
+            {
+                "kind": "Lean.Parser.Command.declId",
+                "args": [{"val": "test_theorem", "info": {"leading": "", "trailing": " "}}],
+            },
+            {"val": ":", "info": {"leading": " ", "trailing": " "}},
+            {"val": "Prop", "info": {"leading": "", "trailing": " "}},
+            {"val": ":=", "info": {"leading": " ", "trailing": " "}},
+            {
+                "kind": "Lean.Parser.Term.byTactic",
+                "args": [
+                    {"val": "by", "info": {"leading": "", "trailing": "\n  "}},
+                    {
+                        "kind": "Lean.Parser.Tactic.tacticSeq",
+                        "args": [
+                            {
+                                "kind": "Mathlib.Tactic.setTactic",
+                                "args": [
+                                    {"val": "set", "info": {"leading": "", "trailing": " "}},
+                                    [],
+                                    {
+                                        "kind": "Mathlib.Tactic.setArgsRest",
+                                        "args": [
+                                            {"val": "x", "info": {"leading": "", "trailing": " "}},
+                                            [],
+                                            {"val": ":=", "info": {"leading": " ", "trailing": " "}},
+                                            {"val": "42", "info": {"leading": " ", "trailing": "\n  "}},
+                                            [
+                                                {"val": "with", "info": {"leading": " ", "trailing": " "}},
+                                                [],
+                                                {"val": "hx", "info": {"leading": "", "trailing": "\n  "}},
+                                            ],
+                                        ],
+                                    },
+                                ],
+                            },
+                            {
+                                "kind": "Lean.Parser.Tactic.tacticHave_",
+                                "args": [
+                                    {"val": "have", "info": {"leading": "", "trailing": " "}},
+                                    {
+                                        "kind": "Lean.Parser.Term.haveDecl",
+                                        "args": [
+                                            {
+                                                "kind": "Lean.Parser.Term.haveIdDecl",
+                                                "args": [
+                                                    {
+                                                        "kind": "Lean.Parser.Term.haveId",
+                                                        "args": [
+                                                            {"val": "h1", "info": {"leading": "", "trailing": " "}}
+                                                        ],
+                                                    },
+                                                    {"val": ":", "info": {"leading": " ", "trailing": " "}},
+                                                    {"val": "Prop", "info": {"leading": "", "trailing": " "}},
+                                                ],
+                                            },
+                                            {"val": ":=", "info": {"leading": " ", "trailing": " "}},
+                                            {"val": "sorry", "info": {"leading": " ", "trailing": ""}},
+                                        ],
+                                    },
+                                ],
+                            },
+                        ],
+                    },
+                ],
+            },
+        ],
+    }
+
+    # Sorries without hx type in goal context
+    sorries = [
+        {
+            "pos": {"line": 5, "column": 4},
+            "endPos": {"line": 5, "column": 9},
+            "goal": "h1 : Prop\n⊢ Prop",
+            "proofState": 1,
+        },
+    ]
+
+    ast = AST(ast_dict, sorries)
+    result = ast.get_named_subgoal_code("h1")
+
+    # Should include hx with constructed type (x = 42)
+    assert "h1" in result
+    assert "hx" in result, f"Missing hx hypothesis. Result: {result}"
+    # Should have the equality type constructed from AST
+    assert "x" in result and "=" in result and "42" in result, (
+        f"hx should have equality type constructed from AST. Result: {result}"
+    )
+    # Should NOT be Prop (the fallback)
+    assert "hx : Prop" not in result, f"hx incorrectly typed as Prop. Result: {result}"
