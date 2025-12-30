@@ -5,6 +5,11 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.6] - 2025-12-30
+
+### Added
+- Timestamps in debug logging output: all debug log entries now include date and time information (formatted as YYYY-MM-DD HH:MM:SS) when `GOEDELS_POETRY_DEBUG` environment variable is enabled. Timestamps are displayed in dimmed style within log titles and messages for all logging functions (`log_llm_prompt`, `log_llm_response`, `log_kimina_response`, `log_vectordb_response`, and `log_debug_message`), providing temporal context for debugging without overwhelming the main content.
+
 ## [1.2.5] - 2025-12-29
 
 ### Fixed
@@ -390,6 +395,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Typer for CLI
 - Rich for beautiful terminal output
 
+[1.2.6]: https://github.com/KellyJDavis/goedels-poetry/releases/tag/v1.2.6
 [1.2.5]: https://github.com/KellyJDavis/goedels-poetry/releases/tag/v1.2.5
 [1.2.4]: https://github.com/KellyJDavis/goedels-poetry/releases/tag/v1.2.4
 [1.2.3]: https://github.com/KellyJDavis/goedels-poetry/releases/tag/v1.2.3
