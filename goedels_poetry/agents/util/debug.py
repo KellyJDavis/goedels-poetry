@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+from datetime import datetime
 from typing import Any
 
 from rich.console import Console
@@ -14,6 +15,18 @@ _debug_console = Console()
 
 # Check if debug mode is enabled
 _DEBUG_ENABLED = os.environ.get("GOEDELS_POETRY_DEBUG", "").lower() in ("1", "true", "yes")
+
+
+def _get_timestamp() -> str:
+    """
+    Get the current date and time formatted as a string.
+
+    Returns
+    -------
+    str
+        Formatted timestamp string (YYYY-MM-DD HH:MM:SS)
+    """
+    return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
 
 def is_debug_enabled() -> bool:
@@ -44,11 +57,13 @@ def log_llm_prompt(agent_name: str, prompt: str, prompt_name: str | None = None)
     if not _DEBUG_ENABLED:
         return
 
+    timestamp = _get_timestamp()
     title_parts = [f"[bold yellow]{agent_name}[/bold yellow]"]
     if prompt_name:
         title_parts.append(f"prompt: {prompt_name}")
     else:
         title_parts.append("prompt")
+    title_parts.append(f"[dim]{timestamp}[/dim]")
     title = " - ".join(title_parts)
 
     # Try to detect if prompt contains Lean code
@@ -77,7 +92,8 @@ def log_llm_response(agent_name: str, response: str, response_type: str = "respo
     if not _DEBUG_ENABLED:
         return
 
-    title = f"[bold cyan]{agent_name}[/bold cyan] - {response_type}"
+    timestamp = _get_timestamp()
+    title = f"[bold cyan]{agent_name}[/bold cyan] - {response_type} - [dim]{timestamp}[/dim]"
 
     # Try to detect if response is Lean code
     if "```lean" in response or "theorem" in response or "lemma" in response:
@@ -103,7 +119,8 @@ def log_kimina_response(operation: str, response: dict[str, Any]) -> None:
     if not _DEBUG_ENABLED:
         return
 
-    title = f"[bold magenta]KIMINA_SERVER[/bold magenta] - {operation}"
+    timestamp = _get_timestamp()
+    title = f"[bold magenta]KIMINA_SERVER[/bold magenta] - {operation} - [dim]{timestamp}[/dim]"
 
     # Format the response nicely
     import json
@@ -127,7 +144,8 @@ def log_vectordb_response(operation: str, response: list[Any]) -> None:
     if not _DEBUG_ENABLED:
         return
 
-    title = f"[bold green]VECTOR_DB[/bold green] - {operation}"
+    timestamp = _get_timestamp()
+    title = f"[bold green]VECTOR_DB[/bold green] - {operation} - [dim]{timestamp}[/dim]"
 
     # Format the response nicely
     import json
@@ -151,4 +169,5 @@ def log_debug_message(message: str, style: str = "yellow") -> None:
     if not _DEBUG_ENABLED:
         return
 
-    _debug_console.print(f"[{style}][DEBUG][/{style}] {message}")
+    timestamp = _get_timestamp()
+    _debug_console.print(f"[{style}][DEBUG][/{style}] [dim]{timestamp}[/dim] {message}")
