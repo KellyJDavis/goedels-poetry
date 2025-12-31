@@ -3,6 +3,7 @@
 from goedels_poetry.agents.util.common import (
     DEFAULT_IMPORTS,
     add_default_imports,
+    combine_preamble_and_body,
     combine_theorem_with_proof,
     get_error_str,
     load_prompt,
@@ -500,3 +501,275 @@ def test_combine_theorem_with_proof_comment_between_colon_eq_and_by() -> None:
     # Preserve comment block while inserting proof after `by`
     assert "comment between := and by" in result
     assert result.endswith("by\n  trivial")
+
+
+# Tests for get_error_str with trailing newline handling
+def test_get_error_str_with_trailing_newline() -> None:
+    """Test get_error_str handles code with trailing newline correctly."""
+    code = "line0\nline1\nline2\nline3\n"
+    errors = [
+        {
+            "pos": {"line": 0, "column": 2},
+            "endPos": {"line": 0, "column": 5},
+            "data": "Error on line 2",
+        }
+    ]
+    result = get_error_str(code, errors, error_thres=True)
+
+    assert "Error 1:" in result
+    assert "Error on line 2" in result
+    assert "ne2" in result  # Part of line2 (error markers split the text)
+    assert "<error>" in result
+    assert "</error>" in result
+
+
+def test_get_error_str_without_trailing_newline() -> None:
+    """Test get_error_str handles code without trailing newline correctly."""
+    code = "line0\nline1\nline2\nline3"
+    errors = [
+        {
+            "pos": {"line": 0, "column": 2},
+            "endPos": {"line": 0, "column": 5},
+            "data": "Error on line 2",
+        }
+    ]
+    result = get_error_str(code, errors, error_thres=True)
+
+    assert "Error 1:" in result
+    assert "Error on line 2" in result
+    assert "ne2" in result  # Part of line2 (error markers split the text)
+    assert "<error>" in result
+    assert "</error>" in result
+
+
+def test_get_error_str_error_on_last_line_with_trailing_newline() -> None:
+    """Test get_error_str with error on last line when code has trailing newline."""
+    code = "line0\nline1\nline2\nline3\n"
+    errors = [
+        {
+            "pos": {"line": 2, "column": 2},  # Last content line (line3 after +2 offset)
+            "endPos": {"line": 2, "column": 5},
+            "data": "Error on last line",
+        }
+    ]
+    result = get_error_str(code, errors, error_thres=True)
+
+    assert "Error 1:" in result
+    assert "Error on last line" in result
+    assert "ne3" in result  # Part of line3 (error markers split the text)
+    assert "<error>" in result
+    assert "</error>" in result
+
+
+def test_get_error_str_error_on_last_line_without_trailing_newline() -> None:
+    """Test get_error_str with error on last line when code lacks trailing newline."""
+    code = "line0\nline1\nline2\nline3"
+    errors = [
+        {
+            "pos": {"line": 2, "column": 2},  # Last line (line3 after +2 offset)
+            "endPos": {"line": 2, "column": 5},
+            "data": "Error on last line",
+        }
+    ]
+    result = get_error_str(code, errors, error_thres=True)
+
+    assert "Error 1:" in result
+    assert "Error on last line" in result
+    assert "ne3" in result  # Part of line3 (error markers split the text)
+    assert "<error>" in result
+    assert "</error>" in result
+
+
+def test_get_error_str_with_windows_line_endings() -> None:
+    """Test get_error_str handles Windows line endings (\r\n) correctly."""
+    code = "line0\r\nline1\r\nline2\r\nline3\r\n"
+    errors = [
+        {
+            "pos": {"line": 0, "column": 2},
+            "endPos": {"line": 0, "column": 5},
+            "data": "Error on line 2",
+        }
+    ]
+    result = get_error_str(code, errors, error_thres=True)
+
+    assert "Error 1:" in result
+    assert "Error on line 2" in result
+    assert "ne2" in result  # Part of line2 (error markers split the text, splitlines() handles \r\n correctly)
+    assert "<error>" in result
+    assert "</error>" in result
+
+
+def test_get_error_str_with_old_mac_line_endings() -> None:
+    """Test get_error_str handles old Mac line endings (\r) correctly."""
+    code = "line0\rline1\rline2\rline3\r"
+    errors = [
+        {
+            "pos": {"line": 0, "column": 2},
+            "endPos": {"line": 0, "column": 5},
+            "data": "Error on line 2",
+        }
+    ]
+    result = get_error_str(code, errors, error_thres=True)
+
+    assert "Error 1:" in result
+    assert "Error on line 2" in result
+    assert "ne2" in result  # Part of line2 (error markers split the text, splitlines() handles \r correctly)
+    assert "<error>" in result
+    assert "</error>" in result
+
+
+def test_get_error_str_multiline_error_ending_at_last_line_with_trailing_newline() -> None:
+    """Test multiline error ending at last line when code has trailing newline."""
+    code = "line0\nline1\nline2\nline3\n"
+    errors = [
+        {
+            "pos": {"line": 1, "column": 2},
+            "endPos": {"line": 2, "column": 5},  # Ends at last line (line3)
+            "data": "Multiline error ending at last line",
+        }
+    ]
+    result = get_error_str(code, errors, error_thres=True)
+
+    assert "Error 1:" in result
+    assert "Multiline error ending at last line" in result
+    assert "line2" in result  # Full line2 appears in context
+    assert "ne3" in result  # Part of line3 (error markers split the text) - last line should be included
+    assert "<error>" in result
+    assert "</error>" in result
+
+
+def test_get_error_str_multiline_error_ending_at_last_line_without_trailing_newline() -> None:
+    """Test multiline error ending at last line when code lacks trailing newline."""
+    code = "line0\nline1\nline2\nline3"
+    errors = [
+        {
+            "pos": {"line": 1, "column": 2},
+            "endPos": {"line": 2, "column": 5},  # Ends at last line (line3)
+            "data": "Multiline error ending at last line",
+        }
+    ]
+    result = get_error_str(code, errors, error_thres=True)
+
+    assert "Error 1:" in result
+    assert "Multiline error ending at last line" in result
+    assert "line2" in result  # Full line2 appears in context
+    assert "ne3" in result  # Part of line3 (error markers split the text) - last line should be included
+    assert "<error>" in result
+    assert "</error>" in result
+
+
+def test_get_error_str_empty_code_with_newline() -> None:
+    """Test get_error_str with empty code that has newline."""
+    code = "\n"
+    errors = [
+        {
+            "pos": {"line": 0, "column": 0},
+            "endPos": {"line": 0, "column": 0},
+            "data": "Error on empty line",
+        }
+    ]
+    result = get_error_str(code, errors, error_thres=True)
+
+    assert "Error 1:" in result
+    assert "Error on empty line" in result
+    assert "<error>" in result
+    assert "</error>" in result
+
+
+def test_get_error_str_single_line_with_trailing_newline() -> None:
+    """Test get_error_str with single line code that has trailing newline."""
+    code = "single line\n"
+    errors = [
+        {
+            "pos": {"line": 0, "column": 5},
+            "endPos": {"line": 0, "column": 9},
+            "data": "Error on single line",
+        }
+    ]
+    result = get_error_str(code, errors, error_thres=True)
+
+    assert "Error 1:" in result
+    assert "Error on single line" in result
+    assert "single line" in result
+    assert "<error>" in result
+    assert "</error>" in result
+
+
+# Tests for combine_preamble_and_body trailing newline behavior
+def test_combine_preamble_and_body_adds_trailing_newline() -> None:
+    """Test that combine_preamble_and_body always adds trailing newline."""
+    preamble = "import Mathlib"
+    body = "theorem test : True := by trivial"
+    result = combine_preamble_and_body(preamble, body)
+
+    assert result.endswith("\n")
+    assert "import Mathlib" in result
+    assert "theorem test" in result
+
+
+def test_combine_preamble_and_body_preserves_existing_trailing_newline() -> None:
+    """Test that combine_preamble_and_body handles code that already has trailing newline."""
+    preamble = "import Mathlib\n"
+    body = "theorem test : True := by trivial\n"
+    result = combine_preamble_and_body(preamble, body)
+
+    # Should still end with exactly one newline
+    assert result.endswith("\n")
+    assert not result.endswith("\n\n")  # Should not have double newline at end
+    assert result.count("\n\n") >= 1  # But should have \n\n between preamble and body
+
+
+def test_combine_preamble_and_body_empty_preamble() -> None:
+    """Test combine_preamble_and_body with empty preamble adds trailing newline."""
+    preamble = ""
+    body = "theorem test : True := by trivial"
+    result = combine_preamble_and_body(preamble, body)
+
+    assert result.endswith("\n")
+    assert result == "theorem test : True := by trivial\n"
+
+
+def test_combine_preamble_and_body_empty_body() -> None:
+    """Test combine_preamble_and_body with empty body adds trailing newline."""
+    preamble = "import Mathlib"
+    body = ""
+    result = combine_preamble_and_body(preamble, body)
+
+    assert result.endswith("\n")
+    assert result == "import Mathlib\n"
+
+
+def test_combine_preamble_and_body_both_empty() -> None:
+    """Test combine_preamble_and_body with both empty returns empty string."""
+    preamble = ""
+    body = ""
+    result = combine_preamble_and_body(preamble, body)
+
+    # Empty string doesn't end with newline, but that's fine since it's empty
+    assert result == ""
+
+
+def test_combine_preamble_and_body_strips_whitespace_before_adding_newline() -> None:
+    """Test that combine_preamble_and_body strips whitespace then adds newline."""
+    preamble = "  import Mathlib  \n  "
+    body = "  theorem test : True := by trivial  \n  "
+    result = combine_preamble_and_body(preamble, body)
+
+    assert result.endswith("\n")
+    # Should be stripped and then newline added
+    assert not result.endswith("  \n")  # Trailing spaces should be removed
+    assert "import Mathlib" in result
+    assert "theorem test" in result
+
+
+def test_combine_preamble_and_body_multiple_newlines_between_parts() -> None:
+    """Test that combine_preamble_and_body has correct formatting between preamble and body."""
+    preamble = "import Mathlib"
+    body = "theorem test : True := by trivial"
+    result = combine_preamble_and_body(preamble, body)
+
+    # Should have \n\n between preamble and body, then \n at end
+    assert "\n\n" in result
+    assert result.endswith("\n")
+    # Count newlines: 2 between parts + 1 at end = 3 total
+    assert result.count("\n") == 3
