@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.8] - 2025-01-XX
+
+### Fixed
+- Fixed Kimina server hangs when processing code without trailing newlines: when LLM responses are truncated due to token limits, extracted Lean 4 code may not end with a trailing newline, causing the Kimina Lean server to hang. The server's REPL expects complete lines terminated by newline characters (following POSIX standard). All code paths that send code to the Kimina server now ensure trailing newlines are present.
+- Improved error line number handling: changed `get_error_str()` to use `splitlines(keepends=False)` instead of `split("\n")` for more robust line handling. This correctly handles trailing newlines without creating extra empty array elements and supports various line ending types (`\n`, `\r\n`, `\r`), ensuring accurate line number mapping in error messages.
+
+### Changed
+- `combine_preamble_and_body()` now ensures the returned code always ends with a trailing newline, centralizing the fix for all code paths that send code to Kimina server via this function.
+- `check_complete_proof()` now ensures the `complete_proof` parameter has a trailing newline before sending to Kimina, as this function receives pre-assembled proof strings that bypass `combine_preamble_and_body()`.
+
+### Added
+- Comprehensive test coverage for trailing newline handling: added 18 tests covering `get_error_str()` with/without trailing newlines, errors on last line, Windows and old Mac line endings, multiline errors ending at last line, `combine_preamble_and_body()` trailing newline behavior, and edge cases (empty preamble/body, whitespace handling).
+
 ## [1.2.7] - 2025-12-31
 
 ### Fixed
@@ -407,6 +420,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Typer for CLI
 - Rich for beautiful terminal output
 
+[1.2.8]: https://github.com/KellyJDavis/goedels-poetry/releases/tag/v1.2.8
 [1.2.7]: https://github.com/KellyJDavis/goedels-poetry/releases/tag/v1.2.7
 [1.2.6]: https://github.com/KellyJDavis/goedels-poetry/releases/tag/v1.2.6
 [1.2.5]: https://github.com/KellyJDavis/goedels-poetry/releases/tag/v1.2.5
