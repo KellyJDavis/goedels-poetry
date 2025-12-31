@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.7] - 2025-12-31
+
+### Fixed
+- Fixed match binding extraction when target appears after match statement: match pattern bindings (variables introduced in match pattern branches) are now correctly extracted when the target subgoal appears after the match statement as a sibling, even though the variables are present in the goal context and used in the subgoal's type. This ensures match bindings are included as parameters in extracted subgoals, making them stand-alone and valid.
+- Fixed set/let binding variable inclusion in extracted subgoals: variables defined via `set` or `let` bindings are now correctly included as parameters in extracted subgoals when they are used in the subgoal's type or present in the goal context. This fixes two failure scenarios: (1) when value extraction succeeded but variables weren't included as parameters despite equality hypotheses being created, and (2) when value extraction failed and the fallback to goal context types didn't work correctly.
+
+### Added
+- Comprehensive test suites for binding type extraction: added extensive test coverage for match, set, let, obtain, choose, and generalize bindings to verify correct extraction behavior across various scenarios including targets inside branches, targets after statements, and multiple branch scenarios.
+
+### Removed
+- Removed out-of-date notes: cleaned up 13 obsolete markdown documentation files from the notes directory (AST_COMPARISON.md, AST_ENHANCEMENTS.md, AST_PARSING_DEEP_DIVE.md, AST_PARSING_PROBLEMS.md, AST_SUBGOAL_ENHANCEMENT.md, BACKTRACKING_IMPLEMENTATION.md, BACKTRACKING_TESTS.md, HYPOTHESIS_TYPING_ANSWER.md, IMPLEMENTATION_SUMMARY.md, INTEGRATION_NOTES.md, LET_AND_OBTAIN_ENHANCEMENT.md, PROOF_RECONSTRUCTION_ANALYSIS.md, VERIFICATION_COMPLETE.md).
+
 ## [1.2.6] - 2025-12-30
 
 ### Added
@@ -395,6 +407,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Typer for CLI
 - Rich for beautiful terminal output
 
+[1.2.7]: https://github.com/KellyJDavis/goedels-poetry/releases/tag/v1.2.7
 [1.2.6]: https://github.com/KellyJDavis/goedels-poetry/releases/tag/v1.2.6
 [1.2.5]: https://github.com/KellyJDavis/goedels-poetry/releases/tag/v1.2.5
 [1.2.4]: https://github.com/KellyJDavis/goedels-poetry/releases/tag/v1.2.4
