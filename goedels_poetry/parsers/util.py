@@ -1645,6 +1645,7 @@ def __find_earlier_bindings(  # noqa: C901
                     # For match expressions, we need to check each branch
                     # If the target is in a branch, include that branch's pattern bindings
                     args = node.get("args", [])
+                    target_in_branch = False
                     # Look for branches (matchAlt nodes)
                     for arg in args:
                         if isinstance(arg, dict):
@@ -1653,6 +1654,7 @@ def __find_earlier_bindings(  # noqa: C901
                                 "Lean.Parser.Term.matchAlt",
                                 "Lean.Parser.Tactic.matchAlt",
                             } and __contains_target_name(arg, target_name, name_map):
+                                target_in_branch = True
                                 # Extract pattern bindings from this branch
                                 pattern_names = __extract_match_pattern_names(arg)
                                 for name in pattern_names:
@@ -1670,6 +1672,7 @@ def __find_earlier_bindings(  # noqa: C901
                                         "Lean.Parser.Term.matchAlt",
                                         "Lean.Parser.Tactic.matchAlt",
                                     } and __contains_target_name(item, target_name, name_map):
+                                        target_in_branch = True
                                         pattern_names = __extract_match_pattern_names(item)
                                         for name in pattern_names:
                                             if name:
@@ -1677,8 +1680,36 @@ def __find_earlier_bindings(  # noqa: C901
                                         traverse_for_bindings(item)
                                         if target_found:
                                             return
-                    # If target not found in any branch, continue normal traversal
-                    # (to handle cases where match appears before target but target is outside)
+                    # If target is NOT in any branch but match appears before target,
+                    # extract bindings from all branches (new behavior)
+                    # This handles cases where match appears before target but target is outside
+                    if not target_in_branch and not target_found:
+                        # We're traversing in order, so if we haven't found the target yet,
+                        # this match appears before it. Extract bindings from all branches.
+                        # The post-processing step will filter out unused ones based on dependencies.
+                        for arg in args:
+                            if isinstance(arg, dict):
+                                branch_kind = arg.get("kind", "")
+                                if branch_kind in {
+                                    "Lean.Parser.Term.matchAlt",
+                                    "Lean.Parser.Tactic.matchAlt",
+                                }:
+                                    pattern_names = __extract_match_pattern_names(arg)
+                                    for name in pattern_names:
+                                        if name:
+                                            earlier_bindings.append((name, "match", arg))
+                            elif isinstance(arg, list):
+                                for item in arg:
+                                    if isinstance(item, dict):
+                                        item_kind = item.get("kind", "")
+                                        if item_kind in {
+                                            "Lean.Parser.Term.matchAlt",
+                                            "Lean.Parser.Tactic.matchAlt",
+                                        }:
+                                            pattern_names = __extract_match_pattern_names(item)
+                                            for name in pattern_names:
+                                                if name:
+                                                    earlier_bindings.append((name, "match", item))
                 except (KeyError, IndexError, TypeError, AttributeError):
                     # Silently handle expected errors from malformed AST structures
                     # If match handling fails, continue with normal traversal
@@ -2689,6 +2720,7 @@ def __handle_set_let_binding_as_equality(
     existing_names: set[str],
     variables_in_equality_hypotheses: set[str],
     goal_var_types: dict[str, str] | None = None,
+    sorries: list[dict[str, Any]] | None = None,
 ) -> tuple[dict | None, bool]:
     """
     Handle a set or let binding by creating an equality hypothesis.
@@ -2708,6 +2740,8 @@ def __handle_set_let_binding_as_equality(
     goal_var_types: Optional[dict[str, str]]
         Optional dictionary mapping variable names to their types from goal context.
         Used as fallback when value extraction fails.
+    sorries: Optional[list[dict[str, Any]]]
+        Optional list of sorries for defensive goal context parsing when goal_var_types is empty.
 
     Returns
     -------
@@ -2760,10 +2794,29 @@ def __handle_set_let_binding_as_equality(
         variables_in_equality_hypotheses.add(var_name)  # Still track it
         return (binder, True)
 
+    # Fallback 3: Defensive goal context parsing - if goal_var_types is empty but sorries exist, try parsing directly
+    if (not goal_var_types or var_name not in goal_var_types) and sorries:
+        logging.debug(
+            f"__handle_set_let_binding_as_equality: goal_var_types is empty or missing '{var_name}', "
+            "trying defensive goal context parsing from sorries"
+        )
+        for sorry in sorries:
+            goal = sorry.get("goal", "")
+            if goal and var_name in goal:
+                parsed_types = __parse_goal_context(goal)
+                if var_name in parsed_types:
+                    logging.debug(
+                        f"__handle_set_let_binding_as_equality: Found '{var_name}' in defensive goal context parsing, "
+                        f"type: {parsed_types[var_name]}"
+                    )
+                    binder = __make_binder_from_type_string(var_name, parsed_types[var_name])
+                    variables_in_equality_hypotheses.add(var_name)
+                    return (binder, True)
+
     # All fallbacks exhausted - return failure
     logging.debug(
         f"__handle_set_let_binding_as_equality: All extraction attempts failed for {binding_type} '{var_name}' "
-        "(value extraction, type extraction, and goal context all failed)"
+        "(value extraction, type extraction, goal context, and defensive parsing all failed)"
     )
     return (None, False)
 
@@ -2986,6 +3039,7 @@ def _get_named_subgoal_rewritten_ast(  # noqa: C901
                 existing_names,
                 variables_in_equality_hypotheses,
                 goal_var_types=goal_var_types,
+                sorries=sorries,
             )
             if was_handled and set_let_binder is not None:
                 binders.append(set_let_binder)
@@ -3025,8 +3079,31 @@ def _get_named_subgoal_rewritten_ast(  # noqa: C901
             # Track the binding name in existing_names (it's already there, but this ensures consistency)
             existing_names.add(binding_name)
 
-    # Finally, add any remaining dependencies not yet included
+    # Post-process: Add variables from equality hypotheses that are also used elsewhere
+    # This fixes the bug where equality hypotheses reference undefined variables
+    # (e.g., "hx : x = value" but x itself is not defined as a parameter)
     existing_binder_names = {__extract_binder_name(b) for b in binders}
+    for var_name in variables_in_equality_hypotheses:
+        # Check if variable is used in subgoal (dependencies) or should be included (goal_var_types)
+        if (
+            var_name in deps or (goal_var_types and var_name in goal_var_types)
+        ) and var_name not in existing_binder_names:
+            # Variable is used but only has equality hypothesis - add as parameter too
+            if goal_var_types and var_name in goal_var_types:
+                binder = __make_binder_from_type_string(var_name, goal_var_types[var_name])
+            else:
+                # Try to extract type from AST
+                var_node = name_map.get(var_name)
+                var_type_ast = __extract_type_ast(var_node, binding_name=var_name) if var_node else None
+                binder = __make_binder(var_name, var_type_ast)
+            binders.append(binder)
+            existing_binder_names.add(var_name)
+            logging.debug(
+                f"_get_named_subgoal_rewritten_ast: Added variable '{var_name}' as parameter "
+                "because it's used in subgoal but only had equality hypothesis"
+            )
+
+    # Finally, add any remaining dependencies not yet included
     for d in sorted(deps):
         # Skip if already included as a binder name or as an equality hypothesis variable
         if d in existing_binder_names or d in variables_in_equality_hypotheses:
@@ -3046,6 +3123,7 @@ def _get_named_subgoal_rewritten_ast(  # noqa: C901
                 existing_names,
                 variables_in_equality_hypotheses,
                 goal_var_types=goal_var_types,
+                sorries=sorries,
             )
             if was_handled and set_let_binder is not None:
                 binders.append(set_let_binder)

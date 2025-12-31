@@ -892,12 +892,10 @@ def test_ast_get_named_subgoal_code_includes_let_binding() -> None:
     # Should include the let binding n as an equality hypothesis (hn : n = 5)
     assert "hn" in result  # Hypothesis name
     assert "n  = 5" in result or "n = 5" in result or "n=5" in result  # Equality format (with possible spaces)
-    # Should NOT include n as a type annotation (n : ℕ) - that would be incorrect  # noqa: RUF003
-    # The old incorrect format would have "(n : ℕ)" but we want "(hn : n = 5)"  # noqa: RUF003
-    # Check that n is not included as a separate type annotation
-    # Count occurrences of "(n :" - should only appear in the equality hypothesis context
-    assert result.count("(n :") == 0, (
-        f"Found type annotation for n, but it should only appear in equality hypothesis. Result: {result}"
+    # Should ALSO include n as a type annotation (n : ℕ) because it's used in the subgoal type (n > 0)  # noqa: RUF003
+    # The fix ensures variables used in subgoal types are included as parameters
+    assert result.count("(n :") >= 1, (
+        f"Should include n as a parameter because it's used in the subgoal type. Result: {result}"
     )
 
 
@@ -1171,9 +1169,10 @@ def test_ast_get_named_subgoal_code_includes_set_binding() -> None:
     assert (
         "s  = x  + 1" in result or "s = x + 1" in result or "s=x+1" in result
     )  # Equality format (with possible spaces)
-    # Should NOT include s as a type annotation (s : ℕ) - that would be incorrect  # noqa: RUF003
-    assert result.count("(s :") == 0, (
-        f"Found type annotation for s, but it should only appear in equality hypothesis. Result: {result}"
+    # Should ALSO include s as a type annotation (s : ℕ) because it's used in the subgoal type (s > 0)  # noqa: RUF003
+    # The fix ensures variables used in subgoal types are included as parameters
+    assert result.count("(s :") >= 1, (
+        f"Should include s as a parameter because it's used in the subgoal type. Result: {result}"
     )
 
 
@@ -1335,16 +1334,16 @@ def test_ast_get_named_subgoal_code_complex_let_statements() -> None:
     # Should include equality hypotheses for let bindings
     assert "hs" in result  # Hypothesis for s
     assert "hsOdd" in result  # Hypothesis for sOdd
-    # Should have equality format, not type annotations
+    # Should have equality format
     assert "s  = " in result or "s = " in result or "s=" in result  # s should be in an equality (with possible spaces)
     assert "sOdd  = " in result or "sOdd = " in result or "sOdd=" in result  # sOdd should be in an equality
-    # Should NOT have type annotations like (s : Finset ℕ) - that would be incorrect  # noqa: RUF003
-    # Check that s and sOdd are not included as separate type annotations
-    assert result.count("(s :") == 0, (
-        f"Found type annotation for s, but it should only appear in equality hypothesis. Result: {result}"
+    # Should ALSO have type annotations like (s : Finset ℕ) because s and sOdd are used in the subgoal type  # noqa: RUF003
+    # The fix ensures variables used in subgoal types are included as parameters
+    assert result.count("(s :") >= 1, (
+        f"Should include s as a parameter because it's used in the subgoal type. Result: {result}"
     )
-    assert result.count("(sOdd :") == 0, (
-        f"Found type annotation for sOdd, but it should only appear in equality hypothesis. Result: {result}"
+    assert result.count("(sOdd :") >= 1, (
+        f"Should include sOdd as a parameter because it's used in the subgoal type. Result: {result}"
     )
 
 
@@ -1823,9 +1822,10 @@ def test_ast_get_named_subgoal_code_set_dependency_as_equality() -> None:
     assert (
         "l  = x  + 1" in result or "l = x + 1" in result or "l=x+1" in result
     )  # Equality format (with possible spaces)
-    # Should NOT include l as a type annotation (l : ℕ) - that would be incorrect  # noqa: RUF003
-    assert result.count("(l :") == 0, (
-        f"Found type annotation for l, but it should only appear in equality hypothesis. Result: {result}"
+    # Should ALSO include l as a type annotation (l : ℕ) because it's used in the subgoal type (l > 0)  # noqa: RUF003
+    # The fix ensures variables used in subgoal types are included as parameters
+    assert result.count("(l :") >= 1, (
+        f"Should include l as a parameter because it's used in the subgoal type. Result: {result}"
     )
 
 
@@ -1967,9 +1967,10 @@ def test_ast_get_named_subgoal_code_let_dependency_as_equality() -> None:
     assert (
         "m  = n  * 2" in result or "m = n * 2" in result or "m=n*2" in result
     )  # Equality format (with possible spaces)
-    # Should NOT include m as a type annotation (m : ℕ) - that would be incorrect  # noqa: RUF003
-    assert result.count("(m :") == 0, (
-        f"Found type annotation for m, but it should only appear in equality hypothesis. Result: {result}"
+    # Should ALSO include m as a type annotation (m : ℕ) because it's used in the subgoal type (m > 0)  # noqa: RUF003
+    # The fix ensures variables used in subgoal types are included as parameters
+    assert result.count("(m :") >= 1, (
+        f"Should include m as a parameter because it's used in the subgoal type. Result: {result}"
     )
 
 
@@ -2087,9 +2088,10 @@ def test_ast_get_named_subgoal_code_set_dependency_complex_expression() -> None:
     # Should include "l" as an equality hypothesis (hl : l = 5)
     assert "hl" in result  # Hypothesis name
     assert "l  = 5" in result or "l = 5" in result or "l=5" in result  # Equality format (with possible spaces)
-    # Should NOT include l as a type annotation (l : ℕ) - that would be incorrect  # noqa: RUF003
-    assert result.count("(l :") == 0, (
-        f"Found type annotation for l, but it should only appear in equality hypothesis. Result: {result}"
+    # Should ALSO include l as a type annotation (l : ℕ) because it's used in the subgoal type (l = 5)  # noqa: RUF003
+    # The fix ensures variables used in subgoal types are included as parameters
+    assert result.count("(l :") >= 1, (
+        f"Should include l as a parameter because it's used in the subgoal type. Result: {result}"
     )
 
 
@@ -2213,9 +2215,10 @@ def test_ast_get_named_subgoal_code_includes_set_binding_with_type() -> None:
     # Should include equality hypothesis (hoddProd : oddProd = Finset.prod (Finset.range 5000))
     assert "hoddProd" in result  # Hypothesis name
     assert "oddProd  = " in result or "oddProd = " in result or "oddProd=" in result  # Equality format
-    # Should NOT include oddProd as a type annotation (oddProd : ℕ) - that would be incorrect  # noqa: RUF003
-    assert result.count("(oddProd :") == 0, (
-        f"Found type annotation for oddProd, but it should only appear in equality hypothesis. Result: {result}"
+    # Should ALSO include oddProd as a type annotation (oddProd : ℕ) because it's used in the subgoal type (oddProd > 0)  # noqa: RUF003
+    # The fix ensures variables used in subgoal types are included as parameters
+    assert result.count("(oddProd :") >= 1, (
+        f"Should include oddProd as a parameter because it's used in the subgoal type. Result: {result}"
     )
 
 
