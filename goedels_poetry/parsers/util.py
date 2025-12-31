@@ -1645,6 +1645,7 @@ def __find_earlier_bindings(  # noqa: C901
                     # For match expressions, we need to check each branch
                     # If the target is in a branch, include that branch's pattern bindings
                     args = node.get("args", [])
+                    target_in_branch = False
                     # Look for branches (matchAlt nodes)
                     for arg in args:
                         if isinstance(arg, dict):
@@ -1653,6 +1654,7 @@ def __find_earlier_bindings(  # noqa: C901
                                 "Lean.Parser.Term.matchAlt",
                                 "Lean.Parser.Tactic.matchAlt",
                             } and __contains_target_name(arg, target_name, name_map):
+                                target_in_branch = True
                                 # Extract pattern bindings from this branch
                                 pattern_names = __extract_match_pattern_names(arg)
                                 for name in pattern_names:
@@ -1670,6 +1672,7 @@ def __find_earlier_bindings(  # noqa: C901
                                         "Lean.Parser.Term.matchAlt",
                                         "Lean.Parser.Tactic.matchAlt",
                                     } and __contains_target_name(item, target_name, name_map):
+                                        target_in_branch = True
                                         pattern_names = __extract_match_pattern_names(item)
                                         for name in pattern_names:
                                             if name:
@@ -1677,8 +1680,36 @@ def __find_earlier_bindings(  # noqa: C901
                                         traverse_for_bindings(item)
                                         if target_found:
                                             return
-                    # If target not found in any branch, continue normal traversal
-                    # (to handle cases where match appears before target but target is outside)
+                    # If target is NOT in any branch but match appears before target,
+                    # extract bindings from all branches (new behavior)
+                    # This handles cases where match appears before target but target is outside
+                    if not target_in_branch and not target_found:
+                        # We're traversing in order, so if we haven't found the target yet,
+                        # this match appears before it. Extract bindings from all branches.
+                        # The post-processing step will filter out unused ones based on dependencies.
+                        for arg in args:
+                            if isinstance(arg, dict):
+                                branch_kind = arg.get("kind", "")
+                                if branch_kind in {
+                                    "Lean.Parser.Term.matchAlt",
+                                    "Lean.Parser.Tactic.matchAlt",
+                                }:
+                                    pattern_names = __extract_match_pattern_names(arg)
+                                    for name in pattern_names:
+                                        if name:
+                                            earlier_bindings.append((name, "match", arg))
+                            elif isinstance(arg, list):
+                                for item in arg:
+                                    if isinstance(item, dict):
+                                        item_kind = item.get("kind", "")
+                                        if item_kind in {
+                                            "Lean.Parser.Term.matchAlt",
+                                            "Lean.Parser.Tactic.matchAlt",
+                                        }:
+                                            pattern_names = __extract_match_pattern_names(item)
+                                            for name in pattern_names:
+                                                if name:
+                                                    earlier_bindings.append((name, "match", item))
                 except (KeyError, IndexError, TypeError, AttributeError):
                     # Silently handle expected errors from malformed AST structures
                     # If match handling fails, continue with normal traversal
