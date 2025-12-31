@@ -391,11 +391,18 @@ def combine_preamble_and_body(preamble: str, body: str) -> str:
     normalized_body = body.strip()
 
     if not normalized_preamble:
-        return normalized_body
-    if not normalized_body:
-        return normalized_preamble
+        result = normalized_body
+    elif not normalized_body:
+        result = normalized_preamble
+    else:
+        result = f"{normalized_preamble}\n\n{normalized_body}"
 
-    return f"{normalized_preamble}\n\n{normalized_body}"
+    # Ensure trailing newline to prevent Kimina server hangs
+    # This follows POSIX standard that text files should end with a newline
+    if result and not result.endswith("\n"):
+        result += "\n"
+
+    return result
 
 
 def strip_known_preamble(code: str, expected_preamble: str) -> tuple[str, bool]:
@@ -561,7 +568,7 @@ def get_error_str(code: str, errors: list[dict], error_thres: bool) -> str:  # n
         A string summarizing the errors in a format expected by Goedel-Prover-V2.
     """
     err_str = ""
-    code_lines = code.split("\n")
+    code_lines = code.splitlines(keepends=False)
     if not code_lines:
         code_lines = [""]
 
