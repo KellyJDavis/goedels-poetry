@@ -171,8 +171,12 @@ def check_complete_proof(complete_proof: str, server_url: str, server_max_retrie
     # Create a client to access the Kimina Server
     kimina_client = KiminaClient(api_url=server_url, http_timeout=36000, n_retries=server_max_retries)
 
+    # Ensure trailing newline to prevent Kimina server hangs
+    # This follows POSIX standard that text files should end with a newline
+    normalized_proof = complete_proof if complete_proof.endswith("\n") else complete_proof + "\n"
+
     # The complete_proof is already a valid Lean file, so we can check it directly
-    check_response = kimina_client.check(complete_proof, timeout=36000)
+    check_response = kimina_client.check(normalized_proof, timeout=36000)
 
     # Parse check_response
     parsed_response = parse_kimina_check_response(check_response)
@@ -182,6 +186,7 @@ def check_complete_proof(complete_proof: str, server_url: str, server_max_retrie
 
     # Extract the result
     is_valid = parsed_response["complete"]
-    error_msg = get_error_str(complete_proof, parsed_response.get("errors", []), False) if not is_valid else ""
+    # Use normalized_proof (with trailing newline) for consistency with what was sent to Kimina
+    error_msg = get_error_str(normalized_proof, parsed_response.get("errors", []), False) if not is_valid else ""
 
     return is_valid, error_msg
