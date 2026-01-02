@@ -11,7 +11,11 @@ from goedels_poetry.config.config import parsed_config
 def _get_optional_int(section: str, option: str) -> int | None:
     """Get optional integer config value, returning None if not found."""
     try:
-        return int(parsed_config.getint(section=section, option=option))
+        value = parsed_config.getint(section=section, option=option)
+        # Handle case where getint returns None (e.g., from mocks or fallback)
+        if value is None:
+            return None
+        return int(value)
     except (NoOptionError, NoSectionError):
         return None
 
@@ -40,11 +44,19 @@ def _build_extra_body(section: str, provider: str) -> dict[str, Any]:
     dict[str, Any]
         Dictionary of parameters to include in extra_body
     """
-    # OpenAI doesn't support extra_body parameters
-    if provider == "openai":
-        return {}
-
     extra_body: dict[str, Any] = {}
+
+    # OpenAI-specific Responses API parameters (only valid when use_responses_api=True)
+    if provider == "openai" and section == "DECOMPOSER_AGENT_LLM":
+        # Always set store=False for stateless Responses API operation.
+        # We pass decomposition_history in each request, so we don't want OpenAI
+        # to also store it on the server (which would be redundant and problematic).
+        extra_body["store"] = False
+        return extra_body
+
+    # For non-OpenAI providers, continue with provider-specific parameters
+    if provider == "openai":
+        return extra_body
 
     # num_ctx parameter (supported by all non-OpenAI providers)
     if num_ctx := _get_optional_int(section, "num_ctx"):
@@ -196,7 +208,11 @@ def _create_llm_safe(section: str, **kwargs):  # type: ignore[no-untyped-def]
     else:
         chat_openai_kwargs["api_key"] = explicit_api_key if explicit_api_key is not None else api_key
 
-    # Add extra_body only if not empty (OpenAI doesn't support it)
+    # For DECOMPOSER_AGENT_LLM with OpenAI, enable Responses API
+    if section == "DECOMPOSER_AGENT_LLM" and provider == "openai":
+        chat_openai_kwargs["use_responses_api"] = True
+
+    # Add extra_body if not empty (now allowed for OpenAI when using Responses API)
     if extra_body:
         chat_openai_kwargs["extra_body"] = extra_body
 
