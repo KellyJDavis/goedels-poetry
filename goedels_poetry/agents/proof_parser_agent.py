@@ -22,7 +22,7 @@ class ProofParserAgentFactory:
     """
 
     @staticmethod
-    def create_agent(server_url: str, server_max_retries: int) -> CompiledStateGraph:
+    def create_agent(server_url: str, server_max_retries: int, server_timeout: int) -> CompiledStateGraph:
         """
         Creates a ProofParserAgent instance that employs the server at the passed URL.
 
@@ -32,16 +32,18 @@ class ProofParserAgentFactory:
             The URL of the Kimina server.
         server_max_retries: int
             The maximum number of retries for the Kimina server.
+        server_timeout: int
+            The timeout in seconds for requests to the Kimina server.
 
         Returns
         -------
         CompiledStateGraph
             An CompiledStateGraph instance of the proof parser agent.
         """
-        return _build_agent(server_url=server_url, server_max_retries=server_max_retries)
+        return _build_agent(server_url=server_url, server_max_retries=server_max_retries, server_timeout=server_timeout)
 
 
-def _build_agent(server_url: str, server_max_retries: int) -> CompiledStateGraph:
+def _build_agent(server_url: str, server_max_retries: int, server_timeout: int) -> CompiledStateGraph:
     """
     Builds a compiled state graph for the specified Kimina server.
 
@@ -51,6 +53,8 @@ def _build_agent(server_url: str, server_max_retries: int) -> CompiledStateGraph
         The URL of the Kimina server.
     server_max_retries: int
         The maximum number of retries for the Kimina server.
+    server_timeout: int
+        The timeout in seconds for requests to the Kimina server.
 
     Returns
     -------
@@ -61,7 +65,7 @@ def _build_agent(server_url: str, server_max_retries: int) -> CompiledStateGraph
     graph_builder = StateGraph(FormalTheoremProofStates)
 
     # Bind the server related arguments of _parse_proof
-    bound_parse_proof = partial(_parse_proof, server_url, server_max_retries)
+    bound_parse_proof = partial(_parse_proof, server_url, server_max_retries, server_timeout)
 
     # Add the nodes
     graph_builder.add_node("parser_agent", bound_parse_proof)
@@ -92,7 +96,9 @@ def _map_edge(states: FormalTheoremProofStates) -> list[Send]:
     return [Send("parser_agent", state) for state in states["inputs"]]
 
 
-def _parse_proof(server_url: str, server_max_retries: int, state: FormalTheoremProofState) -> FormalTheoremProofStates:
+def _parse_proof(
+    server_url: str, server_max_retries: int, server_timeout: int, state: FormalTheoremProofState
+) -> FormalTheoremProofStates:
     """
     Parses the proof of the formal proof in the passed FormalTheoremProofState.
 
@@ -102,6 +108,8 @@ def _parse_proof(server_url: str, server_max_retries: int, state: FormalTheoremP
         The URL of the server.
     server_max_retries: int
         The maximum number of retries for the server.
+    server_timeout: int
+        The timeout in seconds for requests to the server.
     state: FormalTheoremProofState
         The formal theorem proof state  with the formal proof to be parsed.
 
@@ -112,7 +120,7 @@ def _parse_proof(server_url: str, server_max_retries: int, state: FormalTheoremP
         to the FormalTheoremProofStates "outputs" member.
     """
     # Create a client to access the Kimina Server
-    kimina_client = KiminaClient(api_url=server_url, http_timeout=36000, n_retries=server_max_retries)
+    kimina_client = KiminaClient(api_url=server_url, http_timeout=server_timeout, n_retries=server_max_retries)
 
     # Combine the original theorem statement with the proof body
     # state["formal_theorem"] contains the theorem with `:= by sorry`

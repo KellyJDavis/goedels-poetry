@@ -145,12 +145,16 @@ if IMPORTS_AVAILABLE:
 
         def test_create_agent(self, kimina_server_url: str) -> None:
             """Test that ProofCheckerAgent can be created."""
-            agent = ProofCheckerAgentFactory.create_agent(server_url=kimina_server_url, server_max_retries=3)
+            agent = ProofCheckerAgentFactory.create_agent(
+                server_url=kimina_server_url, server_max_retries=3, server_timeout=3600
+            )
             assert agent is not None
 
         def test_check_valid_proof(self, kimina_server_url: str) -> None:
             """Test checking a valid proof."""
-            agent = ProofCheckerAgentFactory.create_agent(server_url=kimina_server_url, server_max_retries=3)
+            agent = ProofCheckerAgentFactory.create_agent(
+                server_url=kimina_server_url, server_max_retries=3, server_timeout=3600
+            )
 
             # Create input state
             state = _make_formal_theorem_state(
@@ -171,7 +175,9 @@ if IMPORTS_AVAILABLE:
 
         def test_check_invalid_proof(self, kimina_server_url: str) -> None:
             """Test checking an invalid proof."""
-            agent = ProofCheckerAgentFactory.create_agent(server_url=kimina_server_url, server_max_retries=3)
+            agent = ProofCheckerAgentFactory.create_agent(
+                server_url=kimina_server_url, server_max_retries=3, server_timeout=3600
+            )
 
             # Create input state with invalid proof
             state = _make_formal_theorem_state(
@@ -192,7 +198,9 @@ if IMPORTS_AVAILABLE:
 
         def test_check_proof_with_sorry(self, kimina_server_url: str) -> None:
             """Test checking a proof with sorry - should not be marked as proved."""
-            agent = ProofCheckerAgentFactory.create_agent(server_url=kimina_server_url, server_max_retries=3)
+            agent = ProofCheckerAgentFactory.create_agent(
+                server_url=kimina_server_url, server_max_retries=3, server_timeout=3600
+            )
 
             # Create input state with proof containing sorry
             state = _make_formal_theorem_state(
@@ -215,12 +223,16 @@ if IMPORTS_AVAILABLE:
 
         def test_create_agent(self, kimina_server_url: str) -> None:
             """Test that ProofParserAgent can be created."""
-            agent = ProofParserAgentFactory.create_agent(server_url=kimina_server_url, server_max_retries=3)
+            agent = ProofParserAgentFactory.create_agent(
+                server_url=kimina_server_url, server_max_retries=3, server_timeout=3600
+            )
             assert agent is not None
 
         def test_parse_proof(self, kimina_server_url: str) -> None:
             """Test parsing a valid proof."""
-            agent = ProofParserAgentFactory.create_agent(server_url=kimina_server_url, server_max_retries=3)
+            agent = ProofParserAgentFactory.create_agent(
+                server_url=kimina_server_url, server_max_retries=3, server_timeout=3600
+            )
 
             # Create input state
             state = _make_formal_theorem_state(
@@ -243,12 +255,16 @@ if IMPORTS_AVAILABLE:
 
         def test_create_agent(self, kimina_server_url: str) -> None:
             """Test that SketchCheckerAgent can be created."""
-            agent = SketchCheckerAgentFactory.create_agent(server_url=kimina_server_url, server_max_retries=3)
+            agent = SketchCheckerAgentFactory.create_agent(
+                server_url=kimina_server_url, server_max_retries=3, server_timeout=3600
+            )
             assert agent is not None
 
         def test_check_valid_sketch(self, kimina_server_url: str) -> None:
             """Test checking a valid proof sketch."""
-            agent = SketchCheckerAgentFactory.create_agent(server_url=kimina_server_url, server_max_retries=3)
+            agent = SketchCheckerAgentFactory.create_agent(
+                server_url=kimina_server_url, server_max_retries=3, server_timeout=3600
+            )
 
             # Create input state
             state = _make_decomposed_theorem_state(
@@ -269,7 +285,9 @@ if IMPORTS_AVAILABLE:
 
         def test_check_invalid_sketch(self, kimina_server_url: str) -> None:
             """Test checking an invalid proof sketch."""
-            agent = SketchCheckerAgentFactory.create_agent(server_url=kimina_server_url, server_max_retries=3)
+            agent = SketchCheckerAgentFactory.create_agent(
+                server_url=kimina_server_url, server_max_retries=3, server_timeout=3600
+            )
 
             # Create input state with invalid sketch
             state = _make_decomposed_theorem_state(
@@ -293,12 +311,16 @@ if IMPORTS_AVAILABLE:
 
         def test_create_agent(self, kimina_server_url: str) -> None:
             """Test that SketchParserAgent can be created."""
-            agent = SketchParserAgentFactory.create_agent(server_url=kimina_server_url, server_max_retries=3)
+            agent = SketchParserAgentFactory.create_agent(
+                server_url=kimina_server_url, server_max_retries=3, server_timeout=3600
+            )
             assert agent is not None
 
         def test_parse_sketch(self, kimina_server_url: str) -> None:
             """Test parsing a valid proof sketch."""
-            agent = SketchParserAgentFactory.create_agent(server_url=kimina_server_url, server_max_retries=3)
+            agent = SketchParserAgentFactory.create_agent(
+                server_url=kimina_server_url, server_max_retries=3, server_timeout=3600
+            )
 
             # Create input state
             state = _make_decomposed_theorem_state(
@@ -321,12 +343,16 @@ if IMPORTS_AVAILABLE:
 
         def test_create_agent(self, kimina_server_url: str) -> None:
             """Test that FormalTheoremSyntaxAgent can be created."""
-            agent = FormalTheoremSyntaxAgentFactory.create_agent(server_url=kimina_server_url, server_max_retries=3)
+            agent = FormalTheoremSyntaxAgentFactory.create_agent(
+                server_url=kimina_server_url, server_max_retries=3, server_timeout=3600
+            )
             assert agent is not None
 
         def test_check_valid_theorem(self, kimina_server_url: str) -> None:
             """Test checking a valid formal theorem."""
-            agent = FormalTheoremSyntaxAgentFactory.create_agent(server_url=kimina_server_url, server_max_retries=3)
+            agent = FormalTheoremSyntaxAgentFactory.create_agent(
+                server_url=kimina_server_url, server_max_retries=3, server_timeout=3600
+            )
 
             # Create input state
             state = _make_formal_theorem_state(
@@ -346,7 +372,9 @@ if IMPORTS_AVAILABLE:
 
         def test_check_invalid_theorem(self, kimina_server_url: str) -> None:
             """Test checking an invalid formal theorem."""
-            agent = FormalTheoremSyntaxAgentFactory.create_agent(server_url=kimina_server_url, server_max_retries=3)
+            agent = FormalTheoremSyntaxAgentFactory.create_agent(
+                server_url=kimina_server_url, server_max_retries=3, server_timeout=3600
+            )
 
             # Create input state with invalid theorem
             state = _make_formal_theorem_state(
@@ -369,12 +397,16 @@ if IMPORTS_AVAILABLE:
 
         def test_create_agent(self, kimina_server_url: str) -> None:
             """Test that InformalTheoremSyntaxAgent can be created."""
-            agent = InformalTheoremSyntaxAgentFactory.create_agent(server_url=kimina_server_url, server_max_retries=3)
+            agent = InformalTheoremSyntaxAgentFactory.create_agent(
+                server_url=kimina_server_url, server_max_retries=3, server_timeout=3600
+            )
             assert agent is not None
 
         def test_check_valid_theorem(self, kimina_server_url: str) -> None:
             """Test checking a valid formal theorem from informal state."""
-            agent = InformalTheoremSyntaxAgentFactory.create_agent(server_url=kimina_server_url, server_max_retries=3)
+            agent = InformalTheoremSyntaxAgentFactory.create_agent(
+                server_url=kimina_server_url, server_max_retries=3, server_timeout=3600
+            )
 
             # Create input state
             state = _make_informal_theorem_state(
@@ -390,7 +422,9 @@ if IMPORTS_AVAILABLE:
 
         def test_check_invalid_theorem(self, kimina_server_url: str) -> None:
             """Test checking an invalid formal theorem from informal state."""
-            agent = InformalTheoremSyntaxAgentFactory.create_agent(server_url=kimina_server_url, server_max_retries=3)
+            agent = InformalTheoremSyntaxAgentFactory.create_agent(
+                server_url=kimina_server_url, server_max_retries=3, server_timeout=3600
+            )
 
             # Create input state with invalid theorem
             state = _make_informal_theorem_state(
