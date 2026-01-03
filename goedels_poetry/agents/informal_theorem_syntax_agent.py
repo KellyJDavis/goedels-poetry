@@ -16,7 +16,7 @@ class InformalTheoremSyntaxAgentFactory:
     """
 
     @staticmethod
-    def create_agent(server_url: str, server_max_retries: int) -> CompiledStateGraph:
+    def create_agent(server_url: str, server_max_retries: int, server_timeout: int) -> CompiledStateGraph:
         """
         Creates a InformalTheoremSyntaxAgent instance that employs the server at the passed URL.
 
@@ -26,16 +26,18 @@ class InformalTheoremSyntaxAgentFactory:
             The URL of the Kimina server.
         server_max_retries: int
             The maximum number of retries for the Kimina server.
+        server_timeout: int
+            The timeout in seconds for requests to the Kimina server.
 
         Returns
         -------
         CompiledStateGraph
             An CompiledStateGraph instance of the informal theorem syntax agent.
         """
-        return _build_agent(server_url=server_url, server_max_retries=server_max_retries)
+        return _build_agent(server_url=server_url, server_max_retries=server_max_retries, server_timeout=server_timeout)
 
 
-def _build_agent(server_url: str, server_max_retries: int) -> CompiledStateGraph:
+def _build_agent(server_url: str, server_max_retries: int, server_timeout: int) -> CompiledStateGraph:
     """
     Builds a compiled state graph for the specified Kimina server.
 
@@ -45,6 +47,8 @@ def _build_agent(server_url: str, server_max_retries: int) -> CompiledStateGraph
         The URL of the Kimina server.
     server_max_retries: int
         The maximum number of retries for the Kimina server.
+    server_timeout: int
+        The timeout in seconds for requests to the Kimina server.
 
     Returns
     -------
@@ -55,7 +59,7 @@ def _build_agent(server_url: str, server_max_retries: int) -> CompiledStateGraph
     graph_builder = StateGraph(InformalTheoremState)
 
     # Bind the server related arguments of check_syntax
-    bound_check_syntax = partial(_check_syntax, server_url, server_max_retries)
+    bound_check_syntax = partial(_check_syntax, server_url, server_max_retries, server_timeout)
 
     # Add the nodes
     graph_builder.add_node("syntax_agent", bound_check_syntax)
@@ -67,7 +71,9 @@ def _build_agent(server_url: str, server_max_retries: int) -> CompiledStateGraph
     return graph_builder.compile()
 
 
-def _check_syntax(server_url: str, server_max_retries: int, state: InformalTheoremState) -> InformalTheoremState:
+def _check_syntax(
+    server_url: str, server_max_retries: int, server_timeout: int, state: InformalTheoremState
+) -> InformalTheoremState:
     """
     Checks the syntax of a formal theorem of the passed informal theorem state.
 
@@ -77,6 +83,8 @@ def _check_syntax(server_url: str, server_max_retries: int, state: InformalTheor
         The URL of the server.
     server_max_retries: int
         The maximum number of retries for the server.
+    server_timeout: int
+        The timeout in seconds for requests to the server.
     state : InformalTheoremState
         The informal theorem state with the formal theorem to be checked.
 
@@ -86,11 +94,11 @@ def _check_syntax(server_url: str, server_max_retries: int, state: InformalTheor
         A InformalTheoremState indicating if the formal statement is syntactic
     """
     # Create a client to access the Kimina Server
-    kimina_client = KiminaClient(api_url=server_url, http_timeout=36000, n_retries=server_max_retries)
+    kimina_client = KiminaClient(api_url=server_url, http_timeout=server_timeout, n_retries=server_max_retries)
 
     # Check syntax of state["formal_theorem"] with the default preamble prefix
     code_with_imports = combine_preamble_and_body(DEFAULT_IMPORTS, str(state["formal_theorem"]))
-    check_response = kimina_client.check(code_with_imports, timeout=36000)
+    check_response = kimina_client.check(code_with_imports, timeout=server_timeout)
 
     # Parse check_response
     parsed_response = parse_kimina_check_response(check_response)

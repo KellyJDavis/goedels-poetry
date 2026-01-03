@@ -118,11 +118,11 @@ exact h_main"""
         manager = GoedelsPoetryStateManager(state)
 
         baseline = manager.reconstruct_complete_proof()
-        ok0, _ = check_complete_proof(baseline, server_url=kimina_server_url, server_max_retries=3)
+        ok0, _ = check_complete_proof(baseline, server_url=kimina_server_url, server_max_retries=3, server_timeout=3600)
         assert not ok0, "Expected baseline reconstruction to fail final verification in this test case"
 
         guided, ok1, err1 = manager.reconstruct_complete_proof_kimina_guided(
-            server_url=kimina_server_url, server_max_retries=3, max_candidates=12
+            server_url=kimina_server_url, server_max_retries=3, server_timeout=3600, max_candidates=12
         )
         assert ok1, f"Expected Kimina-guided reconstruction to succeed, but it failed:\n{err1}"
         assert "sorry" not in guided

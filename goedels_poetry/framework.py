@@ -58,6 +58,8 @@ class GoedelsPoetryConfig:
         The url of the REPL Kimina Lean server
     kimina_lean_server_max_retries: int
         The max number of retries for the Kimina Lean server
+    kimina_lean_server_timeout: int
+        The timeout in seconds for requests to the Kimina Lean server
 
     """
 
@@ -71,6 +73,7 @@ class GoedelsPoetryConfig:
         decomposer_agent_llm: BaseChatModel = DECOMPOSER_AGENT_LLM,
         kimina_lean_server_url: str = KIMINA_LEAN_SERVER["url"],
         kimina_lean_server_max_retries: int = KIMINA_LEAN_SERVER["max_retries"],
+        kimina_lean_server_timeout: int = KIMINA_LEAN_SERVER["timeout"],
         proof_reconstruction_max_candidates: int = PROOF_RECONSTRUCTION["max_candidates"],
     ):
         self.formalizer_agent_llm = formalizer_agent_llm
@@ -81,6 +84,7 @@ class GoedelsPoetryConfig:
         self.decomposer_agent_llm = decomposer_agent_llm
         self.kimina_lean_server_url = kimina_lean_server_url
         self.kimina_lean_server_max_retries = kimina_lean_server_max_retries
+        self.kimina_lean_server_timeout = kimina_lean_server_timeout
         self.proof_reconstruction_max_candidates = proof_reconstruction_max_candidates
 
 
@@ -160,7 +164,9 @@ class GoedelsPoetryFramework:
         """
         # Create informal theorem syntax agent
         syntax_agent = InformalTheoremSyntaxAgentFactory.create_agent(
-            server_url=KIMINA_LEAN_SERVER["url"], server_max_retries=KIMINA_LEAN_SERVER["max_retries"]
+            server_url=KIMINA_LEAN_SERVER["url"],
+            server_max_retries=KIMINA_LEAN_SERVER["max_retries"],
+            server_timeout=KIMINA_LEAN_SERVER["timeout"],
         )
 
         # Get informal theorem state and syntax check informal theorem's formalization
@@ -186,7 +192,9 @@ class GoedelsPoetryFramework:
         """
         # Create formal theorem syntax agent
         syntax_agent = FormalTheoremSyntaxAgentFactory.create_agent(
-            server_url=KIMINA_LEAN_SERVER["url"], server_max_retries=KIMINA_LEAN_SERVER["max_retries"]
+            server_url=KIMINA_LEAN_SERVER["url"],
+            server_max_retries=KIMINA_LEAN_SERVER["max_retries"],
+            server_timeout=KIMINA_LEAN_SERVER["timeout"],
         )
 
         # Get formal theorem states and syntax check formal theorems
@@ -212,7 +220,9 @@ class GoedelsPoetryFramework:
         """
         # Create proof checker agent
         proof_checker_agent = ProofCheckerAgentFactory.create_agent(
-            server_url=KIMINA_LEAN_SERVER["url"], server_max_retries=KIMINA_LEAN_SERVER["max_retries"]
+            server_url=KIMINA_LEAN_SERVER["url"],
+            server_max_retries=KIMINA_LEAN_SERVER["max_retries"],
+            server_timeout=KIMINA_LEAN_SERVER["timeout"],
         )
 
         # Get formal theorem states and check their proofs' validity
@@ -238,7 +248,9 @@ class GoedelsPoetryFramework:
         """
         # Create proof parser agent
         proof_parser_agent = ProofParserAgentFactory.create_agent(
-            server_url=KIMINA_LEAN_SERVER["url"], server_max_retries=KIMINA_LEAN_SERVER["max_retries"]
+            server_url=KIMINA_LEAN_SERVER["url"],
+            server_max_retries=KIMINA_LEAN_SERVER["max_retries"],
+            server_timeout=KIMINA_LEAN_SERVER["timeout"],
         )
 
         # Get formal theorem states and parse their proofs into ASTs
@@ -294,7 +306,9 @@ class GoedelsPoetryFramework:
         """
         # Create sketch checker agent
         sketch_checker_agent = SketchCheckerAgentFactory.create_agent(
-            server_url=KIMINA_LEAN_SERVER["url"], server_max_retries=KIMINA_LEAN_SERVER["max_retries"]
+            server_url=KIMINA_LEAN_SERVER["url"],
+            server_max_retries=KIMINA_LEAN_SERVER["max_retries"],
+            server_timeout=KIMINA_LEAN_SERVER["timeout"],
         )
 
         # Get decomposed formal theorem states and check their sketches' syntax
@@ -334,7 +348,9 @@ class GoedelsPoetryFramework:
         """
         # Create sketch parser agent
         sketch_parser_agent = SketchParserAgentFactory.create_agent(
-            server_url=KIMINA_LEAN_SERVER["url"], server_max_retries=KIMINA_LEAN_SERVER["max_retries"]
+            server_url=KIMINA_LEAN_SERVER["url"],
+            server_max_retries=KIMINA_LEAN_SERVER["max_retries"],
+            server_timeout=KIMINA_LEAN_SERVER["timeout"],
         )
 
         # Get decomposed formal theorem states and parse their sketches into ASTs
@@ -376,6 +392,7 @@ class GoedelsPoetryFramework:
                     complete_proof,
                     server_url=self._config.kimina_lean_server_url,
                     server_max_retries=self._config.kimina_lean_server_max_retries,
+                    server_timeout=self._config.kimina_lean_server_timeout,
                 )
 
                 # If final verification fails, try Kimina-guided reconstruction variants.
@@ -386,6 +403,7 @@ class GoedelsPoetryFramework:
                     guided_proof, guided_ok, guided_err = self._state_manager.reconstruct_complete_proof_kimina_guided(
                         server_url=self._config.kimina_lean_server_url,
                         server_max_retries=self._config.kimina_lean_server_max_retries,
+                        server_timeout=self._config.kimina_lean_server_timeout,
                         max_candidates=self._config.proof_reconstruction_max_candidates,
                     )
                     if guided_ok:
