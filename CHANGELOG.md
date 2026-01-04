@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.3.0] - 2026-01-04
+
+### Added
+- Pass and attempt tracking in LLM debug logging: extended `log_llm_prompt()` and `log_llm_response()` functions to display pass and attempt numbers in debug log titles, providing better visibility into retry and self-correction loops during proof generation. Pass numbers are shown for `FormalTheoremProofState` (where `pass_attempts` can be > 0), while attempt numbers are shown for all state types that track attempts.
+- Configurable Kimina server timeout: added `timeout` parameter to `[KIMINA_LEAN_SERVER]` configuration section (default 3600 seconds/1 hour), replacing the previously hardcoded 36000 second (10 hour) timeout. All agent factory methods and `check_complete_proof()` function now accept and use the configurable timeout value.
+- OpenAI Responses API support for decomposer agent: enabled stateless Responses API when `DECOMPOSER_AGENT_LLM` is configured with `provider=openai`. The API operates in stateless mode (`store=False`) since conversation history is maintained locally in `decomposition_history`.
+
+### Fixed
+- Fixed Responses API content extraction in proof_sketcher_agent: when using OpenAI's Responses API, response content is returned as a list of dictionaries (e.g., `[{'type': 'text', 'text': '...'}]`) instead of a plain string. Added `_extract_responses_api_content()` helper function to handle both Responses API format (list of dicts) and standard format (string), extracting and concatenating all text segments to reconstruct the complete response.
+
+### Changed
+- Updated decomposer agent default model to `gpt-5.2-pro-2025-12-11` in documentation and configuration files (previously `gpt-5.2-2025-12-11`).
+
 ## [1.2.8] - 2025-01-XX
 
 ### Fixed
@@ -420,6 +433,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Typer for CLI
 - Rich for beautiful terminal output
 
+[1.3.0]: https://github.com/KellyJDavis/goedels-poetry/releases/tag/v1.3.0
 [1.2.8]: https://github.com/KellyJDavis/goedels-poetry/releases/tag/v1.2.8
 [1.2.7]: https://github.com/KellyJDavis/goedels-poetry/releases/tag/v1.2.7
 [1.2.6]: https://github.com/KellyJDavis/goedels-poetry/releases/tag/v1.2.6
