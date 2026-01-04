@@ -96,13 +96,22 @@ def _check_semantics(llm: BaseChatModel, state: InformalTheoremState) -> Informa
     )
 
     # Log debug prompt
-    log_llm_prompt("SEMANTICS_AGENT", prompt, "goedel-semiotician-v2")
+    log_llm_prompt(
+        "SEMANTICS_AGENT",
+        prompt,
+        "goedel-semiotician-v2",
+        attempt_num=state["formalization_attempts"],
+    )
 
     # Determine if the semantics of the informal and formal theorems are the same
     response_content = llm.invoke(prompt).content
 
     # Log debug response
-    log_llm_response("SEMANTICS_AGENT_LLM", str(response_content))
+    log_llm_response(
+        "SEMANTICS_AGENT_LLM",
+        str(response_content),
+        attempt_num=state["formalization_attempts"],
+    )
 
     # Parse semantics checker response
     try:

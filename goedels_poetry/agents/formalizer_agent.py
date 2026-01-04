@@ -96,13 +96,22 @@ def _formalizer(llm: BaseChatModel, state: InformalTheoremState) -> InformalTheo
     )
 
     # Log debug prompt
-    log_llm_prompt("FORMALIZER_AGENT", prompt, "goedel-formalizer-v2")
+    log_llm_prompt(
+        "FORMALIZER_AGENT",
+        prompt,
+        "goedel-formalizer-v2",
+        attempt_num=state["formalization_attempts"],
+    )
 
     # Formalize informal statement
     response_content = llm.invoke(prompt).content
 
     # Log debug response
-    log_llm_response("FORMALIZER_AGENT_LLM", str(response_content))
+    log_llm_response(
+        "FORMALIZER_AGENT_LLM",
+        str(response_content),
+        attempt_num=state["formalization_attempts"],
+    )
 
     # Parse formalizer response
     try:

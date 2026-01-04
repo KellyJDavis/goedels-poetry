@@ -95,7 +95,12 @@ def _backtrack(state: DecomposedFormalTheoremState) -> DecomposedFormalTheoremSt
     )
 
     # Log debug prompt
-    log_llm_prompt("SKETCH_BACKTRACK_AGENT", prompt, "decomposer-backtrack")
+    log_llm_prompt(
+        "SKETCH_BACKTRACK_AGENT",
+        prompt,
+        "decomposer-backtrack",
+        attempt_num=state["self_correction_attempts"],
+    )
 
     # Add backtrack request to the state's decomposition_history
     state["decomposition_history"] += [HumanMessage(content=prompt)]

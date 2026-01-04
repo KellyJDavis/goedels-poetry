@@ -146,11 +146,21 @@ def _search_query_generator(llm: BaseChatModel, state: DecomposedFormalTheoremSt
         # Use backtrack prompt - the full history is already in decomposition_history
         prompt = load_prompt("search-query-backtrack", formal_theorem=formal_theorem_with_imports)
         # Log debug prompt
-        log_llm_prompt("SEARCH_QUERY_AGENT", prompt, "search-query-backtrack")
+        log_llm_prompt(
+            "SEARCH_QUERY_AGENT",
+            prompt,
+            "search-query-backtrack",
+            attempt_num=state["self_correction_attempts"],
+        )
     else:
         prompt = load_prompt("search-query-initial", formal_theorem=formal_theorem_with_imports)
         # Log debug prompt
-        log_llm_prompt("SEARCH_QUERY_AGENT", prompt, "search-query-initial")
+        log_llm_prompt(
+            "SEARCH_QUERY_AGENT",
+            prompt,
+            "search-query-initial",
+            attempt_num=state["self_correction_attempts"],
+        )
 
     # Add the prompt to decomposition_history
     state["decomposition_history"] += [HumanMessage(content=prompt)]
@@ -159,7 +169,11 @@ def _search_query_generator(llm: BaseChatModel, state: DecomposedFormalTheoremSt
     response_content = llm.invoke(state["decomposition_history"]).content
 
     # Log debug response
-    log_llm_response("SEARCH_QUERY_AGENT_LLM", str(response_content))
+    log_llm_response(
+        "SEARCH_QUERY_AGENT_LLM",
+        str(response_content),
+        attempt_num=state["self_correction_attempts"],
+    )
 
     # Parse search query response
     search_queries = _parse_search_queries_response(str(response_content))

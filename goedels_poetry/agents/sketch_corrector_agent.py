@@ -94,7 +94,12 @@ def _corrector(state: DecomposedFormalTheoremState) -> DecomposedFormalTheoremSt
     )
 
     # Log debug prompt
-    log_llm_prompt("SKETCH_CORRECTOR_AGENT", prompt, "decomposer-subsequent")
+    log_llm_prompt(
+        "SKETCH_CORRECTOR_AGENT",
+        prompt,
+        "decomposer-subsequent",
+        attempt_num=state["self_correction_attempts"],
+    )
 
     # Add correction request to the state's decomposition_history
     state["decomposition_history"] += [HumanMessage(content=prompt)]

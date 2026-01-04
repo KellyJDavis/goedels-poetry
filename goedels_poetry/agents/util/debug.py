@@ -41,7 +41,13 @@ def is_debug_enabled() -> bool:
     return _DEBUG_ENABLED
 
 
-def log_llm_prompt(agent_name: str, prompt: str, prompt_name: str | None = None) -> None:
+def log_llm_prompt(
+    agent_name: str,
+    prompt: str,
+    prompt_name: str | None = None,
+    attempt_num: int | None = None,
+    pass_num: int | None = None,
+) -> None:
     """
     Log an LLM prompt if debug mode is enabled.
 
@@ -53,6 +59,10 @@ def log_llm_prompt(agent_name: str, prompt: str, prompt_name: str | None = None)
         The prompt content to be sent to the LLM
     prompt_name : str, optional
         The name of the prompt template (e.g., "goedel-formalizer-v2"), by default None
+    attempt_num : int, optional
+        The attempt number (0-based), by default None
+    pass_num : int, optional
+        The pass number (0-based), by default None
     """
     if not _DEBUG_ENABLED:
         return
@@ -63,6 +73,19 @@ def log_llm_prompt(agent_name: str, prompt: str, prompt_name: str | None = None)
         title_parts.append(f"prompt: {prompt_name}")
     else:
         title_parts.append("prompt")
+
+    # Add pass/attempt info if provided
+    pass_attempt_parts = []
+    if pass_num is not None and attempt_num is not None:
+        pass_attempt_parts.append(f"pass {pass_num}, attempt {attempt_num}")
+    elif attempt_num is not None:
+        pass_attempt_parts.append(f"attempt {attempt_num}")
+    elif pass_num is not None:
+        pass_attempt_parts.append(f"pass {pass_num}")
+
+    if pass_attempt_parts:
+        title_parts.append(", ".join(pass_attempt_parts))
+
     title_parts.append(f"[dim]{timestamp}[/dim]")
     title = " - ".join(title_parts)
 
@@ -76,7 +99,13 @@ def log_llm_prompt(agent_name: str, prompt: str, prompt_name: str | None = None)
         _debug_console.print(Panel(prompt, title=title, border_style="yellow"))
 
 
-def log_llm_response(agent_name: str, response: str, response_type: str = "response") -> None:
+def log_llm_response(
+    agent_name: str,
+    response: str,
+    response_type: str = "response",
+    attempt_num: int | None = None,
+    pass_num: int | None = None,
+) -> None:
     """
     Log an LLM response if debug mode is enabled.
 
@@ -88,12 +117,32 @@ def log_llm_response(agent_name: str, response: str, response_type: str = "respo
         The response content from the LLM
     response_type : str, optional
         The type of response (e.g., "response", "parsed"), by default "response"
+    attempt_num : int, optional
+        The attempt number (0-based), by default None
+    pass_num : int, optional
+        The pass number (0-based), by default None
     """
     if not _DEBUG_ENABLED:
         return
 
     timestamp = _get_timestamp()
-    title = f"[bold cyan]{agent_name}[/bold cyan] - {response_type} - [dim]{timestamp}[/dim]"
+    title_parts = [f"[bold cyan]{agent_name}[/bold cyan]"]
+    title_parts.append(response_type)
+
+    # Add pass/attempt info if provided
+    pass_attempt_parts = []
+    if pass_num is not None and attempt_num is not None:
+        pass_attempt_parts.append(f"pass {pass_num}, attempt {attempt_num}")
+    elif attempt_num is not None:
+        pass_attempt_parts.append(f"attempt {attempt_num}")
+    elif pass_num is not None:
+        pass_attempt_parts.append(f"pass {pass_num}")
+
+    if pass_attempt_parts:
+        title_parts.append(", ".join(pass_attempt_parts))
+
+    title_parts.append(f"[dim]{timestamp}[/dim]")
+    title = " - ".join(title_parts)
 
     # Try to detect if response is Lean code
     if "```lean" in response or "theorem" in response or "lemma" in response:
