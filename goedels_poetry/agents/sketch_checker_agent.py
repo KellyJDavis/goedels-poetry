@@ -17,7 +17,7 @@ class SketchCheckerAgentFactory:
     """
 
     @staticmethod
-    def create_agent(server_url: str, server_max_retries: int) -> CompiledStateGraph:
+    def create_agent(server_url: str, server_max_retries: int, server_timeout: int) -> CompiledStateGraph:
         """
         Creates a SketchCheckerAgent instance that employs the server at the passed URL.
 
@@ -27,16 +27,18 @@ class SketchCheckerAgentFactory:
             The URL of the Kimina server.
         server_max_retries: int
             The maximum number of retries for the Kimina server.
+        server_timeout: int
+            The timeout in seconds for requests to the Kimina server.
 
         Returns
         -------
         CompiledStateGraph
             An CompiledStateGraph instance of the sketch checker agent.
         """
-        return _build_agent(server_url=server_url, server_max_retries=server_max_retries)
+        return _build_agent(server_url=server_url, server_max_retries=server_max_retries, server_timeout=server_timeout)
 
 
-def _build_agent(server_url: str, server_max_retries: int) -> CompiledStateGraph:
+def _build_agent(server_url: str, server_max_retries: int, server_timeout: int) -> CompiledStateGraph:
     """
     Builds a compiled state graph for the specified Kimina server.
 
@@ -46,6 +48,8 @@ def _build_agent(server_url: str, server_max_retries: int) -> CompiledStateGraph
         The URL of the Kimina server.
     server_max_retries: int
         The maximum number of retries for the Kimina server.
+    server_timeout: int
+        The timeout in seconds for requests to the Kimina server.
 
     Returns
     -------
@@ -56,7 +60,7 @@ def _build_agent(server_url: str, server_max_retries: int) -> CompiledStateGraph
     graph_builder = StateGraph(DecomposedFormalTheoremStates)
 
     # Bind the server related arguments of _check_sketch
-    bound_check_sketch = partial(_check_sketch, server_url, server_max_retries)
+    bound_check_sketch = partial(_check_sketch, server_url, server_max_retries, server_timeout)
 
     # Add the nodes
     graph_builder.add_node("check_sketch_agent", bound_check_sketch)
@@ -88,7 +92,7 @@ def _map_edge(states: DecomposedFormalTheoremStates) -> list[Send]:
 
 
 def _check_sketch(
-    server_url: str, server_max_retries: int, state: DecomposedFormalTheoremState
+    server_url: str, server_max_retries: int, server_timeout: int, state: DecomposedFormalTheoremState
 ) -> DecomposedFormalTheoremStates:
     """
     Checks syntax of the proof sketch in the passed DecomposedFormalTheoremState.
@@ -99,6 +103,8 @@ def _check_sketch(
         The URL of the server.
     server_max_retries: int
         The maximum number of retries for the server.
+    server_timeout: int
+        The timeout in seconds for requests to the server.
     state: DecomposedFormalTheoremState
         The decomposed formal theorem state  with the proof sketch whose syntax is to be checked.
 
@@ -109,11 +115,11 @@ def _check_sketch(
         checked added to the DecomposedFormalTheoremStates "outputs" member.
     """
     # Create a client to access the Kimina Server
-    kimina_client = KiminaClient(api_url=server_url, http_timeout=36000, n_retries=server_max_retries)
+    kimina_client = KiminaClient(api_url=server_url, http_timeout=server_timeout, n_retries=server_max_retries)
 
     # Check the proof sketch with the stored preamble prefix
     sketch_with_imports = combine_preamble_and_body(state["preamble"], str(state["proof_sketch"]))
-    check_response = kimina_client.check(sketch_with_imports, timeout=36000)
+    check_response = kimina_client.check(sketch_with_imports, timeout=server_timeout)
 
     # Parse check_response
     parsed_response = parse_kimina_check_response(check_response)

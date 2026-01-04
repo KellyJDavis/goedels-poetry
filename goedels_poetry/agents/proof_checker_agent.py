@@ -21,7 +21,7 @@ class ProofCheckerAgentFactory:
     """
 
     @staticmethod
-    def create_agent(server_url: str, server_max_retries: int) -> CompiledStateGraph:
+    def create_agent(server_url: str, server_max_retries: int, server_timeout: int) -> CompiledStateGraph:
         """
         Creates a ProofCheckerAgent instance that employs the server at the passed URL.
 
@@ -31,16 +31,18 @@ class ProofCheckerAgentFactory:
             The URL of the Kimina server.
         server_max_retries: int
             The maximum number of retries for the Kimina server.
+        server_timeout: int
+            The timeout in seconds for requests to the Kimina server.
 
         Returns
         -------
         CompiledStateGraph
             An CompiledStateGraph instance of the proof checker agent.
         """
-        return _build_agent(server_url=server_url, server_max_retries=server_max_retries)
+        return _build_agent(server_url=server_url, server_max_retries=server_max_retries, server_timeout=server_timeout)
 
 
-def _build_agent(server_url: str, server_max_retries: int) -> CompiledStateGraph:
+def _build_agent(server_url: str, server_max_retries: int, server_timeout: int) -> CompiledStateGraph:
     """
     Builds a compiled state graph for the specified Kimina server.
 
@@ -50,6 +52,8 @@ def _build_agent(server_url: str, server_max_retries: int) -> CompiledStateGraph
         The URL of the Kimina server.
     server_max_retries: int
         The maximum number of retries for the Kimina server.
+    server_timeout: int
+        The timeout in seconds for requests to the Kimina server.
 
     Returns
     -------
@@ -60,7 +64,7 @@ def _build_agent(server_url: str, server_max_retries: int) -> CompiledStateGraph
     graph_builder = StateGraph(FormalTheoremProofStates)
 
     # Bind the server related arguments of _check_proof
-    bound_check_proof = partial(_check_proof, server_url, server_max_retries)
+    bound_check_proof = partial(_check_proof, server_url, server_max_retries, server_timeout)
 
     # Add the nodes
     graph_builder.add_node("check_proof_agent", bound_check_proof)
@@ -91,7 +95,9 @@ def _map_edge(states: FormalTheoremProofStates) -> list[Send]:
     return [Send("check_proof_agent", state) for state in states["inputs"]]
 
 
-def _check_proof(server_url: str, server_max_retries: int, state: FormalTheoremProofState) -> FormalTheoremProofStates:
+def _check_proof(
+    server_url: str, server_max_retries: int, server_timeout: int, state: FormalTheoremProofState
+) -> FormalTheoremProofStates:
     """
     Checks proof of the formal proof in the passed FormalTheoremProofState.
 
@@ -101,6 +107,8 @@ def _check_proof(server_url: str, server_max_retries: int, state: FormalTheoremP
         The URL of the server.
     server_max_retries: int
         The maximum number of retries for the server.
+    server_timeout: int
+        The timeout in seconds for requests to the server.
     state: FormalTheoremProofState
         The formal theorem state  with the formal proof to be checked.
 
@@ -111,7 +119,7 @@ def _check_proof(server_url: str, server_max_retries: int, state: FormalTheoremP
         to the FormalTheoremProofStates "outputs" member.
     """
     # Create a client to access the Kimina Server
-    kimina_client = KiminaClient(api_url=server_url, http_timeout=36000, n_retries=server_max_retries)
+    kimina_client = KiminaClient(api_url=server_url, http_timeout=server_timeout, n_retries=server_max_retries)
 
     # Combine the original theorem statement with the proof body
     # state["formal_theorem"] contains the theorem with `:= by sorry`
@@ -122,7 +130,7 @@ def _check_proof(server_url: str, server_max_retries: int, state: FormalTheoremP
 
     # Check the formal proof with the stored preamble prefix
     proof_with_imports = combine_preamble_and_body(state["preamble"], theorem_with_proof)
-    check_response = kimina_client.check(proof_with_imports, timeout=36000)
+    check_response = kimina_client.check(proof_with_imports, timeout=server_timeout)
 
     # Parse check_response
     parsed_response = parse_kimina_check_response(check_response)
@@ -142,7 +150,9 @@ def _check_proof(server_url: str, server_max_retries: int, state: FormalTheoremP
     return {"outputs": [state]}  # type: ignore[typeddict-item]
 
 
-def check_complete_proof(complete_proof: str, server_url: str, server_max_retries: int) -> tuple[bool, str]:
+def check_complete_proof(
+    complete_proof: str, server_url: str, server_max_retries: int, server_timeout: int
+) -> tuple[bool, str]:
     """
     Checks a complete proof (assembled from subgoals) to verify it proves the desired theorem.
 
@@ -160,6 +170,8 @@ def check_complete_proof(complete_proof: str, server_url: str, server_max_retrie
         The URL of the Kimina server.
     server_max_retries: int
         The maximum number of retries for the Kimina server.
+    server_timeout: int
+        The timeout in seconds for requests to the Kimina server.
 
     Returns
     -------
@@ -169,14 +181,14 @@ def check_complete_proof(complete_proof: str, server_url: str, server_max_retrie
         - str: Error message string if proof is invalid, empty string if valid
     """
     # Create a client to access the Kimina Server
-    kimina_client = KiminaClient(api_url=server_url, http_timeout=36000, n_retries=server_max_retries)
+    kimina_client = KiminaClient(api_url=server_url, http_timeout=server_timeout, n_retries=server_max_retries)
 
     # Ensure trailing newline to prevent Kimina server hangs
     # This follows POSIX standard that text files should end with a newline
     normalized_proof = complete_proof if complete_proof.endswith("\n") else complete_proof + "\n"
 
     # The complete_proof is already a valid Lean file, so we can check it directly
-    check_response = kimina_client.check(normalized_proof, timeout=36000)
+    check_response = kimina_client.check(normalized_proof, timeout=server_timeout)
 
     # Parse check_response
     parsed_response = parse_kimina_check_response(check_response)

@@ -91,6 +91,47 @@ def _map_edge(states: DecomposedFormalTheoremStates) -> list[Send]:
     return [Send("proof_sketcher", state) for state in states["inputs"]]
 
 
+def _extract_responses_api_content(response_content: str | list) -> str:
+    """
+    Extract text content from Responses API format or return string as-is.
+
+    When using OpenAI's Responses API (with use_responses_api=True), the response content
+    is returned as a list of dictionaries, each with a 'type' key and corresponding content.
+    This function extracts all text segments from such responses and concatenates them.
+
+    Parameters
+    ----------
+    response_content: str | list
+        The response content, either a string (standard format) or a list of dictionaries
+        (Responses API format like [{'type': 'text', 'text': '...'}]).
+
+    Returns
+    -------
+    str
+        The extracted text content as a single string. If the input is already a string,
+        it is returned as-is. If it's a list (Responses API format), all text segments
+        are extracted and concatenated in order.
+    """
+    # If it's already a string, return as-is (non-Responses API format)
+    if isinstance(response_content, str):
+        return response_content
+
+    # Handle Responses API format: list of dictionaries
+    if isinstance(response_content, list):
+        text_parts = []
+        for item in response_content:
+            # Check if this is a dictionary with type='text'
+            if isinstance(item, dict) and item.get("type") == "text":
+                text_value = item.get("text", "")
+                if text_value:
+                    text_parts.append(str(text_value))
+        # Concatenate all text parts in order
+        return "".join(text_parts)
+
+    # Fallback: convert to string if it's neither string nor list
+    return str(response_content)
+
+
 def _proof_sketcher(llm: BaseChatModel, state: DecomposedFormalTheoremState) -> DecomposedFormalTheoremStates:
     """
     Sketch the proof of the formal theorem in the passed DecomposedFormalTheoremState.
@@ -130,12 +171,15 @@ def _proof_sketcher(llm: BaseChatModel, state: DecomposedFormalTheoremState) -> 
     # Sketch the proof of the formal theorem
     response_content = llm.invoke(state["decomposition_history"]).content
 
+    # Extract text content from Responses API format (list of dicts) or use string as-is
+    normalized_content = _extract_responses_api_content(response_content)
+
     # Log debug response
-    log_llm_response("DECOMPOSER_AGENT_LLM", str(response_content))
+    log_llm_response("DECOMPOSER_AGENT_LLM", normalized_content)
 
     # Parse sketcher response
     try:
-        proof_sketch = _parse_proof_sketcher_response(str(response_content), state["preamble"])
+        proof_sketch = _parse_proof_sketcher_response(normalized_content, state["preamble"])
 
         # Add the proof sketch to the state
         state["proof_sketch"] = proof_sketch

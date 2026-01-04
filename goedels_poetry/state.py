@@ -1625,7 +1625,7 @@ class GoedelsPoetryStateManager:
         return variants[:max_candidates]
 
     def reconstruct_complete_proof_kimina_guided(
-        self, *, server_url: str, server_max_retries: int, max_candidates: int
+        self, *, server_url: str, server_max_retries: int, server_timeout: int, max_candidates: int
     ) -> tuple[str, bool, str]:
         """
         Attempt to find a reconstruction variant that Kimina marks complete.
@@ -1648,7 +1648,9 @@ class GoedelsPoetryStateManager:
         for idx, variant in enumerate(variants, start=1):
             proof_without_preamble = self._reconstruct_node_proof(self._state.formal_theorem_proof, variant=variant)
             candidate = combine_preamble_and_body(preamble, proof_without_preamble)
-            ok, err = check_complete_proof(candidate, server_url=server_url, server_max_retries=server_max_retries)
+            ok, err = check_complete_proof(
+                candidate, server_url=server_url, server_max_retries=server_max_retries, server_timeout=server_timeout
+            )
             last_err = err
 
             if is_debug_enabled():

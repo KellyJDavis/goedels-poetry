@@ -635,7 +635,7 @@ num_ctx = 262144
 max_remote_retries = 5
 
 [DECOMPOSER_AGENT_LLM]
-model = gpt-5.2-2025-12-11
+model = gpt-5.2-pro-2025-12-11
 provider = openai
 url = https://api.openai.com/v1
 max_tokens = 50000
@@ -691,7 +691,7 @@ package_filters = Mathlib,Batteries,Std,Init,Lean
 
 **Decomposer Agent**:
 - `provider`: The provider type - `"ollama"`, `"vllm"`, `"lmstudio"`, or `"openai"` (default: `"openai"`)
-- `model`: The model used for proof sketching (default: `gpt-5.2-2025-12-11` for OpenAI)
+- `model`: The model used for proof sketching (default: `gpt-5.2-pro-2025-12-11` for OpenAI)
 - `url`: The base URL for the API endpoint (default: `https://api.openai.com/v1` for OpenAI)
 - `max_tokens`: Maximum tokens in generated response (preferred over `max_completion_tokens`)
 - `max_remote_retries`: Maximum remote API retry attempts for network/API errors
