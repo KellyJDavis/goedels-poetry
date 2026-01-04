@@ -115,7 +115,13 @@ def _prover(llm: BaseChatModel, state: FormalTheoremProofState) -> FormalTheorem
         prompt = load_prompt("goedel-prover-v2-initial", formal_statement=formal_statement_with_imports)
 
         # Log debug prompt
-        log_llm_prompt("PROVER_AGENT", prompt, "goedel-prover-v2-initial")
+        log_llm_prompt(
+            "PROVER_AGENT",
+            prompt,
+            "goedel-prover-v2-initial",
+            attempt_num=state["self_correction_attempts"],
+            pass_num=state["pass_attempts"],
+        )
 
         # Put the prompt in the final message
         state["proof_history"] += [HumanMessage(content=prompt)]
@@ -124,7 +130,12 @@ def _prover(llm: BaseChatModel, state: FormalTheoremProofState) -> FormalTheorem
     response_content = llm.invoke(state["proof_history"]).content
 
     # Log debug response
-    log_llm_response("PROVER_AGENT_LLM", str(response_content))
+    log_llm_response(
+        "PROVER_AGENT_LLM",
+        str(response_content),
+        attempt_num=state["self_correction_attempts"],
+        pass_num=state["pass_attempts"],
+    )
 
     # Parse prover response
     try:

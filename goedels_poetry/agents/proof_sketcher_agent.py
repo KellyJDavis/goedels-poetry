@@ -163,7 +163,12 @@ def _proof_sketcher(llm: BaseChatModel, state: DecomposedFormalTheoremState) -> 
         )
 
         # Log debug prompt
-        log_llm_prompt("PROOF_SKETCHER_AGENT", prompt, "decomposer-initial")
+        log_llm_prompt(
+            "PROOF_SKETCHER_AGENT",
+            prompt,
+            "decomposer-initial",
+            attempt_num=state["self_correction_attempts"],
+        )
 
         # Put the prompt in the final message
         state["decomposition_history"] += [HumanMessage(content=prompt)]
@@ -175,7 +180,11 @@ def _proof_sketcher(llm: BaseChatModel, state: DecomposedFormalTheoremState) -> 
     normalized_content = _extract_responses_api_content(response_content)
 
     # Log debug response
-    log_llm_response("DECOMPOSER_AGENT_LLM", normalized_content)
+    log_llm_response(
+        "DECOMPOSER_AGENT_LLM",
+        normalized_content,
+        attempt_num=state["self_correction_attempts"],
+    )
 
     # Parse sketcher response
     try:
