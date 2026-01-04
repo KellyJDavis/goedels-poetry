@@ -93,7 +93,13 @@ def _corrector(state: FormalTheoremProofState) -> FormalTheoremProofStates:
     )
 
     # Log debug prompt
-    log_llm_prompt("PROOF_CORRECTOR_AGENT", prompt, "goedel-prover-v2-subsequent")
+    log_llm_prompt(
+        "PROOF_CORRECTOR_AGENT",
+        prompt,
+        "goedel-prover-v2-subsequent",
+        attempt_num=state["self_correction_attempts"],
+        pass_num=state["pass_attempts"],
+    )
 
     # Add correction request to the state's proof_history
     state["proof_history"] += [HumanMessage(content=prompt)]
