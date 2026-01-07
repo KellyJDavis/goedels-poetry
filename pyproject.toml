@@ -148,6 +148,7 @@ root = ["goedels_poetry"]
 exclude = [
     "\\.venv/.*",
     "\\.goedels_poetry/.*",
+    "\\.goedels-poetry-v.*/.*",
     "test-venv/.*",
     "dist/.*",
     "site/.*",

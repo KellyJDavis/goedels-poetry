@@ -1,10 +1,9 @@
-name: Deploy Documentation
+name: Deploy Tag Documentation
 
 on:
   push:
-    branches:
-      - main
-  workflow_dispatch:
+    tags:
+      - 'v*'  # Trigger on version tags like v0.0.1, v1.0.0, etc.
 
 permissions:
   contents: write  # Need write to update gh-pages branch
@@ -22,7 +21,15 @@ jobs:
       - name: Check out
         uses: actions/checkout@v4
         with:
+          ref: ${{ github.ref }}
           fetch-depth: 0
+
+      - name: Extract tag name
+        id: get-tag
+        run: |
+          TAG=${GITHUB_REF#refs/tags/}
+          echo "tag=$TAG" >> $GITHUB_OUTPUT
+          echo "Building documentation for tag: $TAG"
 
       - name: Set up the environment
         uses: ./.github/actions/setup-python-env
@@ -58,9 +65,11 @@ jobs:
         run: |
           cd ${{ github.workspace }}
 
+          TAG="${{ steps.get-tag.outputs.tag }}"
+
           # Update site_url for versioned deployment
           cp mkdocs.yml mkdocs.yml.original
-          sed -i "s|site_url:.*|site_url: https://KellyJDavis.github.io/main/goedels-poetry|g" mkdocs.yml
+          sed -i "s|site_url:.*|site_url: https://KellyJDavis.github.io/${TAG}/goedels-poetry|g" mkdocs.yml
 
           # Build docs
           if ! uv run mkdocs build; then
@@ -79,7 +88,7 @@ jobs:
           # Restore original mkdocs.yml
           mv mkdocs.yml.original mkdocs.yml
 
-      - name: Merge main docs into gh-pages
+      - name: Merge tag docs into gh-pages
         run: |
           GH_PAGES_DIR="$(dirname ${{ github.workspace }})/gh-pages-repo"
           if [ ! -d "$GH_PAGES_DIR" ]; then
@@ -88,43 +97,38 @@ jobs:
           fi
           cd "$GH_PAGES_DIR"
 
-          # Copy main branch docs
-          mkdir -p main/goedels-poetry
+          TAG="${{ steps.get-tag.outputs.tag }}"
+
+          # Copy tag docs
+          mkdir -p "${TAG}/goedels-poetry"
           if [ ! -d "${{ github.workspace }}/site" ]; then
             echo "Error: site directory not found after build"
             exit 1
           fi
-          cp -r ${{ github.workspace }}/site/* main/goedels-poetry/
+          cp -r ${{ github.workspace }}/site/* "${TAG}/goedels-poetry/"
 
-          # Update root index.html to redirect to latest tag
-          cd ${{ github.workspace }}
-          LATEST_TAG=$(git tag --sort=-version:refname | head -n 1)
-          if [ -z "$LATEST_TAG" ]; then
-            LATEST_TAG="main"
-          fi
-          cd "$GH_PAGES_DIR"
-
+          # Update root index.html to redirect to this latest tag
           cat > index.html << EOF
           <!DOCTYPE html>
           <html>
           <head>
             <meta charset="utf-8">
             <title>Redirecting to Latest Documentation</title>
-            <meta http-equiv="refresh" content="0; url=./${LATEST_TAG}/goedels-poetry/">
-            <link rel="canonical" href="./${LATEST_TAG}/goedels-poetry/">
+            <meta http-equiv="refresh" content="0; url=./${TAG}/goedels-poetry/">
+            <link rel="canonical" href="./${TAG}/goedels-poetry/">
             <script>
-              window.location.replace("./${LATEST_TAG}/goedels-poetry/");
+              window.location.replace("./${TAG}/goedels-poetry/");
             </script>
           </head>
           <body>
-            <p>Redirecting to <a href="./${LATEST_TAG}/goedels-poetry/">latest documentation</a>...</p>
+            <p>Redirecting to <a href="./${TAG}/goedels-poetry/">latest documentation</a>...</p>
           </body>
           </html>
           EOF
 
           # Commit and push
           git add -A
-          git commit -m "Update main branch documentation [skip ci]" || echo "No changes to commit"
+          git commit -m "Add documentation for ${TAG} [skip ci]" || echo "No changes to commit"
           # Retry push up to 3 times to handle race conditions
           PUSH_SUCCESS=false
           for i in 1 2 3; do
@@ -182,6 +186,7 @@ jobs:
         run: |
           GH_PAGES_DIR="$(dirname ${{ github.workspace }})/gh-pages-repo"
           ARTIFACT_DIR="${{ github.workspace }}/pages-artifact"
+          TAG="${{ steps.get-tag.outputs.tag }}"
           if [ ! -d "$GH_PAGES_DIR" ]; then
             echo "Error: gh-pages-repo directory not found at $GH_PAGES_DIR"
             exit 1
@@ -203,9 +208,9 @@ jobs:
             echo "Error: Artifact appears to be empty"
             exit 1
           fi
-          # Verify the main directory we just added exists
-          if [ ! -d "$ARTIFACT_DIR/main" ]; then
-            echo "Warning: main directory not found in artifact, but continuing..."
+          # Verify the tag directory we just added exists
+          if [ ! -d "$ARTIFACT_DIR/${TAG}" ]; then
+            echo "Warning: ${TAG} directory not found in artifact, but continuing..."
           fi
 
       - name: Upload artifact
