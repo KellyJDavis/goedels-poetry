@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.4.0] - 2026-01-07
+
+### Added
+- High-effort reasoning for decomposer agent: added `reasoning={"effort": "high"}` parameter to ChatOpenAI constructor for `DECOMPOSER_AGENT_LLM` when using OpenAI provider, enabling enhanced reasoning capabilities for theorem decomposition tasks.
+- Versioned documentation deployment system: implemented comprehensive GitHub Actions workflows for deploying documentation to versioned subdirectories, enabling users to access documentation for specific versions while maintaining access to the latest documentation. Documentation is deployed to `/vX.Y.Z/goedels-poetry/` for tags and `/main/goedels-poetry/` for the main branch, with automatic root redirect to the latest version.
+- Retroactive documentation deployment workflow: added `build-all-tag-docs.yml` workflow that can build and deploy documentation for all existing tags (32 tags) plus the main branch, with retry logic (3 attempts per tag) and graceful handling of failed builds.
+
+### Changed
+- Updated decomposer agent default model from `gpt-5.2-pro-2025-12-11` to `gpt-5.2-2025-12-11` in configuration files and documentation to align with current model availability.
+- Updated main branch documentation deployment: `deploy-docs.yml` workflow now deploys to `/main/goedels-poetry/` instead of root, maintaining consistency with versioned tag deployments while preserving all versioned documentation in the gh-pages branch.
+
 ## [1.3.0] - 2026-01-04
 
 ### Added
@@ -433,6 +444,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Typer for CLI
 - Rich for beautiful terminal output
 
+[1.4.0]: https://github.com/KellyJDavis/goedels-poetry/releases/tag/v1.4.0
 [1.3.0]: https://github.com/KellyJDavis/goedels-poetry/releases/tag/v1.3.0
 [1.2.8]: https://github.com/KellyJDavis/goedels-poetry/releases/tag/v1.2.8
 [1.2.7]: https://github.com/KellyJDavis/goedels-poetry/releases/tag/v1.2.7
