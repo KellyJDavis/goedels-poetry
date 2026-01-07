@@ -211,6 +211,7 @@ def _create_llm_safe(section: str, **kwargs):  # type: ignore[no-untyped-def]
     # For DECOMPOSER_AGENT_LLM with OpenAI, enable Responses API
     if section == "DECOMPOSER_AGENT_LLM" and provider == "openai":
         chat_openai_kwargs["use_responses_api"] = True
+        chat_openai_kwargs["reasoning"] = {"effort": "high"}
 
     # Add extra_body if not empty (now allowed for OpenAI when using Responses API)
     if extra_body:
