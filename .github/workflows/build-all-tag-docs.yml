@@ -1,0 +1,236 @@
+name: Build All Tag Documentation
+
+on:
+  workflow_dispatch:
+  # This is a one-time retroactive build workflow
+  # Can be triggered manually to build docs for all existing tags
+
+permissions:
+  contents: write  # Need write to update gh-pages branch if we decide to use it
+  pages: write
+  id-token: write
+
+concurrency:
+  group: "pages-retroactive"
+  cancel-in-progress: false
+
+jobs:
+  build-all-versions:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # Need full history to access all tags
+
+      - name: Set up Python environment
+        uses: ./.github/actions/setup-python-env
+        with:
+          python-version: "3.12"
+
+      - name: Get all tags
+        id: get-tags
+        run: |
+          # Get all tags sorted by version (newest first)
+          TAGS=$(git tag --sort=-version:refname)
+          echo "tags<<EOF" >> $GITHUB_OUTPUT
+          echo "$TAGS" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+          echo "Found $(echo "$TAGS" | wc -l | tr -d ' ') tags"
+
+      - name: Create output directory
+        run: |
+          mkdir -p all-versions
+          mkdir -p build-logs
+
+      - name: Build documentation for all tags
+        id: build-tags
+        run: |
+          set +e  # Don't exit on error
+
+          TAGS="${{ steps.get-tags.outputs.tags }}"
+          SUCCESSFUL_BUILDS=()
+          FAILED_BUILDS=()
+
+          for TAG in $TAGS; do
+            echo "=========================================="
+            echo "Building docs for tag: $TAG"
+            echo "=========================================="
+
+            ATTEMPT=1
+            MAX_ATTEMPTS=3
+            BUILD_SUCCESS=false
+
+            while [ $ATTEMPT -le $MAX_ATTEMPTS ]; do
+              echo "Attempt $ATTEMPT of $MAX_ATTEMPTS for $TAG"
+
+              # Checkout the tag
+              git checkout "$TAG" 2>&1 | tee "build-logs/${TAG}-checkout.log"
+
+              if [ $? -ne 0 ]; then
+                echo "Failed to checkout $TAG"
+                ATTEMPT=$((ATTEMPT + 1))
+                continue
+              fi
+
+              # Check if required files exist
+              if [ ! -f "mkdocs.yml" ] || [ ! -d "docs" ] || [ ! -f "pyproject.toml" ]; then
+                echo "Required files missing for $TAG"
+                ATTEMPT=$((ATTEMPT + 1))
+                continue
+              fi
+
+              # Install dependencies for this tag
+              echo "Installing dependencies for $TAG..."
+              uv sync --frozen 2>&1 | tee "build-logs/${TAG}-deps.log"
+
+              if [ $? -ne 0 ]; then
+                echo "Failed to install dependencies for $TAG (attempt $ATTEMPT)"
+                ATTEMPT=$((ATTEMPT + 1))
+                continue
+              fi
+
+              # Build documentation
+              echo "Building documentation for $TAG..."
+
+              # Create a temporary mkdocs.yml with versioned site_url
+              cp mkdocs.yml mkdocs.yml.original
+
+              # Update site_url to point to versioned subdirectory
+              sed -i "s|site_url:.*|site_url: https://KellyJDavis.github.io/${TAG}/goedels-poetry|g" mkdocs.yml
+
+              # Build docs
+              uv run mkdocs build 2>&1 | tee "build-logs/${TAG}-build.log"
+              BUILD_EXIT_CODE=$?
+
+              # Restore original mkdocs.yml
+              mv mkdocs.yml.original mkdocs.yml
+
+              if [ $BUILD_EXIT_CODE -eq 0 ] && [ -d "site" ]; then
+                # Create versioned directory structure
+                mkdir -p "all-versions/${TAG}/goedels-poetry"
+                cp -r site/* "all-versions/${TAG}/goedels-poetry/"
+                echo "✓ Successfully built docs for $TAG"
+                SUCCESSFUL_BUILDS+=("$TAG")
+                BUILD_SUCCESS=true
+                break
+              else
+                echo "✗ Build failed for $TAG (attempt $ATTEMPT)"
+                ATTEMPT=$((ATTEMPT + 1))
+              fi
+            done
+
+            if [ "$BUILD_SUCCESS" = false ]; then
+              echo "✗ Failed to build $TAG after $MAX_ATTEMPTS attempts"
+              FAILED_BUILDS+=("$TAG")
+            fi
+
+            # Clean up for next iteration
+            rm -rf site .venv
+            git checkout main 2>/dev/null || git checkout master 2>/dev/null || true
+          done
+
+          # Build main branch docs
+          echo "=========================================="
+          echo "Building docs for main branch"
+          echo "=========================================="
+
+          git checkout main 2>/dev/null || git checkout master 2>/dev/null || true
+
+          if [ -f "mkdocs.yml" ] && [ -d "docs" ] && [ -f "pyproject.toml" ]; then
+            if ! uv sync --frozen; then
+              echo "Error: Failed to install dependencies for main"
+              exit 1
+            fi
+
+            # Update site_url for main
+            cp mkdocs.yml mkdocs.yml.original
+            sed -i "s|site_url:.*|site_url: https://KellyJDavis.github.io/main/goedels-poetry|g" mkdocs.yml
+
+            uv run mkdocs build
+
+            if [ $? -eq 0 ] && [ -d "site" ]; then
+              mkdir -p "all-versions/main/goedels-poetry"
+              cp -r site/* "all-versions/main/goedels-poetry/"
+              echo "✓ Successfully built docs for main"
+              SUCCESSFUL_BUILDS+=("main")
+            else
+              echo "✗ Failed to build docs for main"
+              FAILED_BUILDS+=("main")
+            fi
+
+            # Restore original mkdocs.yml
+            mv mkdocs.yml.original mkdocs.yml
+          fi
+
+          # Summary
+          echo "=========================================="
+          echo "Build Summary"
+          echo "=========================================="
+          echo "Successful builds: ${#SUCCESSFUL_BUILDS[@]}"
+          for build in "${SUCCESSFUL_BUILDS[@]}"; do
+            echo "  ✓ $build"
+          done
+          echo ""
+          echo "Failed builds: ${#FAILED_BUILDS[@]}"
+          for build in "${FAILED_BUILDS[@]}"; do
+            echo "  ✗ $build"
+          done
+
+          # Set outputs
+          echo "successful_count=${#SUCCESSFUL_BUILDS[@]}" >> $GITHUB_OUTPUT
+          echo "failed_count=${#FAILED_BUILDS[@]}" >> $GITHUB_OUTPUT
+
+      - name: Create root index page
+        run: |
+          # Get the latest tag
+          LATEST_TAG=$(git tag --sort=-version:refname | head -n 1)
+          if [ -z "$LATEST_TAG" ]; then
+            LATEST_TAG="main"
+          fi
+
+          # Create a simple redirect page
+          cat > all-versions/index.html << 'EOF'
+          <!DOCTYPE html>
+          <html>
+          <head>
+            <meta charset="utf-8">
+            <title>Redirecting to Latest Documentation</title>
+            <meta http-equiv="refresh" content="0; url=./LATEST_TAG_PLACEHOLDER/goedels-poetry/">
+            <link rel="canonical" href="./LATEST_TAG_PLACEHOLDER/goedels-poetry/">
+            <script>
+              window.location.replace("./LATEST_TAG_PLACEHOLDER/goedels-poetry/");
+            </script>
+          </head>
+          <body>
+            <p>Redirecting to <a href="./LATEST_TAG_PLACEHOLDER/goedels-poetry/">latest documentation</a>...</p>
+          </body>
+          </html>
+          EOF
+
+          # Replace placeholder with actual latest tag
+          sed -i "s/LATEST_TAG_PLACEHOLDER/$LATEST_TAG/g" all-versions/index.html
+
+      - name: Upload build logs
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: build-logs
+          path: build-logs/
+          retention-days: 30
+
+      - name: Upload documentation artifact
+        uses: actions/upload-pages-artifact@v4
+        with:
+          path: all-versions/
+
+  deploy:
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    runs-on: ubuntu-latest
+    needs: build-all-versions
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
