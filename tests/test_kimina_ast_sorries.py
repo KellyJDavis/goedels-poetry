@@ -1,12 +1,13 @@
 from __future__ import annotations
 
+import importlib
+import sys
+import types
 from typing import Any
 
 import pytest
 
-from goedels_poetry.agents import proof_parser_agent, sketch_parser_agent
 from goedels_poetry.agents.util.common import DEFAULT_IMPORTS
-from goedels_poetry.agents.util.kimina_server import parse_kimina_ast_code_response
 
 
 def _named_have(name: str, prop: str) -> dict:
@@ -95,6 +96,29 @@ def _sorries() -> list[dict]:
     ]
 
 
+def _install_kimina_stub(monkeypatch: pytest.MonkeyPatch, kimina_client_cls: type) -> None:
+    """
+    Install a stub kimina_client module (and its .models) before importing agents to
+    avoid pulling the real dependency (which requires Python 3.12+ TypedDict).
+    """
+    kimina_mod = types.ModuleType("kimina_client")
+    kimina_mod.KiminaClient = kimina_client_cls
+
+    models_mod = types.ModuleType("kimina_client.models")
+
+    class _StubAstModuleResponse:  # minimal placeholder
+        def __init__(self, results: Any) -> None:
+            self.results = results
+
+    models_mod.AstModuleResponse = _StubAstModuleResponse
+    models_mod.CheckResponse = object
+    models_mod.CommandResponse = dict
+    models_mod.Message = dict
+
+    monkeypatch.setitem(sys.modules, "kimina_client", kimina_mod)
+    monkeypatch.setitem(sys.modules, "kimina_client.models", models_mod)
+
+
 class _DummyAstResult:
     def __init__(self) -> None:
         self.module = "dummy"
@@ -109,7 +133,10 @@ class _DummyAstResponse:
 
 
 def test_parse_ast_code_response_threads_sorries() -> None:
-    parsed = parse_kimina_ast_code_response(_DummyAstResponse())
+    # Import with kimina_client stubbed
+    parsed = importlib.import_module("goedels_poetry.agents.util.kimina_server").parse_kimina_ast_code_response(
+        _DummyAstResponse()
+    )
     assert "sorries" in parsed
     assert parsed["sorries"] == _sorries()
 
@@ -128,7 +155,8 @@ def _assert_binders_present(code: str) -> None:
 
 
 def test_sketch_parser_passes_goal_context(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(sketch_parser_agent, "KiminaClient", _DummyKiminaClient)
+    _install_kimina_stub(monkeypatch, _DummyKiminaClient)
+    sketch_parser_agent = importlib.import_module("goedels_poetry.agents.sketch_parser_agent")
 
     state = {
         "parent": None,
@@ -157,7 +185,8 @@ def test_sketch_parser_passes_goal_context(monkeypatch: pytest.MonkeyPatch) -> N
 
 
 def test_proof_parser_passes_goal_context(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(proof_parser_agent, "KiminaClient", _DummyKiminaClient)
+    _install_kimina_stub(monkeypatch, _DummyKiminaClient)
+    proof_parser_agent = importlib.import_module("goedels_poetry.agents.proof_parser_agent")
 
     state = {
         "parent": None,
