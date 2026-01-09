@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.4.2] - 2026-01-09
+
+### Fixed
+- Kimina AST parsing now handles both object- and dict-shaped responses while threading goal-context `sorries` and diagnostics (`messages`, `warnings`, `infos`, `tactics`) so subgoal extraction preserves required binders for incomplete proofs.
+
+### Added
+- Regression tests ensuring Kimina AST `sorries` propagate through sketch and proof parsers, keeping A303656-style subgoal binders intact during decomposition and proof parsing.
+
 ## [1.4.1] - 2026-01-09
 
 ### Fixed
@@ -452,6 +460,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Typer for CLI
 - Rich for beautiful terminal output
 
+[1.4.2]: https://github.com/KellyJDavis/goedels-poetry/releases/tag/v1.4.2
 [1.4.1]: https://github.com/KellyJDavis/goedels-poetry/releases/tag/v1.4.1
 [1.4.0]: https://github.com/KellyJDavis/goedels-poetry/releases/tag/v1.4.0
 [1.3.0]: https://github.com/KellyJDavis/goedels-poetry/releases/tag/v1.3.0
