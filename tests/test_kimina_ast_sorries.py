@@ -96,11 +96,28 @@ def _sorries() -> list[dict]:
     ]
 
 
+def _clear_modules(monkeypatch: pytest.MonkeyPatch, module_names: list[str]) -> None:
+    for name in module_names:
+        monkeypatch.delitem(sys.modules, name, raising=False)
+
+
 def _install_kimina_stub(monkeypatch: pytest.MonkeyPatch, kimina_client_cls: type) -> None:
     """
     Install a stub kimina_client module (and its .models) before importing agents to
     avoid pulling the real dependency (which requires Python 3.12+ TypedDict).
+    Also clears previously imported agent modules so they reload with the stub.
     """
+    _clear_modules(
+        monkeypatch,
+        [
+            "kimina_client",
+            "kimina_client.models",
+            "goedels_poetry.agents.util.kimina_server",
+            "goedels_poetry.agents.proof_parser_agent",
+            "goedels_poetry.agents.sketch_parser_agent",
+        ],
+    )
+
     kimina_mod = types.ModuleType("kimina_client")
     kimina_mod.KiminaClient = kimina_client_cls
 
@@ -132,11 +149,10 @@ class _DummyAstResponse:
         self.results = [_DummyAstResult()]
 
 
-def test_parse_ast_code_response_threads_sorries() -> None:
-    # Import with kimina_client stubbed
-    parsed = importlib.import_module("goedels_poetry.agents.util.kimina_server").parse_kimina_ast_code_response(
-        _DummyAstResponse()
-    )
+def test_parse_ast_code_response_threads_sorries(monkeypatch: pytest.MonkeyPatch) -> None:
+    _install_kimina_stub(monkeypatch, _DummyKiminaClient)
+    kimina_server = importlib.import_module("goedels_poetry.agents.util.kimina_server")
+    parsed = kimina_server.parse_kimina_ast_code_response(_DummyAstResponse())
     assert "sorries" in parsed
     assert parsed["sorries"] == _sorries()
 
