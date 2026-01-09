@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import cast
+from typing import Any, cast
 
 from kimina_client.models import AstModuleResponse, CheckResponse, CommandResponse, Message
 
@@ -59,9 +59,30 @@ def parse_kimina_ast_code_response(ast_code_response: AstModuleResponse) -> dict
         A dict representing the response
     """
     response = ast_code_response.results[0]  # TODO: Is this the right element?
+
+    def _maybe_get(obj: Any, key: str) -> Any:
+        if isinstance(obj, dict):
+            return obj.get(key)
+        return getattr(obj, key, None)
+
+    error = _maybe_get(response, "error")
     parsed_response = {
-        "module": response.module,
-        "error": response.error,
-        "ast": response.ast if response.error is None else None,
+        "module": _maybe_get(response, "module"),
+        "error": error,
+        "ast": _maybe_get(response, "ast") if error is None else None,
     }
+
+    # Thread through goal-context data (sorries) and any additional diagnostic fields if present.
+    # Kimina includes `sorries` on AST responses for incomplete proofs; downstream subgoal extraction
+    # relies on this goal context to reconstruct standalone subgoals.
+    sorries = _maybe_get(response, "sorries") or _maybe_get(_maybe_get(response, "response"), "sorries")
+    if sorries is not None:
+        parsed_response["sorries"] = sorries
+
+    # Preserve optional diagnostic fields when available (safe, best-effort).
+    for field in ("messages", "warnings", "infos", "tactics"):
+        value = _maybe_get(response, field)
+        if value is not None:
+            parsed_response[field] = value
+
     return parsed_response
