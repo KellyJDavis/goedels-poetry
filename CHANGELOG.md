@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.4.1] - 2026-01-09
+
+### Fixed
+- Fixed subgoal binder extraction: improved goal-context parsing to handle target-specific contexts and normalized binder assembly to ensure decomposed lemmas remain standalone and valid. This fixes issues where required binders were missing from extracted subgoals, particularly in cases like A303656-style subgoals.
+
+### Added
+- Regression test coverage for goal context binder extraction: added comprehensive test suite (`test_goal_context_binder_fallback.py`) covering A303656-style subgoals to ensure required binders and syntax remain intact during decomposition.
+
 ## [1.4.0] - 2026-01-07
 
 ### Added
@@ -444,6 +452,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Typer for CLI
 - Rich for beautiful terminal output
 
+[1.4.1]: https://github.com/KellyJDavis/goedels-poetry/releases/tag/v1.4.1
 [1.4.0]: https://github.com/KellyJDavis/goedels-poetry/releases/tag/v1.4.0
 [1.3.0]: https://github.com/KellyJDavis/goedels-poetry/releases/tag/v1.3.0
 [1.2.8]: https://github.com/KellyJDavis/goedels-poetry/releases/tag/v1.2.8
