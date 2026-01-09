@@ -1250,47 +1250,45 @@ def __parse_goal_context_line(line: str) -> dict[str, str] | None:
     return dict.fromkeys(names, type_part)
 
 
-def __parse_goal_context(goal: str) -> dict[str, str]:
+def __parse_goal_context(goal: str, *, stop_at_name: str | None = None) -> dict[str, str]:  # noqa: C901
     r"""
     Parse the goal string to extract variable type declarations.
 
-    Example goal string:
-        "O A C B D : Complex
-        hd₁ : ¬B = D
-        hd₂ : ¬C = D
-        OddProd : Nat := (Finset.filter ...).prod id
-        hOddProd : OddProd = (Finset.filter ...).prod id
-        ⊢ some_goal"
-
-    Returns a dict mapping variable names to their types.
-
-    Notes:
-    - Uses rsplit(":", 1) to handle types that may contain colons (though rare in goal context)
-    - Filters out empty and whitespace-only names
-    - Validates that names are non-empty after processing
-    - Handles both type declarations (name : type) and assignments (name : type := value)
-    - For assignments, extracts the type part before ":="
+    - Splits on lines, stopping at the turnstile.
+    - Handles assignment lines `name : type := value` by keeping only the type.
+    - Optionally stops when encountering `stop_at_name`, collecting only earlier names on that line.
     """
+
     var_types: dict[str, str] = {}
     if not isinstance(goal, str):
         return var_types
 
     lines = goal.split("\n")
 
-    for line in lines:
-        line = line.strip()
-        # Stop at the turnstile (goal separator)
+    for raw_line in lines:
+        line = raw_line.strip()
+        if not line:
+            continue
         if line.startswith("⊢"):
             break
 
-        # Skip empty lines
-        if not line:
+        if " := " in line:
+            parts = line.split(" := ", 1)
+            if len(parts) == 2:
+                line = parts[0].strip()
+
+        line_types = __parse_goal_context_line(line)
+        if not line_types:
             continue
 
-        # Parse the line
-        line_types = __parse_goal_context_line(line)
-        if line_types:
-            var_types.update(line_types)
+        if stop_at_name and stop_at_name in line_types:
+            for nm, typ in line_types.items():
+                if nm == stop_at_name:
+                    break
+                var_types[nm] = typ
+            break
+
+        var_types.update(line_types)
 
     return var_types
 
@@ -1299,8 +1297,14 @@ def __make_binder_from_type_string(name: str, type_str: str) -> dict:
     """
     Create a binder AST node from a name and type string.
     """
+    # Clean common artifacts like leading ':' or extra whitespace to avoid malformed binders
+    cleaned_type_str = type_str.lstrip(":").strip() if isinstance(type_str, str) else ""
+    if cleaned_type_str:
+        cleaned_type_str = " ".join(cleaned_type_str.split())  # normalize whitespace
+    if not cleaned_type_str:
+        cleaned_type_str = "Prop"
     # Create a simple type AST node from the string
-    type_ast = {"val": type_str, "info": {"leading": " ", "trailing": " "}}
+    type_ast = {"val": cleaned_type_str, "info": {"leading": "", "trailing": ""}}
     return __make_binder(name, type_ast)
 
 
@@ -2948,6 +2952,7 @@ def _get_named_subgoal_rewritten_ast(  # noqa: C901
     # - Target-specific types take precedence when there are conflicts
     # - All relevant type information is collected from the complete proof context
     goal_var_types: dict[str, str] = {}
+    target_sorry_full_types: dict[str, str] = {}
     if sorries:
         all_types: dict[str, str] = {}
         target_sorry_types: dict[str, str] = {}
@@ -2959,6 +2964,7 @@ def _get_named_subgoal_rewritten_ast(  # noqa: C901
             if not goal:
                 continue
 
+            # First parse without truncation
             parsed_types = __parse_goal_context(goal)
 
             # Check if this sorry mentions the target name
@@ -2966,23 +2972,36 @@ def _get_named_subgoal_rewritten_ast(  # noqa: C901
             # This avoids false positives (e.g., "h1" matching "h10")
             is_target_sorry = not target_sorry_found and lookup_name in parsed_types
             if is_target_sorry:
-                target_sorry_types = parsed_types
+                # Reparse with truncation at the target to avoid pulling in later context
+                target_sorry_types = __parse_goal_context(goal, stop_at_name=lookup_name)
+                target_sorry_full_types = parsed_types
                 target_sorry_found = True
-
-            # Merge types from this sorry into all_types (don't overwrite existing)
-            # Skip adding target-specific sorry types here - we'll merge them with priority later
-            # This ensures types from earlier sorries (including set_with_hypothesis) are collected
-            if not is_target_sorry:
+            else:
+                # Merge types from this sorry into all_types (don't overwrite existing)
+                # This ensures types from earlier sorries (including set_with_hypothesis) are collected
                 for name, typ in parsed_types.items():
                     if name not in all_types:
                         all_types[name] = typ
 
-        # Merge target-specific types with all types, giving priority to target-specific types
-        # This ensures we have types from the target-specific sorry (most relevant) but also
-        # includes types from other sorries (e.g., set_with_hypothesis bindings from earlier sorries)
-        goal_var_types = all_types.copy()
-        # Overwrite with target-specific types to give them priority
-        goal_var_types.update(target_sorry_types)
+        merged_goal_var_types = all_types.copy()
+        merged_goal_var_types.update(target_sorry_types)
+        # Use merged map for type lookups; binder selection may filter later.
+        goal_var_types = merged_goal_var_types
+        target_goal_var_types = target_sorry_types
+    else:
+        merged_goal_var_types = {}
+        target_goal_var_types = {}
+
+    # If some variables appear only after the target in its goal context, include those
+    # referenced in the target type so they can be bound.
+    if target_sorry_full_types:
+        for name, typ in target_sorry_full_types.items():
+            if name in target_goal_var_types:
+                continue
+            if __is_referenced_in(target, name):
+                target_goal_var_types[name] = typ
+                if name not in goal_var_types:
+                    goal_var_types[name] = typ
 
     # Find enclosing theorem/lemma and extract its parameters/hypotheses
     enclosing_theorem = __find_enclosing_theorem(ast, lookup_name, anon_have_by_id)
@@ -3152,19 +3171,49 @@ def _get_named_subgoal_rewritten_ast(  # noqa: C901
     # Skip this section if we already have theorem binders, as they should cover the variables
     if not theorem_binders:
         defined_in_target = __collect_defined_names(target)
-        for var_name in sorted(goal_var_types.keys()):
-            # Skip if already added as dependency, defined within target, or included as equality hypothesis
-            if (
-                var_name not in existing_binder_names
-                and var_name not in defined_in_target
-                and var_name != target_name
-                and var_name not in variables_in_equality_hypotheses
-            ):
-                # Check if this variable is actually referenced in the target
-                referenced = __is_referenced_in(target, var_name)
-                if referenced:
-                    binder = __make_binder_from_type_string(var_name, goal_var_types[var_name])
-                    binders.append(binder)
+        binder_source = goal_var_types
+        referenced_names = {name for name in binder_source if __is_referenced_in(target, name)}
+        target_goal_names = set(target_goal_var_types.keys())
+        earlier_binding_names = {name for name, _, _ in earlier_bindings}
+        target_full_referenced = {name for name in target_sorry_full_types if __is_referenced_in(target, name)}
+        ascii_referenced = set()
+        for name in target_sorry_full_types:
+            if __is_referenced_in(target, name):
+                normalized = "".join(ch for ch in name if ch.isascii() and (ch.isalnum() or ch == "_"))
+                if normalized:
+                    ascii_referenced.add(normalized)
+        # Also allow ASCII versions of non-ASCII variables when both forms exist in the goal context.
+        for name in goal_var_types:
+            if not name.isascii():
+                normalized = "".join(ch for ch in name if ch.isascii() and (ch.isalnum() or ch == "_"))
+                if normalized and normalized in goal_var_types:
+                    ascii_referenced.add(normalized)
+        allowed_names = (
+            set(deps)
+            | referenced_names
+            | earlier_binding_names
+            | variables_in_equality_hypotheses
+            | target_goal_names
+            | target_full_referenced
+            | ascii_referenced
+        )
+        if not target_goal_var_types:
+            allowed_names |= set(goal_var_types.keys())
+
+        for var_name in binder_source:  # preserves goal-context insertion order
+            if var_name == target_name:
+                continue
+            if var_name not in allowed_names:
+                continue
+            # Skip if already present or locally defined
+            if var_name in existing_binder_names or var_name in defined_in_target:
+                continue
+            # Skip if it was added only as an equality hypothesis variable
+            if var_name in variables_in_equality_hypotheses:
+                continue
+            binder = __make_binder_from_type_string(var_name, binder_source[var_name])
+            binders.append(binder)
+            existing_binder_names.add(var_name)
 
     # find a proof node or fallback to minimal 'by ... sorry'
     proof_node = __find_first(
