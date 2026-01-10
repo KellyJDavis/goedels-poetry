@@ -724,6 +724,33 @@ def __find_dependencies(subtree: Node, name_map: dict[str, dict]) -> set[str]:
 
 
 # ---------------------------
+# Extract exists witness binder
+# ---------------------------
+def __extract_exists_witness_binder(type_node: Node) -> dict | None:
+    """
+    For an existential type node, try to extract the explicit/implicit/instance binder
+    representing the witness. Returns a binder AST or None.
+    """
+    if not isinstance(type_node, dict):
+        return None
+    kind = __normalize_kind(type_node.get("kind", ""))
+    if kind not in {"Lean.Parser.Term.exists", "Lean.Parser.Term.existsContra"}:
+        return None
+    witness_binder = __find_first(
+        type_node,
+        lambda n: isinstance(n, dict)
+        and n.get("kind")
+        in {
+            "Lean.Parser.Term.explicitBinder",
+            "Lean.Parser.Term.implicitBinder",
+            "Lean.Parser.Term.instBinder",
+            "Lean.Parser.Term.strictImplicitBinder",
+        },
+    )
+    return deepcopy(witness_binder) if witness_binder is not None else None
+
+
+# ---------------------------
 # Extract a best-effort type AST for a decl/have
 # ---------------------------
 __TYPE_KIND_CANDIDATES = {
@@ -1499,13 +1526,20 @@ def __extract_theorem_binders(theorem_node: dict, goal_var_types: dict[str, str]
         # Process this argument
         extract_from_node(arg)
 
-    # If the type head is an existential, also add a hypothesis binder for the whole exists.
+    # If the type head is an existential, also add a hypothesis binder (and witness when available).
     decl_type = __extract_type_ast(theorem_node)
     if isinstance(decl_type, dict) and __normalize_kind(decl_type.get("kind", "")) in {
         "Lean.Parser.Term.exists",
         "Lean.Parser.Term.existsContra",
     }:
         existing_names = {__extract_binder_name(b) for b in binders}
+        # Try to preserve the witness binder if present in the existential.
+        witness = __extract_exists_witness_binder(decl_type)
+        if witness is not None:
+            w_name = __extract_binder_name(witness)
+            if w_name and w_name not in existing_names:
+                binders.append(witness)
+                existing_names.add(w_name)
         if "hExists" not in existing_names:
             binders.append(__make_binder("hExists", deepcopy(decl_type)))
 
@@ -1561,8 +1595,13 @@ def __parse_pi_binders_from_type(type_node: Node) -> list[dict]:  # noqa: C901
             binders.append(deepcopy(n))
             return
 
-        # Handle existentials at the head: ∃ x : T, P  => add hypothesis (hExists : ∃ x : T, P)
+        # Handle existentials at the head: ∃ x : T, P  => add witness (if present) and hypothesis
         if k in {"Lean.Parser.Term.exists", "Lean.Parser.Term.existsContra"}:
+            witness = __extract_exists_witness_binder(n)
+            if witness is not None:
+                w_name = __extract_binder_name(witness)
+                if w_name and w_name not in {__extract_binder_name(b) for b in binders}:
+                    binders.append(witness)
             binders.append(__make_binder("hExists", deepcopy(n)))
             return
 
