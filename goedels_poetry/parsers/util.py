@@ -729,6 +729,9 @@ def __find_dependencies(subtree: Node, name_map: dict[str, dict]) -> set[str]:
 __TYPE_KIND_CANDIDATES = {
     "Lean.Parser.Term.typeSpec",
     "Lean.Parser.Term.forall",
+    "Lean.Parser.Term.arrow",
+    "Lean.Parser.Term.exists",
+    "Lean.Parser.Term.existsContra",
     "Lean.Parser.Term.typeAscription",
     "Lean.Parser.Term.app",
     "Lean.Parser.Term.bracketedBinderList",
@@ -762,9 +765,14 @@ def __extract_type_ast(node: Any, binding_name: str | None = None) -> dict | Non
     # top-level decl (common place: args[2] often contains the signature)
     if __is_decl_command_kind(k):
         args = node.get("args", [])
-        if len(args) > 2 and isinstance(args[2], dict):
-            return deepcopy(args[2])
-        cand = __find_first(node, lambda n: n.get("kind") in __TYPE_KIND_CANDIDATES)
+        # Prefer the first arg that looks like a type, skip colon tokens.
+        for arg in args:
+            if isinstance(arg, dict):
+                if arg.get("val") == ":":
+                    continue
+                if arg.get("kind") in __TYPE_KIND_CANDIDATES:
+                    return deepcopy(arg)
+        cand = __find_first(node, lambda n: n.get("kind") in __TYPE_KIND_CANDIDATES and n.get("val") != ":")
         return deepcopy(cand) if cand is not None else None
     # have: look for haveDecl then extract the type specification
     if k == "Lean.Parser.Tactic.tacticHave_":
@@ -1223,10 +1231,10 @@ def __parse_goal_context_line(line: str) -> dict[str, str] | None:
             # Take the part before ":=" which contains "name : type"
             line = assign_parts[0].strip()
 
-    # Split at the last colon to separate name(s) from type
-    # Using rsplit(":", 1) handles cases where type might contain colons
-    # (though this is rare in Lean goal context, it's defensive)
-    parts = line.rsplit(":", 1)
+    # Split at the first colon to separate name(s) from type.
+    # Goal-context lines like "hq : ∃ q : Nat, ..." should preserve the leading quantifier,
+    # so prefer split, not rsplit.
+    parts = line.split(":", 1)
     if len(parts) != 2:
         return None
 
@@ -1427,17 +1435,26 @@ def __extract_theorem_binders(theorem_node: dict, goal_var_types: dict[str, str]
         if isinstance(node, dict):
             kind = node.get("kind", "")
 
-            # Handle explicit binder lists
+            # Handle binder lists (explicit, implicit, instance, strict implicit)
             if kind == "Lean.Parser.Term.bracketedBinderList":
                 for arg in node.get("args", []):
-                    if isinstance(arg, dict) and arg.get("kind") == "Lean.Parser.Term.explicitBinder":
+                    if isinstance(arg, dict) and arg.get("kind") in {
+                        "Lean.Parser.Term.explicitBinder",
+                        "Lean.Parser.Term.implicitBinder",
+                        "Lean.Parser.Term.instBinder",
+                        "Lean.Parser.Term.strictImplicitBinder",
+                    }:
                         binders.append(deepcopy(arg))
                     elif isinstance(arg, dict):
-                        # Recurse to find nested binders
                         extract_from_node(arg)
 
-            # Handle individual explicit binders
-            elif kind == "Lean.Parser.Term.explicitBinder":
+            # Handle individual binders of any flavor
+            elif kind in {
+                "Lean.Parser.Term.explicitBinder",
+                "Lean.Parser.Term.implicitBinder",
+                "Lean.Parser.Term.instBinder",
+                "Lean.Parser.Term.strictImplicitBinder",
+            }:
                 binders.append(deepcopy(node))
 
             # Recurse into args (but stop at the proof body)
@@ -1482,6 +1499,78 @@ def __extract_theorem_binders(theorem_node: dict, goal_var_types: dict[str, str]
         # Process this argument
         extract_from_node(arg)
 
+    # If the type head is an existential, also add a hypothesis binder for the whole exists.
+    decl_type = __extract_type_ast(theorem_node)
+    if isinstance(decl_type, dict) and __normalize_kind(decl_type.get("kind", "")) in {
+        "Lean.Parser.Term.exists",
+        "Lean.Parser.Term.existsContra",
+    }:
+        existing_names = {__extract_binder_name(b) for b in binders}
+        if "hExists" not in existing_names:
+            binders.append(__make_binder("hExists", deepcopy(decl_type)))
+
+    return binders
+
+
+def __parse_pi_binders_from_type(type_node: Node) -> list[dict]:  # noqa: C901
+    """
+    Best-effort extraction of binder-like information from a type expression when no explicit
+    binder list is present (e.g., arrow-only `P → Q`, top-level `∀` Pis, or `∃` in the head).
+    Returns a list of binder-like AST fragments usable as parameters/hypotheses.
+    """
+    binders: list[dict] = []
+
+    def rec(n: Any) -> None:  # noqa: C901
+        if not isinstance(n, dict):
+            return
+        k = __normalize_kind(n.get("kind", ""))
+        args = n.get("args", [])
+
+        # Handle forall (Pi) binders directly
+        if k in {"Lean.Parser.Term.forall", "Lean.Parser.Term.fun"}:
+            # Expect a binder list in args[0] and body in args[1]
+            if args:
+                rec(args[0])
+            if len(args) > 1:
+                rec(args[1])
+            return
+
+        # Handle arrow types (anonymous hypotheses): P -> Q
+        if k == "Lean.Parser.Term.arrow":
+            # args[0] = domain, args[1] = codomain
+            if len(args) >= 2:
+                domain = args[0]
+                # Create an anonymous hypothesis binder for the domain
+                binder_name = "h"
+                idx = 1
+                existing = {__extract_binder_name(b) for b in binders}
+                while binder_name in existing:
+                    idx += 1
+                    binder_name = f"h{idx}"
+                binders.append(__make_binder(binder_name, deepcopy(domain)))
+                rec(args[1])
+            return
+
+        # Handle explicit/implicit/instance/strict implicit binders nested in the type
+        if k in {
+            "Lean.Parser.Term.explicitBinder",
+            "Lean.Parser.Term.implicitBinder",
+            "Lean.Parser.Term.instBinder",
+            "Lean.Parser.Term.strictImplicitBinder",
+        }:
+            binders.append(deepcopy(n))
+            return
+
+        # Handle existentials at the head: ∃ x : T, P  => add hypothesis (hExists : ∃ x : T, P)
+        if k in {"Lean.Parser.Term.exists", "Lean.Parser.Term.existsContra"}:
+            binders.append(__make_binder("hExists", deepcopy(n)))
+            return
+
+        # Recurse through children
+        for v in args:
+            rec(v)
+
+    rec(type_node)
     return binders
 
 
@@ -3008,15 +3097,66 @@ def _get_named_subgoal_rewritten_ast(  # noqa: C901
     if enclosing_theorem is None and enclosing_theorem_for_main is not None:
         enclosing_theorem = enclosing_theorem_for_main
     theorem_binders: list[dict] = []
+    deps: set[str] = set()
     if enclosing_theorem is not None:
+        # Compute dependencies early so fallback binder synthesis can use them.
+        deps = __find_dependencies(target, name_map)
         theorem_binders = __extract_theorem_binders(enclosing_theorem, goal_var_types)
+        if not theorem_binders:
+            # As a fallback, try to parse binders from the declared type itself (Pi/arrow/exists).
+            decl_type = __extract_type_ast(enclosing_theorem)
+            if decl_type is not None:
+                parsed_pi_binders = __parse_pi_binders_from_type(decl_type)
+                if parsed_pi_binders:
+                    theorem_binders.extend(parsed_pi_binders)
+        # Fallback: if the enclosing theorem has no explicit binder list (e.g., only `∀`/`→`),
+        # synthesize binders directly from the goal-context types collected from sorries.
+        if not theorem_binders and goal_var_types:
+            fallback_source = target_goal_var_types or goal_var_types
+            seen_fallback: set[str] = set()
+            added_any = False
+            for name, typ in fallback_source.items():
+                if not any(ch.isalnum() or ch == "_" for ch in name):
+                    continue
+                if name in seen_fallback:
+                    continue
+                # Require relevance: name is referenced in target or a dependency.
+                if not (__is_referenced_in(target, name) or name in deps):
+                    continue
+                binder = __make_binder_from_type_string(name, typ)
+                theorem_binders.append(binder)
+                seen_fallback.add(name)
+                added_any = True
+            # If nothing qualified via relevance, fall back to the first goal-context name to avoid
+            # dropping all theorem parameters in quantifier-only headers.
+            if not added_any:
+                kept: list[str] = []
+                for name, typ in fallback_source.items():
+                    if not any(ch.isalnum() or ch == "_" for ch in name):
+                        continue
+                    if name in seen_fallback:
+                        continue
+                    # Always keep the first name.
+                    if not kept:
+                        binder = __make_binder_from_type_string(name, typ)
+                        theorem_binders.append(binder)
+                        seen_fallback.add(name)
+                        kept.append(name)
+                        continue
+                    # For subsequent names, keep only if their type references a kept name.
+                    if any(k in str(typ) for k in kept):
+                        binder = __make_binder_from_type_string(name, typ)
+                        theorem_binders.append(binder)
+                        seen_fallback.add(name)
+                        kept.append(name)
 
     # Find earlier bindings (have, let, obtain) that appear textually before the target
     earlier_bindings: list[tuple[str, str, dict]] = []
     if enclosing_theorem is not None:
         earlier_bindings = __find_earlier_bindings(enclosing_theorem, lookup_name, name_map, anon_have_by_id)
 
-    deps = __find_dependencies(target, name_map)
+    if not deps:
+        deps = __find_dependencies(target, name_map)
     binders: list[dict] = []
 
     # First, add theorem binders (parameters and hypotheses from enclosing theorem)
@@ -3167,9 +3307,9 @@ def _get_named_subgoal_rewritten_ast(  # noqa: C901
             binder = __make_binder(d, dep_type_ast)
         binders.append(binder)
 
-    # Also add any variables from the goal context that aren't dependencies but are used
-    # Skip this section if we already have theorem binders, as they should cover the variables
-    if not theorem_binders:
+    # Also add any variables from the goal context that aren't dependencies but are used.
+    # Run this even if theorem binders exist, to pick up remaining goal-context variables.
+    if goal_var_types:
         defined_in_target = __collect_defined_names(target)
         binder_source = goal_var_types
         referenced_names = {name for name in binder_source if __is_referenced_in(target, name)}
@@ -3197,8 +3337,6 @@ def _get_named_subgoal_rewritten_ast(  # noqa: C901
             | target_full_referenced
             | ascii_referenced
         )
-        if not target_goal_var_types:
-            allowed_names |= set(goal_var_types.keys())
 
         for var_name in binder_source:  # preserves goal-context insertion order
             if var_name == target_name:
