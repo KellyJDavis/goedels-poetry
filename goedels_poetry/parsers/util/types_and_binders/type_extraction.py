@@ -1,6 +1,7 @@
 """Extract type ASTs from various node types."""
 
 import logging
+from collections.abc import Callable
 from copy import deepcopy
 from typing import Any
 
@@ -34,6 +35,9 @@ def __extract_exists_witness_binder(type_node: Node) -> dict | None:
     """
     For an existential type node, try to extract the explicit/implicit/instance binder
     representing the witness. Returns a binder AST or None.
+
+    NOTE: This function only extracts the FIRST witness binder. For multiple witnesses,
+    use __extract_all_exists_witness_binders instead.
     """
     if not isinstance(type_node, dict):
         return None
@@ -52,6 +56,63 @@ def __extract_exists_witness_binder(type_node: Node) -> dict | None:
         },
     )
     return deepcopy(witness_binder) if witness_binder is not None else None
+
+
+def __find_all_nodes(node: Any, predicate: Callable[[Any], bool]) -> list[Any]:
+    """
+    Find all nodes in the AST that match the predicate.
+    Similar to __find_first but returns all matches.
+    """
+    results = []
+    if isinstance(node, dict):
+        if predicate(node):
+            results.append(node)
+        for val in node.values():
+            results.extend(__find_all_nodes(val, predicate))
+    elif isinstance(node, list):
+        for item in node:
+            results.extend(__find_all_nodes(item, predicate))
+    return results
+
+
+def __extract_all_exists_witness_binders(exists_type_ast: dict) -> list[dict]:
+    """
+    Extract all witness binders from an existential type AST.
+
+    For "∃ c d : Nat, P", returns binders for both 'c' and 'd'.
+    For "∃ x : T, P", returns a binder for 'x'.
+
+    Parameters
+    ----------
+    exists_type_ast: dict
+        The existential type AST node (kind should be "Lean.Parser.Term.exists" or "Lean.Parser.Term.existsContra")
+
+    Returns
+    -------
+    list[dict]
+        List of all witness binder AST nodes (deep copied)
+    """
+    if not isinstance(exists_type_ast, dict):
+        return []
+    kind = __normalize_kind(exists_type_ast.get("kind", ""))
+    if kind not in {"Lean.Parser.Term.exists", "Lean.Parser.Term.existsContra"}:
+        return []
+
+    # Find all binder nodes (not just the first one)
+    witness_binders = __find_all_nodes(
+        exists_type_ast,
+        lambda n: isinstance(n, dict)
+        and n.get("kind")
+        in {
+            "Lean.Parser.Term.explicitBinder",
+            "Lean.Parser.Term.implicitBinder",
+            "Lean.Parser.Term.instBinder",
+            "Lean.Parser.Term.strictImplicitBinder",
+        },
+    )
+
+    # Deep copy all binders
+    return [deepcopy(binder) for binder in witness_binders]
 
 
 def __extract_type_ast(node: Any, binding_name: str | None = None) -> dict | None:  # noqa: C901
@@ -440,5 +501,15 @@ def __strip_leading_colon(type_ast: Any) -> Any:
     if args and isinstance(args[0], dict) and args[0].get("val") == ":":  # noqa: SIM102
         if len(args) > 1:
             return deepcopy(args[1])
+    # Handle val field with leading colon (e.g., {"val": ": Nat", ...})
+    # This prevents double colons when serializing binders
+    if "val" in type_ast and isinstance(type_ast["val"], str):
+        # Strip whitespace first, then colons, then whitespace again
+        # This handles cases like "  :  Nat  " -> "Nat"
+        val = type_ast["val"].lstrip().lstrip(":").strip()
+        if val != type_ast["val"]:
+            result = deepcopy(type_ast)
+            result["val"] = val
+            return result
     # Nothing to strip: return a deepcopy of original
     return deepcopy(type_ast)
