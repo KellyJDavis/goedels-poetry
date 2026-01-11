@@ -1,8 +1,10 @@
 """Extract theorem binders and find earlier bindings."""
 
+import logging
 from copy import deepcopy
 from typing import Any
 
+from ..foundation.ast_to_code import _ast_to_code
 from ..foundation.ast_walkers import __find_first
 from ..foundation.constants import Node
 from ..foundation.kind_utils import __normalize_kind
@@ -20,6 +22,117 @@ from ..names_and_bindings.name_extraction import __extract_binder_name, _extract
 from ..types_and_binders.binder_construction import __make_binder
 from ..types_and_binders.type_extraction import __extract_exists_witness_binder, __extract_type_ast
 from .reference_checking import __contains_target_name
+
+
+def __match_arrow_domain_name(domain: dict, binders: list[dict], goal_var_types: dict[str, str]) -> str | None:
+    """
+    Try to match arrow domain with goal_var_types to get correct hypothesis name.
+
+    Parameters
+    ----------
+    domain: dict
+        The arrow domain AST node
+    binders: list[dict]
+        List of already-extracted binders
+    goal_var_types: dict[str, str]
+        Dictionary mapping variable names to their types from goal context
+
+    Returns
+    -------
+    str | None
+        The matching name from goal_var_types, or None if no match found
+    """
+    try:
+        # Serialize domain AST to string for matching
+        # Normalize by removing whitespace for comparison
+        domain_str = _ast_to_code(deepcopy(domain)).strip()
+        domain_normalized = " ".join(domain_str.split())
+        # Check each entry in goal_var_types for type match
+        existing = {__extract_binder_name(b) for b in binders}
+        for name, typ in goal_var_types.items():
+            # Normalize type string for comparison
+            typ_normalized = " ".join(typ.strip().split())
+            # Match if types are equal (after normalization) and name is not already used
+            if typ_normalized == domain_normalized and name not in existing:
+                return name
+    except Exception as e:
+        # If serialization fails, log and fall back to auto-generated name
+        logging.debug(f"Failed to serialize arrow domain AST for name matching: {e}")
+    return None
+
+
+def __generate_auto_binder_name(binders: list[dict]) -> str:
+    """
+    Generate an auto-generated binder name (h, h1, h2, etc.) that doesn't conflict with existing names.
+
+    Parameters
+    ----------
+    binders: list[dict]
+        List of already-extracted binders
+
+    Returns
+    -------
+    str
+        An auto-generated binder name
+    """
+    binder_name = "h"
+    idx = 1
+    existing = {__extract_binder_name(b) for b in binders}
+    while binder_name in existing:
+        idx += 1
+        binder_name = f"h{idx}"
+    return binder_name
+
+
+def __handle_arrow_type(
+    domain: dict, codomain: dict, binders: list[dict], goal_var_types: dict[str, str] | None, rec: Any
+) -> None:
+    """
+    Handle arrow type (P -> Q) by creating a binder for the domain.
+
+    Parameters
+    ----------
+    domain: dict
+        The arrow domain AST node
+    codomain: dict
+        The arrow codomain AST node
+    binders: list[dict]
+        List of already-extracted binders (modified in place)
+    goal_var_types: dict[str, str] | None
+        Dictionary mapping variable names to their types from goal context
+    rec: function
+        Recursive function to continue processing
+    """
+    # Try to match arrow domain with goal_var_types to get correct name
+    binder_name = None
+    if goal_var_types:
+        binder_name = __match_arrow_domain_name(domain, binders, goal_var_types)
+
+    # Fall back to auto-generated name if no match found
+    if binder_name is None:
+        binder_name = __generate_auto_binder_name(binders)
+
+    binders.append(__make_binder(binder_name, deepcopy(domain)))
+    rec(codomain)
+
+
+def __handle_existential_type(node: dict, binders: list[dict]) -> None:
+    """
+    Handle existential type (∃ x : T, P) by adding witness and hypothesis binders.
+
+    Parameters
+    ----------
+    node: dict
+        The existential AST node
+    binders: list[dict]
+        List of already-extracted binders (modified in place)
+    """
+    witness = __extract_exists_witness_binder(node)
+    if witness is not None:
+        w_name = __extract_binder_name(witness)
+        if w_name and w_name not in {__extract_binder_name(b) for b in binders}:
+            binders.append(witness)
+    binders.append(__make_binder("hExists", deepcopy(node)))
 
 
 def __extract_theorem_binders(theorem_node: dict, goal_var_types: dict[str, str]) -> list[dict]:  # noqa: C901
@@ -118,15 +231,29 @@ def __extract_theorem_binders(theorem_node: dict, goal_var_types: dict[str, str]
     return binders
 
 
-def __parse_pi_binders_from_type(type_node: Node) -> list[dict]:  # noqa: C901
+def __parse_pi_binders_from_type(type_node: Node, goal_var_types: dict[str, str] | None = None) -> list[dict]:  # noqa: C901
     """
     Best-effort extraction of binder-like information from a type expression when no explicit
     binder list is present (e.g., arrow-only `P → Q`, top-level `∀` Pis, or `∃` in the head).
     Returns a list of binder-like AST fragments usable as parameters/hypotheses.
+
+    Parameters
+    ----------
+    type_node: Node
+        The type AST node to parse
+    goal_var_types: dict[str, str] | None, optional
+        Dictionary mapping variable names to their types from goal context.
+        Used to match arrow domain hypotheses with actual names from proof context.
+
+    Returns
+    -------
+    list[dict]
+        List of binder AST nodes
     """
     binders: list[dict] = []
 
-    def rec(n: Any) -> None:  # noqa: C901
+    def rec(n: Any) -> None:
+        """Recursive function to extract binders, with access to goal_var_types from closure."""
         if not isinstance(n, dict):
             return
         k = __normalize_kind(n.get("kind", ""))
@@ -143,18 +270,8 @@ def __parse_pi_binders_from_type(type_node: Node) -> list[dict]:  # noqa: C901
 
         # Handle arrow types (anonymous hypotheses): P -> Q
         if k == "Lean.Parser.Term.arrow":
-            # args[0] = domain, args[1] = codomain
             if len(args) >= 2:
-                domain = args[0]
-                # Create an anonymous hypothesis binder for the domain
-                binder_name = "h"
-                idx = 1
-                existing = {__extract_binder_name(b) for b in binders}
-                while binder_name in existing:
-                    idx += 1
-                    binder_name = f"h{idx}"
-                binders.append(__make_binder(binder_name, deepcopy(domain)))
-                rec(args[1])
+                __handle_arrow_type(args[0], args[1], binders, goal_var_types, rec)
             return
 
         # Handle explicit/implicit/instance/strict implicit binders nested in the type
@@ -169,12 +286,7 @@ def __parse_pi_binders_from_type(type_node: Node) -> list[dict]:  # noqa: C901
 
         # Handle existentials at the head: ∃ x : T, P  => add witness (if present) and hypothesis
         if k in {"Lean.Parser.Term.exists", "Lean.Parser.Term.existsContra"}:
-            witness = __extract_exists_witness_binder(n)
-            if witness is not None:
-                w_name = __extract_binder_name(witness)
-                if w_name and w_name not in {__extract_binder_name(b) for b in binders}:
-                    binders.append(witness)
-            binders.append(__make_binder("hExists", deepcopy(n)))
+            __handle_existential_type(n, binders)
             return
 
         # Recurse through children
