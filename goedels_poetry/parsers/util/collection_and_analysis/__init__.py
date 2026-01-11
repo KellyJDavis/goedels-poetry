@@ -1,0 +1,32 @@
+"""
+Declaration collection and analysis modules.
+"""
+
+from .decl_collection import (
+    __collect_defined_names,
+    __collect_named_decls,
+    __find_dependencies,
+)
+from .reference_checking import (
+    __contains_target_name,
+    __find_enclosing_theorem,
+    __is_referenced_in,
+)
+from .theorem_binders import (
+    __extract_theorem_binders,
+    __find_earlier_bindings,
+    __parse_pi_binders_from_type,
+)
+
+__all__ = [
+    "__collect_defined_names",
+    # Internal functions (exported for use within util package)
+    "__collect_named_decls",
+    "__contains_target_name",
+    "__extract_theorem_binders",
+    "__find_dependencies",
+    "__find_earlier_bindings",
+    "__find_enclosing_theorem",
+    "__is_referenced_in",
+    "__parse_pi_binders_from_type",
+]
