@@ -36,7 +36,11 @@ from ..types_and_binders.binding_types import (
     __get_binding_type_from_node,
     __handle_set_let_binding_as_equality,
 )
-from ..types_and_binders.type_extraction import __extract_type_ast, __strip_leading_colon
+from ..types_and_binders.type_extraction import (
+    __extract_all_exists_witness_binders,
+    __extract_type_ast,
+    __strip_leading_colon,
+)
 
 
 def _get_named_subgoal_rewritten_ast(  # noqa: C901
@@ -244,6 +248,8 @@ def _get_named_subgoal_rewritten_ast(  # noqa: C901
     existing_names.add(lookup_name)
 
     # Next, add earlier bindings (have, let, obtain) as hypotheses
+    # Initialize existing_binder_names set for duplicate prevention
+    existing_binder_names = {__extract_binder_name(b) for b in binders if __extract_binder_name(b) is not None}
     for binding_name, binding_type, binding_node in earlier_bindings:
         # Skip if this is the target itself or already in theorem binders
         if binding_name == target_name:
@@ -293,6 +299,40 @@ def _get_named_subgoal_rewritten_ast(  # noqa: C901
             existing_names.add(binding_name)
         else:
             # For have, obtain, choose, generalize, match, suffices: use improved type determination
+            # Special case: For have bindings with existential types, extract witness binders first
+            if binding_type == "have":
+                # Extract type AST (have bindings have types in AST)
+                type_ast = __extract_type_ast(binding_node, binding_name=binding_name)
+                if type_ast:
+                    # Handle __type_container case: find exists node inside
+                    exists_node = None
+                    if type_ast.get("kind") == "__type_container":
+                        exists_node = __find_first(
+                            type_ast,
+                            lambda n: __normalize_kind(n.get("kind", ""))
+                            in {"Lean.Parser.Term.exists", "Lean.Parser.Term.existsContra"},
+                        )
+                    elif __normalize_kind(type_ast.get("kind", "")) in {
+                        "Lean.Parser.Term.exists",
+                        "Lean.Parser.Term.existsContra",
+                    }:
+                        exists_node = type_ast
+
+                    # If we found an existential type, extract witness binders
+                    if exists_node:
+                        witness_binders = __extract_all_exists_witness_binders(exists_node)
+                        # Check if witnesses are referenced in target or dependencies
+                        for witness_binder in witness_binders:
+                            witness_name = __extract_binder_name(witness_binder)
+                            if (
+                                witness_name
+                                and (witness_name in deps or __is_referenced_in(target, witness_name))
+                                and witness_name not in existing_binder_names
+                            ):
+                                binders.append(witness_binder)
+                                existing_binder_names.add(witness_name)
+
+            # Continue with normal binder creation
             binder = __determine_general_binding_type(binding_name, binding_type, binding_node, goal_var_types)
             binders.append(binder)
             # Track the binding name in existing_names (it's already there, but this ensures consistency)
@@ -301,7 +341,8 @@ def _get_named_subgoal_rewritten_ast(  # noqa: C901
     # Post-process: Add variables from equality hypotheses that are also used elsewhere
     # This fixes the bug where equality hypotheses reference undefined variables
     # (e.g., "hx : x = value" but x itself is not defined as a parameter)
-    existing_binder_names = {__extract_binder_name(b) for b in binders}
+    # Note: existing_binder_names was initialized earlier, but refresh it here to include any binders added during the loop
+    existing_binder_names = {__extract_binder_name(b) for b in binders if __extract_binder_name(b) is not None}
     for var_name in variables_in_equality_hypotheses:
         # Check if variable is used in subgoal (dependencies) or should be included (goal_var_types)
         if (
@@ -406,9 +447,9 @@ def _get_named_subgoal_rewritten_ast(  # noqa: C901
             # Skip if already present or locally defined
             if var_name in existing_binder_names or var_name in defined_in_target:
                 continue
-            # Skip if it was added only as an equality hypothesis variable
-            if var_name in variables_in_equality_hypotheses:
-                continue
+            # Don't skip variables in variables_in_equality_hypotheses - we need BOTH
+            # the equality hypothesis (e.g., hN : N = value) AND the type annotation (e.g., N : Nat)
+            # for standalone lemmas. The existing_binder_names check above prevents duplicates.
             binder = __make_binder_from_type_string(var_name, binder_source[var_name])
             binders.append(binder)
             existing_binder_names.add(var_name)
