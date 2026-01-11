@@ -170,7 +170,7 @@ def _get_named_subgoal_rewritten_ast(  # noqa: C901
             # As a fallback, try to parse binders from the declared type itself (Pi/arrow/exists).
             decl_type = __extract_type_ast(enclosing_theorem)
             if decl_type is not None:
-                parsed_pi_binders = __parse_pi_binders_from_type(decl_type)
+                parsed_pi_binders = __parse_pi_binders_from_type(decl_type, goal_var_types=goal_var_types)
                 if parsed_pi_binders:
                     theorem_binders.extend(parsed_pi_binders)
         # Fallback: if the enclosing theorem has no explicit binder list (e.g., only `∀`/`→`),
@@ -179,6 +179,8 @@ def _get_named_subgoal_rewritten_ast(  # noqa: C901
             fallback_source = target_goal_var_types or goal_var_types
             seen_fallback: set[str] = set()
             added_any = False
+            kept: list[str] = []  # Track kept names for type reference check
+            # First pass: Add variables that pass relevance check
             for name, typ in fallback_source.items():
                 if not any(ch.isalnum() or ch == "_" for ch in name):
                     continue
@@ -190,11 +192,27 @@ def _get_named_subgoal_rewritten_ast(  # noqa: C901
                 binder = __make_binder_from_type_string(name, typ)
                 theorem_binders.append(binder)
                 seen_fallback.add(name)
+                kept.append(name)
                 added_any = True
-            # If nothing qualified via relevance, fall back to the first goal-context name to avoid
+            # Second pass: Add variables whose type references a kept name (even if not directly referenced)
+            # This ensures theorem signature hypotheses (like `hn : n > 1`) are included when
+            # their type references a kept variable (like `n`)
+            for name, typ in fallback_source.items():
+                if not any(ch.isalnum() or ch == "_" for ch in name):
+                    continue
+                if name in seen_fallback:
+                    continue
+                # Check if type references a kept name
+                if kept and any(k in str(typ) for k in kept):
+                    binder = __make_binder_from_type_string(name, typ)
+                    theorem_binders.append(binder)
+                    seen_fallback.add(name)
+                    kept.append(name)
+                    added_any = True
+            # If nothing qualified via relevance or type reference, fall back to the first goal-context name to avoid
             # dropping all theorem parameters in quantifier-only headers.
             if not added_any:
-                kept: list[str] = []
+                kept = []
                 for name, typ in fallback_source.items():
                     if not any(ch.isalnum() or ch == "_" for ch in name):
                         continue
