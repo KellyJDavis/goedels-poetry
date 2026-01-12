@@ -239,6 +239,123 @@ def __get_binding_type_from_node(node: dict | None) -> str | None:
     return None
 
 
+def __extract_value_from_goal_context(var_name: str, sorries: list[dict[str, Any]] | None = None) -> dict | None:
+    """
+    Extract value expression from goal context for a let/set binding.
+
+    Parameters
+    ----------
+    var_name: str
+        The variable name (e.g., "N")
+    sorries: Optional[list[dict[str, Any]]]
+        List of sorries containing goal context strings
+
+    Returns
+    -------
+    Optional[dict]
+        Value AST wrapped in __value_container, or None if not found
+    """
+    if not sorries:
+        return None
+    for sorry in sorries:
+        goal = sorry.get("goal", "")
+        if not goal or var_name not in goal:
+            continue
+        # Look for line like "N : Nat := Int.toNat n" (assignment syntax)
+        lines = goal.split("\n")
+        for line in lines:
+            line = line.strip()
+            if line.startswith("⊢"):
+                break
+            if f"{var_name} :" in line and " := " in line:
+                # Extract value part after " := "
+                parts = line.split(" := ", 1)
+                if len(parts) == 2:
+                    value_str = parts[1].strip()
+                    # Create a simple value container from the string
+                    # This is a simplified approach - in practice, we'd want to parse the AST
+                    # But for now, we'll create a container with the value as a string
+                    return {
+                        "kind": "__value_container",
+                        "args": [{"val": value_str, "info": {"leading": "", "trailing": ""}}],
+                    }
+    return None
+
+
+def __try_fallback_strategies(
+    var_name: str,
+    binding_type: str,
+    binding_node: dict,
+    existing_names: set[str],
+    variables_in_equality_hypotheses: set[str],
+    goal_var_types: dict[str, str] | None = None,
+    sorries: list[dict[str, Any]] | None = None,
+) -> tuple[dict | None, bool]:
+    """
+    Try fallback strategies when value extraction fails.
+
+    Returns
+    -------
+    tuple[Optional[dict], bool]
+        (binder, was_handled) tuple
+    """
+    # Fallback 1a: Try to extract value from goal context
+    value_ast_from_goal = __extract_value_from_goal_context(var_name, sorries)
+    if value_ast_from_goal is not None:
+        # We found the value in goal context, create equality hypothesis
+        hypothesis_name = __generate_equality_hypothesis_name(var_name, existing_names)
+        existing_names.add(hypothesis_name)
+        binder = __make_equality_binder(hypothesis_name, var_name, value_ast_from_goal)
+        variables_in_equality_hypotheses.add(var_name)
+        logging.debug(
+            f"__handle_set_let_binding_as_equality: Value extraction from AST failed for {binding_type} '{var_name}', "
+            "but found value in goal context, created equality hypothesis"
+        )
+        return (binder, True)
+
+    # Fallback 1b: Try to extract type from AST and create a type annotation instead
+    binding_type_ast = __extract_type_ast(binding_node, binding_name=var_name)
+    if binding_type_ast is not None:
+        logging.debug(
+            f"__handle_set_let_binding_as_equality: Value extraction failed for {binding_type} '{var_name}', "
+            "but type extraction succeeded, using type annotation as fallback"
+        )
+        binder = __make_binder(var_name, binding_type_ast)
+        variables_in_equality_hypotheses.add(var_name)
+        return (binder, True)
+
+    # Fallback 2: Try to use goal context types if available
+    if goal_var_types and var_name in goal_var_types:
+        logging.debug(
+            f"__handle_set_let_binding_as_equality: Value and type extraction failed for {binding_type} '{var_name}', "
+            "but found type in goal context, using as fallback"
+        )
+        binder = __make_binder_from_type_string(var_name, goal_var_types[var_name])
+        variables_in_equality_hypotheses.add(var_name)
+        return (binder, True)
+
+    # Fallback 3: Defensive goal context parsing
+    if (not goal_var_types or var_name not in goal_var_types) and sorries:
+        logging.debug(
+            f"__handle_set_let_binding_as_equality: goal_var_types is empty or missing '{var_name}', "
+            "trying defensive goal context parsing from sorries"
+        )
+        for sorry in sorries:
+            goal = sorry.get("goal", "")
+            if goal and var_name in goal:
+                parsed_types = __parse_goal_context(goal)
+                if var_name in parsed_types:
+                    logging.debug(
+                        f"__handle_set_let_binding_as_equality: Found '{var_name}' in defensive goal context parsing, "
+                        f"type: {parsed_types[var_name]}"
+                    )
+                    binder = __make_binder_from_type_string(var_name, parsed_types[var_name])
+                    variables_in_equality_hypotheses.add(var_name)
+                    return (binder, True)
+
+    return (None, False)
+
+
 def __handle_set_let_binding_as_equality(
     var_name: str,
     binding_type: str,
@@ -296,52 +413,6 @@ def __handle_set_let_binding_as_equality(
         return (binder, True)
 
     # Value extraction failed - try fallback strategies
-    # Fallback 1: Try to extract type from AST and create a type annotation instead
-    # This is better than nothing - at least we have the type information
-    binding_type_ast = __extract_type_ast(binding_node, binding_name=var_name)
-    if binding_type_ast is not None:
-        # We have type information, create a type annotation binder
-        # This is not ideal (we wanted an equality), but better than skipping
-        logging.debug(
-            f"__handle_set_let_binding_as_equality: Value extraction failed for {binding_type} '{var_name}', "
-            "but type extraction succeeded, using type annotation as fallback"
-        )
-        binder = __make_binder(var_name, binding_type_ast)
-        variables_in_equality_hypotheses.add(var_name)  # Still track it
-        return (binder, True)
-
-    # Fallback 2: Try to use goal context types if available
-    if goal_var_types and var_name in goal_var_types:
-        logging.debug(
-            f"__handle_set_let_binding_as_equality: Value and type extraction failed for {binding_type} '{var_name}', "
-            "but found type in goal context, using as fallback"
-        )
-        binder = __make_binder_from_type_string(var_name, goal_var_types[var_name])
-        variables_in_equality_hypotheses.add(var_name)  # Still track it
-        return (binder, True)
-
-    # Fallback 3: Defensive goal context parsing - if goal_var_types is empty but sorries exist, try parsing directly
-    if (not goal_var_types or var_name not in goal_var_types) and sorries:
-        logging.debug(
-            f"__handle_set_let_binding_as_equality: goal_var_types is empty or missing '{var_name}', "
-            "trying defensive goal context parsing from sorries"
-        )
-        for sorry in sorries:
-            goal = sorry.get("goal", "")
-            if goal and var_name in goal:
-                parsed_types = __parse_goal_context(goal)
-                if var_name in parsed_types:
-                    logging.debug(
-                        f"__handle_set_let_binding_as_equality: Found '{var_name}' in defensive goal context parsing, "
-                        f"type: {parsed_types[var_name]}"
-                    )
-                    binder = __make_binder_from_type_string(var_name, parsed_types[var_name])
-                    variables_in_equality_hypotheses.add(var_name)
-                    return (binder, True)
-
-    # All fallbacks exhausted - return failure
-    logging.debug(
-        f"__handle_set_let_binding_as_equality: All extraction attempts failed for {binding_type} '{var_name}' "
-        "(value extraction, type extraction, goal context, and defensive parsing all failed)"
+    return __try_fallback_strategies(
+        var_name, binding_type, binding_node, existing_names, variables_in_equality_hypotheses, goal_var_types, sorries
     )
-    return (None, False)
