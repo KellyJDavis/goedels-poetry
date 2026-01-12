@@ -5,6 +5,23 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.4.3] - 2026-01-12
+
+### Fixed
+- Fixed standalone lemma extraction bugs: missing binders, double colon in type serialization, binder ordering, and comment placement. Standalone lemma extraction now correctly handles theorem signature hypotheses, preserves multi-token type expressions, and properly orders binders so type annotations appear before equality hypotheses that reference them.
+- Fixed missing theorem signature variables and hypotheses in standalone lemma extraction for quantifier-only signatures (e.g., `∀ n : ℤ, n > 1 → ...`). Arrow domain hypotheses now use correct names from goal context instead of auto-generated names, and goal context fallback includes variables whose types reference kept names.
+- Fixed test failures and warnings after Phase 3 implementation: corrected AST structure for `haveId` nodes in tests, fixed dependency tracking assertions, and resolved pytest warnings by converting return statements to proper assertions.
+- Fixed subgoal extraction to preserve default parameters (`optParam`, `autoParam`) and implicit/instance/strict binders in subgoal rewrites. Added existential hypothesis and witness binders when theorem head is `∃`, extending pi/arrow fallback to synthesize binders without sorries.
+
+### Changed
+- Refactored `parsers.util` from monolithic 3499-line module into structured package with 26 focused modules organized into 5 logical subdirectories (`foundation/`, `names_and_bindings/`, `types_and_binders/`, `collection_and_analysis/`, `high_level/`). This improves code organization and maintainability while preserving full backward compatibility through `__init__.py` re-exports.
+
+### Added
+- Added support for extracting implicit, strict-implicit, and instance binders from theorem headers in subgoal extraction.
+- Added existential head hypothesis extraction when theorem head is `∃`.
+- Added type-parse fallback for Pi/arrow/∃ types when sorries are absent, with relevance-filtered goal-context fallback.
+- Added comprehensive test suites for root cause validation, double colon bug reproduction, comment placement, fallback logic, relevance checks, goal context population, arrow domain name matching, and implicit/instance binder handling.
+
 ## [1.4.2] - 2026-01-09
 
 ### Fixed
@@ -460,6 +477,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Typer for CLI
 - Rich for beautiful terminal output
 
+[1.4.3]: https://github.com/KellyJDavis/goedels-poetry/releases/tag/v1.4.3
 [1.4.2]: https://github.com/KellyJDavis/goedels-poetry/releases/tag/v1.4.2
 [1.4.1]: https://github.com/KellyJDavis/goedels-poetry/releases/tag/v1.4.1
 [1.4.0]: https://github.com/KellyJDavis/goedels-poetry/releases/tag/v1.4.0
