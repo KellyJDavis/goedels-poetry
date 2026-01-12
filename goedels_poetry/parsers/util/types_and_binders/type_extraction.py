@@ -481,14 +481,59 @@ def __extract_type_ast(node: Any, binding_name: str | None = None) -> dict | Non
     return None
 
 
+def __strip_type_container(type_ast: dict) -> Any:
+    """
+    Handle __type_container by stripping leading colons while preserving all tokens.
+
+    For multi-token types like "x > 0" or "x = y", we need to preserve all tokens.
+    For single-token types wrapped in typeSpec (like "Nat" from "let N : Nat := ..."),
+    we extract just the type token.
+    """
+    args = type_ast.get("args", [])
+    if not args:
+        return deepcopy(type_ast)
+
+    # Skip leading colon tokens
+    non_colon_args = []
+    for arg in args:
+        if isinstance(arg, dict) and arg.get("val") == ":":
+            continue  # Skip colon tokens
+        non_colon_args.append(arg)
+
+    if not non_colon_args:
+        # All args were colons, return container as-is
+        return deepcopy(type_ast)
+
+    # Check if first non-colon arg is a typeSpec (from let bindings)
+    first_arg = non_colon_args[0]
+    if isinstance(first_arg, dict) and first_arg.get("kind") == "Lean.Parser.Term.typeSpec":
+        # Extract the type from typeSpec (skip the colon token inside)
+        type_from_spec = __strip_leading_colon(first_arg)
+        # If there are more args after the typeSpec, combine them
+        if len(non_colon_args) > 1:
+            # Multiple tokens: return a new container with the extracted type + remaining args
+            return {"kind": "__type_container", "args": [type_from_spec, *non_colon_args[1:]]}
+        else:
+            # Single typeSpec: return just the extracted type
+            return type_from_spec
+
+    # Multiple tokens or single non-typeSpec token: preserve all tokens
+    if len(non_colon_args) == 1:
+        # Single token: return it directly (after stripping if needed)
+        return __strip_leading_colon(non_colon_args[0])
+    else:
+        # Multiple tokens: return a new container with all of them
+        return {"kind": "__type_container", "args": [deepcopy(arg) for arg in non_colon_args]}
+
+
 def __strip_leading_colon(type_ast: Any) -> Any:
     """If the AST begins with a ':' token (typeSpec style), return the inner type AST instead."""
     if not isinstance(type_ast, dict):
         return deepcopy(type_ast)
     args = type_ast.get("args", [])
-    # Handle our custom __type_container - just return it as is
+    # Handle our custom __type_container by stripping its inner payload (if any)
     if type_ast.get("kind") == "__type_container":
-        return deepcopy(type_ast)
+        return __strip_type_container(type_ast)
     # If this node itself is a 'typeSpec', often args include colon token (val=":") then the type expression.
     if type_ast.get("kind") == "Lean.Parser.Term.typeSpec" and args:
         # find the first arg that is not the colon token

@@ -166,13 +166,20 @@ def _get_named_subgoal_rewritten_ast(  # noqa: C901
         # Compute dependencies early so fallback binder synthesis can use them.
         deps = __find_dependencies(target, name_map)
         theorem_binders = __extract_theorem_binders(enclosing_theorem, goal_var_types)
-        if not theorem_binders:
-            # As a fallback, try to parse binders from the declared type itself (Pi/arrow/exists).
-            decl_type = __extract_type_ast(enclosing_theorem)
-            if decl_type is not None:
-                parsed_pi_binders = __parse_pi_binders_from_type(decl_type, goal_var_types=goal_var_types)
-                if parsed_pi_binders:
-                    theorem_binders.extend(parsed_pi_binders)
+        # Always try to parse binders from the declared type itself (Pi/arrow/exists),
+        # even if theorem_binders already has some binders. This ensures arrow domain
+        # hypotheses (like `hn : n > 1`) are extracted even when explicit binders exist.
+        decl_type = __extract_type_ast(enclosing_theorem)
+        if decl_type is not None:
+            parsed_pi_binders = __parse_pi_binders_from_type(decl_type, goal_var_types=goal_var_types)
+            if parsed_pi_binders:
+                # Merge parsed binders, avoiding duplicates based on binder names
+                existing_binder_names = {__extract_binder_name(b) for b in theorem_binders if __extract_binder_name(b)}
+                for parsed_binder in parsed_pi_binders:
+                    parsed_name = __extract_binder_name(parsed_binder)
+                    if parsed_name and parsed_name not in existing_binder_names:
+                        theorem_binders.append(parsed_binder)
+                        existing_binder_names.add(parsed_name)
         # Fallback: if the enclosing theorem has no explicit binder list (e.g., only `∀`/`→`),
         # synthesize binders directly from the goal-context types collected from sorries.
         if not theorem_binders and goal_var_types:
@@ -258,7 +265,7 @@ def _get_named_subgoal_rewritten_ast(  # noqa: C901
             existing_names.add(binder_name)
     # Add earlier binding names (from have, obtain, choose, etc. that will be added)
     for binding_name, _binding_type, _binding_node in earlier_bindings:
-        if binding_name != target_name:
+        if binding_name and binding_name != target_name:
             existing_names.add(binding_name)
     # Add dependency names
     existing_names.update(deps)
@@ -472,6 +479,69 @@ def _get_named_subgoal_rewritten_ast(  # noqa: C901
             binders.append(binder)
             existing_binder_names.add(var_name)
 
+    # Utility: reorder equality binders after their referenced variable binder
+    def __reorder_equality_binders(binders: list[dict]) -> None:
+        name_to_index: dict[str, int] = {}
+        for idx, binder in enumerate(binders):
+            bname = __extract_binder_name(binder)
+            if bname:
+                name_to_index[bname] = idx
+
+        idx = 0
+        while idx < len(binders):
+            binder = binders[idx]
+            args = binder.get("args", [])
+            equality_expr = args[3] if len(args) > 3 and isinstance(args[3], dict) else None
+            if equality_expr and equality_expr.get("kind") == "__equality_expr":
+                var_node = equality_expr.get("args", [None])[0] if isinstance(equality_expr.get("args"), list) else None
+                var_name = var_node.get("val") if isinstance(var_node, dict) else None
+                target_idx = name_to_index.get(var_name) if var_name else None
+                if target_idx is not None and target_idx < idx - 1:
+                    binder_to_move = binders.pop(idx)
+                    binders.insert(target_idx + 1, binder_to_move)
+                    name_to_index = {}
+                    for j, b in enumerate(binders):
+                        bname = __extract_binder_name(b)
+                        if bname:
+                            name_to_index[bname] = j
+                    idx = target_idx + 2
+                    continue
+            idx += 1
+
+    # Utility: strip comments from binder trivia and collect them for lemma leading trivia
+    def __strip_binder_comments(binders: list[dict]) -> str:  # noqa: C901
+        collected: list[str] = []
+
+        def strip_info(info: dict) -> dict:
+            if not isinstance(info, dict):
+                return info
+            leading = info.get("leading", "")
+            trailing = info.get("trailing", "")
+            if isinstance(leading, str) and "--" in leading:
+                collected.append(leading)
+                leading = leading.split("--", 1)[0]
+            if isinstance(trailing, str) and "--" in trailing:
+                collected.append(trailing)
+                trailing = trailing.split("--", 1)[0]
+            new_info = dict(info)
+            new_info["leading"] = leading
+            new_info["trailing"] = trailing
+            return new_info
+
+        def walk(node: Any) -> None:
+            if isinstance(node, dict):
+                if "info" in node and isinstance(node["info"], dict):
+                    node["info"] = strip_info(node["info"])
+                for v in node.values():
+                    walk(v)
+            elif isinstance(node, list):
+                for v in node:
+                    walk(v)
+
+        for b in binders:
+            walk(b)
+        return "".join(collected)
+
     # find a proof node or fallback to minimal 'by ... sorry'
     proof_node = __find_first(
         target,
@@ -505,9 +575,23 @@ def _get_named_subgoal_rewritten_ast(  # noqa: C901
             if type_ast_raw is not None
             else {"val": "Prop", "info": {"leading": " ", "trailing": " "}}
         )
+        # Collect comments from the have node leading trivia
+        have_info = target.get("info", {}) if isinstance(target, dict) else {}
+        comment_parts: list[str] = []
+        if isinstance(have_info, dict):
+            leading = have_info.get("leading", "")
+            if isinstance(leading, str) and "--" in leading:
+                comment_parts.append(leading)
+                have_info["leading"] = leading.split("--", 1)[0]
+
+        # Reorder equality binders and strip misplaced comments from binders
+        __reorder_equality_binders(binders)
+        comment_parts.append(__strip_binder_comments(binders))
+        comment_text = "".join(comment_parts)
+
         # Build the new lemma node: "lemma NAME (binders) : TYPE := proof"
         have_args: list[dict[str, Any]] = []
-        have_args.append({"val": "lemma", "info": {"leading": "", "trailing": " "}})
+        have_args.append({"val": "lemma", "info": {"leading": comment_text, "trailing": " "}})
         have_args.append({"val": have_name, "info": {"leading": "", "trailing": " "}})
         if binders:
             have_args.append({"kind": "Lean.Parser.Term.bracketedBinderList", "args": binders})
@@ -555,6 +639,17 @@ def _get_named_subgoal_rewritten_ast(  # noqa: C901
                     },
                 ],
             }
+        # Collect comments from target leading trivia and binder trivia
+        decl_comment_parts: list[str] = []
+        target_info = target.get("info", {}) if isinstance(target, dict) else {}
+        if isinstance(target_info, dict):
+            leading = target_info.get("leading", "")
+            if isinstance(leading, str) and "--" in leading:
+                decl_comment_parts.append(leading)
+                target_info["leading"] = leading.split("--", 1)[0]
+        __reorder_equality_binders(binders)
+        decl_comment_parts.append(__strip_binder_comments(binders))
+        comment_text = "".join(decl_comment_parts)
         top_args: list[dict[str, Any]] = []
         # keep same keyword (theorem/lemma/def)
         kw = (
@@ -564,7 +659,7 @@ def _get_named_subgoal_rewritten_ast(  # noqa: C901
             if __normalize_kind(target.get("kind")) == "Lean.Parser.Command.lemma"
             else "def"
         )
-        top_args.append({"val": kw, "info": {"leading": "", "trailing": " "}})
+        top_args.append({"val": kw, "info": {"leading": comment_text, "trailing": " "}})
         top_args.append({"val": decl_name, "info": {"leading": "", "trailing": " "}})
         if binders:
             top_args.append({"kind": "Lean.Parser.Term.bracketedBinderList", "args": binders})
