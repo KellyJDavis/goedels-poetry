@@ -364,7 +364,11 @@ class GoedelsPoetryFramework:
         extracted theorm introduces a formal theorem child of the parent decomposed formal theorem.
         """
         # Create decomposition agent
-        decomposition_agent = SketchDecompositionAgentFactory.create_agent()
+        decomposition_agent = SketchDecompositionAgentFactory.create_agent(
+            server_url=KIMINA_LEAN_SERVER["url"],
+            server_max_retries=KIMINA_LEAN_SERVER["max_retries"],
+            server_timeout=KIMINA_LEAN_SERVER["timeout"],
+        )
 
         # Get decomposed formal theorem states with sketches and decompose each into formal theorems
         decomposed_states = self._state_manager.get_sketches_to_decompose()
