@@ -86,3 +86,65 @@ def parse_kimina_ast_code_response(ast_code_response: AstModuleResponse) -> dict
             parsed_response[field] = value
 
     return parsed_response
+
+
+def extract_hypotheses_from_check_response(parsed_check_response: dict) -> list[str]:  # noqa: C901
+    """
+    Extract hypothesis strings from "unsolved goals" error messages in a parsed check response.
+
+    Parameters
+    ----------
+    parsed_check_response: dict
+        A parsed check response from parse_kimina_check_response(). Should have an "errors" key
+        containing a list of Message dicts with "severity" == "error".
+
+    Returns
+    -------
+    list[str]
+        List of hypothesis strings in order (e.g., ["n : Z", "hn : n > 1"]).
+        The order is preserved from all "unsolved goals" messages in the order they appear.
+
+    Raises
+    ------
+    ValueError
+        If no error message contains "unsolved goals" in its "data" field.
+    """
+    hypotheses: list[str] = []
+    found_unsolved_goals = False
+
+    errors = parsed_check_response.get("errors", [])
+    if not isinstance(errors, list):
+        raise TypeError("parsed_check_response['errors'] must be a list")  # noqa: TRY003
+
+    # Search all error messages in order
+    for error_msg in errors:
+        if not isinstance(error_msg, dict):
+            continue
+        if error_msg.get("severity") != "error":
+            continue
+
+        data = error_msg.get("data", "")
+        if not isinstance(data, str):
+            continue
+
+        # Check if this is an "unsolved goals" message
+        if not data.startswith("unsolved goals"):
+            continue
+
+        found_unsolved_goals = True
+        lines = data.splitlines()
+
+        # Process lines after "unsolved goals" (first line)
+        for line in lines[1:]:
+            stripped = line.strip()
+            # Stop at the goal line (starts with ⊢ or \u22a2)
+            if stripped.startswith("⊢") or stripped.startswith("\u22a2"):
+                break
+            # Skip blank lines for robustness (kimina server shouldn't produce them, but be safe)
+            if stripped:
+                hypotheses.append(stripped)
+
+    if not found_unsolved_goals:
+        raise ValueError('No error message contains "unsolved goals" in its data field')  # noqa: TRY003
+
+    return hypotheses

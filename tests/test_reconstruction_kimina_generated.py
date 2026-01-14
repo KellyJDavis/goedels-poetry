@@ -322,7 +322,9 @@ if IMPORTS_AVAILABLE:
         ast_without_imports = remove_default_imports_from_ast(parsed["ast"], preamble=DEFAULT_IMPORTS)
         return AST(ast_without_imports, source_text=full, body_start=body_start)
 
-    def _reconstruct_and_check(client: KiminaClient, case: ReconCase) -> None:
+    def _reconstruct_and_check(
+        client: KiminaClient, server_url: str, server_max_retries: int, server_timeout: int, case: ReconCase
+    ) -> None:
         # Build DecomposedFormalTheoremState and parse it with the real SketchParserAgent (mirrors pipeline).
         root: DecomposedFormalTheoremState = cast(
             DecomposedFormalTheoremState,
@@ -348,7 +350,9 @@ if IMPORTS_AVAILABLE:
         root["ast"] = _parse_parent_ast(client, case.parent_body)
 
         # Decompose to create children states (with hole offsets).
-        decomposer = SketchDecompositionAgentFactory.create_agent()
+        decomposer = SketchDecompositionAgentFactory.create_agent(
+            server_url=server_url, server_max_retries=server_max_retries, server_timeout=server_timeout
+        )
         out_states: DecomposedFormalTheoremStates = decomposer.invoke({"inputs": [root], "outputs": []})
         assert out_states["outputs"], "decomposer produced no outputs"
         decomposed = out_states["outputs"][0]
@@ -392,5 +396,7 @@ if IMPORTS_AVAILABLE:
     _CASES = _selected_cases()
 
     @pytest.mark.parametrize("case", _CASES, ids=lambda c: cast(ReconCase, c).case_id)
-    def test_reconstruction_generated_cases(_kimina_client: KiminaClient, case: ReconCase) -> None:
-        _reconstruct_and_check(_kimina_client, case)
+    def test_reconstruction_generated_cases(
+        _kimina_client: KiminaClient, kimina_server_url: str, case: ReconCase
+    ) -> None:
+        _reconstruct_and_check(_kimina_client, kimina_server_url, 3, 36000, case)
