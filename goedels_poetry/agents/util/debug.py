@@ -204,6 +204,30 @@ def log_vectordb_response(operation: str, response: list[Any]) -> None:
     _debug_console.print(Panel(syntax, title=title, border_style="green"))
 
 
+def log_reconstruction_event(event: str, payload: dict[str, Any]) -> None:
+    """
+    Log a reconstruction event if debug mode is enabled.
+
+    Parameters
+    ----------
+    event : str
+        Short event name (e.g., "use_canonical_sketch", "hole_unresolved")
+    payload : dict[str, Any]
+        Event payload to display
+    """
+    if not _DEBUG_ENABLED:
+        return
+
+    timestamp = _get_timestamp()
+    title = f"[bold blue]RECONSTRUCTION[/bold blue] - {event} - [dim]{timestamp}[/dim]"
+
+    import json
+
+    formatted_payload = json.dumps(payload, indent=2, default=str)
+    syntax = Syntax(formatted_payload, "json", theme="monokai", line_numbers=False)
+    _debug_console.print(Panel(syntax, title=title, border_style="blue"))
+
+
 def log_debug_message(message: str, style: str = "yellow") -> None:
     """
     Log a general debug message if debug mode is enabled.

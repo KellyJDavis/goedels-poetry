@@ -23,6 +23,7 @@ from goedels_poetry.agents.util.common import (
     ensure_mandatory_preamble,
     split_preamble_and_body,
 )
+from goedels_poetry.agents.util.debug import log_reconstruction_event
 from goedels_poetry.config.llm import (
     DECOMPOSER_AGENT_MAX_SELF_CORRECTION_ATTEMPTS,
     FORMALIZER_AGENT_MAX_RETRIES,
@@ -1727,7 +1728,18 @@ class GoedelsPoetryStateManager:
             context.partial = True
             return f"{decomposed_state['formal_theorem']} := by sorry\n"
 
-        sketch_text = str(sketch)
+        canonical_sketch = ast.get_body_text() if isinstance(ast, AST) else None
+        if canonical_sketch:
+            sketch_text = canonical_sketch
+            log_reconstruction_event(
+                "use_canonical_sketch",
+                {
+                    "source_len": len(canonical_sketch),
+                    "body_start": ast.get_body_start() if isinstance(ast, AST) else None,
+                },
+            )
+        else:
+            sketch_text = str(sketch)
         holes_by_name = ast.get_sorry_holes_by_name()
 
         children = list(decomposed_state.get("children", []))
@@ -1765,21 +1777,43 @@ class GoedelsPoetryStateManager:
             if hole_start is None or hole_end is None:
                 context.unresolved_holes += 1
                 context.partial = True
+                log_reconstruction_event(
+                    "hole_unresolved",
+                    {"hole_name": hole_name, "reason": "missing_span", "spans": spans},
+                )
                 continue
             if len(spans) > 1 and hole_start is None:
                 context.non_unique_holes = True
                 context.mark_ambiguity()
                 context.unresolved_holes += 1
+                log_reconstruction_event(
+                    "hole_unresolved",
+                    {"hole_name": hole_name, "reason": "ambiguous_span", "spans": spans},
+                )
                 continue
             if not (0 <= hole_start < hole_end <= len(sketch_text)):
                 context.unresolved_holes += 1
                 context.partial = True
+                log_reconstruction_event(
+                    "hole_unresolved",
+                    {
+                        "hole_name": hole_name,
+                        "reason": "span_out_of_range",
+                        "hole_start": hole_start,
+                        "hole_end": hole_end,
+                        "sketch_len": len(sketch_text),
+                    },
+                )
                 continue
 
             proof_body = self._extract_proof_body_ast(child, mode, context)
             if proof_body is None:
                 context.unresolved_holes += 1
                 context.partial = True
+                log_reconstruction_event(
+                    "hole_unresolved",
+                    {"hole_name": hole_name, "reason": "missing_proof_body"},
+                )
                 continue
 
             replacement = self._format_body_for_hole(
@@ -1788,6 +1822,10 @@ class GoedelsPoetryStateManager:
             if replacement is None:
                 context.unresolved_holes += 1
                 context.partial = True
+                log_reconstruction_event(
+                    "hole_unresolved",
+                    {"hole_name": hole_name, "reason": "format_failure"},
+                )
                 continue
             replacements.append((hole_start, hole_end, replacement))
 
