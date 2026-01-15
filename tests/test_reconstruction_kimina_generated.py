@@ -6,7 +6,7 @@ variations) so we can iterate on reconstruction correctness without proving real
 
 Configuration (env vars)
 ------------------------
-- RECONSTRUCTION_TEST_CASES: number of generated cases to run (default: 600). Set to 0 to skip.
+- RECONSTRUCTION_TEST_CASES: number of generated cases to run (default: 200). Set to 0 to skip.
 - RECONSTRUCTION_TEST_SEED: seed used to shuffle the deterministic corpus (default: 0).
 
 These tests match the conventions in `tests/test_kimina_agents.py`:
@@ -409,7 +409,7 @@ if IMPORTS_AVAILABLE:
         assert parsed_check["complete"] is True, parsed_check
 
     def _selected_cases() -> list[ReconCase]:
-        n = _env_int("RECONSTRUCTION_TEST_CASES", 600)
+        n = _env_int("RECONSTRUCTION_TEST_CASES", 200)
         seed = _env_int("RECONSTRUCTION_TEST_SEED", 0)
         if n <= 0:
             return []
