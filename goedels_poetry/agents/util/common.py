@@ -422,13 +422,6 @@ def strip_known_preamble(code: str, expected_preamble: str) -> tuple[str, bool]:
     return folded_body, False
 
 
-def strip_known_preamble_loose(code: str, expected_preamble: str) -> tuple[str, bool]:
-    """
-    Legacy alias retained for backwards compatibility.
-    """
-    return strip_known_preamble(code, expected_preamble)
-
-
 def ensure_mandatory_preamble(preamble: str) -> str:
     """Ensure required Lean directives are present in a preamble."""
     lines = preamble.split("\n") if preamble else []

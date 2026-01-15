@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import dataclasses
-import logging
 import os
 import pickle
 import re
@@ -37,11 +36,8 @@ from goedels_poetry.functools import maybe_save
 from goedels_poetry.parsers.ast import AST
 from goedels_poetry.util.tree import TreeNode
 
-logger = logging.getLogger(__name__)
-
 # Global configuration for output directory
 _OUTPUT_DIR = os.environ.get("GOEDELS_POETRY_DIR", os.path.expanduser("~/.goedels_poetry"))
-
 # Configuration constants for proof reconstruction
 # PROOF_BODY_INDENT_SPACES: Number of spaces to indent proof bodies in Lean4 code.
 # Set to 2 to follow Lean4's standard indentation convention, where tactics inside
@@ -315,8 +311,8 @@ class GoedelsPoetryState:
 
         return checkpoint_files
 
-    @classmethod
-    def load(cls, filepath: str) -> GoedelsPoetryState:
+    @staticmethod
+    def load(filepath: str) -> GoedelsPoetryState:
         """
         Load a GoedelsPoetryState from a pickle file.
 
@@ -902,16 +898,9 @@ class GoedelsPoetryStateManager:
         return FormalTheoremProofStates(inputs=self._state.proof_ast_queue, outputs=[])
 
     @maybe_save(n=1)
-    def set_parsed_proofs(self, parsed_proofs: FormalTheoremProofStates) -> None:
+    def set_parsed_proofs(self) -> None:
         """
-        Sets FormalTheoremProofStates containing parsed_proofs["outputs"] the list of
-        FormalTheoremProofState with proofs with associated ASTs.
-
-        Parameters
-        ---------
-        parsed_proofs: FormalTheoremProofStates
-            FormalTheoremProofStates containing parsed_proofs["outputs"] the list of
-            FormalTheoremProofState each of which has a proof associated AST.
+        Clears the queue of proofs that needed AST parsing.
         """
         # Remove all elements from the queue of proofs to generate ASTs for
         self._state.proof_ast_queue.clear()
@@ -1617,20 +1606,6 @@ class GoedelsPoetryStateManager:
         audit: dict[str, object]
         permissive_ok: bool
 
-    @dataclasses.dataclass(frozen=True)
-    class ReconstructionVariant:
-        """
-        Legacy normalization variant (kept for backward compatibility in unused helpers).
-        """
-
-        variant_id: str
-        dedent_common: bool = True
-        snap_indent_levels: bool = True
-        rewrite_trailing_apply: bool = True
-        fix_dangling_closing_tactics_after_comments: bool = True
-        snap_self_reference_closers: bool = True
-        dedent_last_closer_out_of_inner_have_by: bool = True
-
     def _reconstruction_mode_strict(self) -> ReconstructionMode:
         return self.ReconstructionMode(
             mode_id="strict",
@@ -1691,142 +1666,6 @@ class GoedelsPoetryStateManager:
             permissive_ok=permissive_ok,
         )
 
-    def _reconstruct_leaf_node_proof(self, formal_proof_state: FormalTheoremProofState) -> str:
-        """
-        Reconstruct proof text for a leaf `FormalTheoremProofState`.
-        """
-        if formal_proof_state["formal_proof"] is not None:
-            proof_text = str(formal_proof_state["formal_proof"])
-            # If this is the root leaf (no parent), ensure the output includes the theorem header.
-            # Avoid regex: if it already starts with the theorem signature, return as-is.
-            if formal_proof_state["parent"] is None:
-                theorem_decl_full = str(formal_proof_state["formal_theorem"]).strip()
-                theorem_sig = self._strip_decl_assignment(theorem_decl_full)
-                # Skip leading empty lines and single-line comments to avoid redundant wrapping
-                leading_skipped = self._skip_leading_trivia(proof_text)
-                if leading_skipped.startswith(theorem_sig):
-                    return proof_text
-                # Otherwise treat stored proof as tactics and wrap once.
-                indent = " " * PROOF_BODY_INDENT_SPACES
-                indented_body = self._indent_proof_body(proof_text, indent)
-                return f"{theorem_sig} := by\n{indented_body}"
-            # Non-root leaves are always tactic bodies used for inlining; return as-is.
-            return proof_text
-        # No proof yet, return the theorem with sorry
-        return f"{formal_proof_state['formal_theorem']} := by sorry\n"
-
-    def _apply_offset_replacements(  # noqa: C901
-        self, sketch: str, children: list[TreeNode], *, variant: ReconstructionVariant | None = None
-    ) -> str:
-        """
-        Apply offset-based replacements for children that have hole metadata.
-        """
-        replacements: list[tuple[int, int, str]] = []
-        missing: list[TreeNode] = []
-
-        for child in children:
-            child_proof_body = self._extract_proof_body(child, variant=variant)
-
-            if isinstance(child, dict) and "hole_start" in child and "hole_end" in child:
-                hole_start = cast(int | None, child.get("hole_start"))
-                hole_end = cast(int | None, child.get("hole_end"))
-                if (
-                    isinstance(hole_start, int)
-                    and isinstance(hole_end, int)
-                    and 0 <= hole_start < hole_end <= len(sketch)
-                ):
-                    # Determine indentation prefix on the line containing the hole.
-                    line_start = sketch.rfind("\n", 0, hole_start) + 1
-                    line_prefix = sketch[line_start:hole_start]
-                    # Leading whitespace at the start of this line (used for inline `by sorry` holes).
-                    line = sketch[
-                        line_start : sketch.find("\n", line_start) if "\n" in sketch[line_start:] else len(sketch)
-                    ]
-                    leading_ws = line[: len(line) - len(line.lstrip(" \t"))]
-
-                    normalized_body = self._normalize_child_proof_body(
-                        child_proof_body, offset_insertion=True, variant=variant
-                    )
-                    body_lines = normalized_body.split("\n")
-                    if not body_lines:
-                        body_lines = ["sorry"]
-
-                    # Two forms of `sorry` holes exist in sketches:
-                    # 1) Standalone line: `    sorry` (hole indentation is pure whitespace)
-                    # 2) Inline: `have h : T := by sorry` (hole indentation includes non-whitespace)
-                    #
-                    # For (1), we can replace the token in-place: the line already contains the correct
-                    # indentation prefix before the token. We only need to indent subsequent lines.
-                    #
-                    # For (2), replacing `sorry` with a multi-line proof must insert a newline and indent
-                    # the *entire* proof body under the surrounding `by`.
-                    inline_hole = bool(line_prefix.strip())
-                    rebuilt_lines: list[str] = []
-                    if inline_hole:
-                        proof_indent = leading_ws + (" " * PROOF_BODY_INDENT_SPACES)
-                        rebuilt_lines.append("")  # turn `by sorry` into `by\n<proof>`
-                        for ln in body_lines:
-                            rebuilt_lines.append(f"{proof_indent}{ln}" if ln.strip() else ln)
-                    else:
-                        indent_prefix = line_prefix
-                        for i, ln in enumerate(body_lines):
-                            if i == 0:
-                                rebuilt_lines.append(ln)
-                            else:
-                                rebuilt_lines.append(f"{indent_prefix}{ln}" if ln.strip() else ln)
-
-                    replacement_text = "\n".join(rebuilt_lines)
-                    replacements.append((hole_start, hole_end, replacement_text))
-                    continue
-
-            missing.append(child)
-
-        if replacements:
-            replacements.sort(key=lambda t: t[0], reverse=True)
-            for start, end, rep in replacements:
-                sketch = sketch[:start] + rep + sketch[end:]
-
-        if missing:
-            logger.warning(
-                "Reconstruction skipped %d child(ren) missing valid hole offsets; "
-                "their `sorry` placeholders will remain in the parent sketch.",
-                len(missing),
-            )
-        return sketch
-
-    def _reconstruct_decomposed_node_proof(
-        self, decomposed_state: DecomposedFormalTheoremState, *, variant: ReconstructionVariant | None = None
-    ) -> str:
-        """
-        Reconstruct proof text for an internal `DecomposedFormalTheoremState` by filling holes.
-        """
-        if decomposed_state["proof_sketch"] is None:
-            return f"{decomposed_state['formal_theorem']} := by sorry\n"
-
-        sketch = str(decomposed_state["proof_sketch"])
-
-        # Fill holes using absolute offsets recorded during decomposition (hole_start/hole_end).
-        # The legacy name/regex-based reconstruction path has been removed.
-        return self._apply_offset_replacements(sketch, decomposed_state["children"], variant=variant)
-
-    def _reconstruct_node_proof(self, node: TreeNode) -> str:
-        """
-        Recursively reconstructs the proof for a given node in the proof tree.
-
-        Parameters
-        ----------
-        node : TreeNode
-            The node to reconstruct proof for
-
-        Returns
-        -------
-        str
-            The proof text for this node and all its children (without preamble)
-        """
-        mode = self._reconstruction_mode_strict()
-        context = self.ReconstructionContext(mode_id=mode.mode_id)
-        return self._reconstruct_node_proof_ast(node, mode=mode, context=context)
-
     def _reconstruct_node_proof_ast(
         self,
         node: TreeNode,
@@ -1842,6 +1681,14 @@ class GoedelsPoetryStateManager:
 
         context.mark_failure("unexpected_node")
         return "-- Unable to reconstruct proof for this node\n"
+
+    def _reconstruct_decomposed_node_proof(self, decomposed_state: DecomposedFormalTheoremState) -> str:
+        """
+        Reconstruct proof text for an internal `DecomposedFormalTheoremState` using AST-guided logic.
+        """
+        mode = self._reconstruction_mode_strict()
+        context = self.ReconstructionContext(mode_id=mode.mode_id)
+        return self._reconstruct_decomposed_node_proof_ast(decomposed_state, mode=mode, context=context)
 
     def _reconstruct_leaf_node_proof_ast(
         self,
@@ -2043,6 +1890,59 @@ class GoedelsPoetryStateManager:
         end_c = len(source) if override_text is not None else ast.byte_to_char_index(span_end)
         return source[start_c:end_c]
 
+    def _extract_tactics_after_by(self, proof: str) -> str:
+        """
+        Extracts the tactic sequence after 'by' from a proof.
+
+        Parameters
+        ----------
+        proof : str
+            The complete proof text
+
+        Returns
+        -------
+        str
+            The tactic sequence (indented appropriately)
+        """
+        # Check if this looks like a full lemma/theorem statement.
+        #
+        # IMPORTANT: Do NOT treat a leading `have` as a top-level declaration here.
+        # In many prover outputs (and inlining scenarios), the "proof" we receive is already a
+        # tactic script that starts with `have ... := by ...` and ends with `exact ...`.
+        # Stripping tactics after the first `:= by` would remove the binder and leave dangling
+        # references like `exact h_main` (this was observed in partial.log).
+        starts_with_decl = re.search(r"^\s*(lemma|theorem)\s+", proof, re.MULTILINE)
+
+        if starts_with_decl:
+            # This is a full lemma/theorem statement, find the first := by and extract from there
+            match = re.search(r":=\s*by", proof)
+            if match is None:
+                # Has declaration but no := by, return sorry
+                return "sorry"
+            # Extract everything after the first := by
+            tactics = proof[match.end() :].strip()
+
+            # Check if tactics contain another lemma/theorem (nested)
+            if re.search(r"^\s*(lemma|theorem)\s+", tactics, re.MULTILINE):
+                # Nested lemma, extract from it
+                inner_match = re.search(r":=\s*by", tactics)
+                if inner_match:
+                    tactics = tactics[inner_match.end() :].strip()
+                else:
+                    return "sorry"
+
+            return tactics
+
+        # Not a full declaration, check if it has := by pattern (might be tactics with nested := by)
+        match = re.search(r":=\s*by", proof)
+        if match is None:
+            # No := by pattern, return the whole proof (pure tactics)
+            return proof.strip()
+
+        # Has := by but doesn't start with declaration - this is tactics that contain := by
+        # Return as-is (it's already just tactics)
+        return proof.strip()
+
     @dataclasses.dataclass(frozen=True)
     class _ByToken:
         start: int
@@ -2204,452 +2104,9 @@ class GoedelsPoetryStateManager:
                     rebuilt_lines.append(f"{line_prefix}{ln}" if ln.strip() else ln)
         return "\n".join(rebuilt_lines)
 
-    def _extract_proof_body(self, child: TreeNode, *, variant: ReconstructionVariant | None = None) -> str:
-        """
-        Extracts the proof body (tactics after 'by') from a child node.
-
-        Parameters
-        ----------
-        child : TreeNode
-            The child node to extract proof body from
-
-        Returns
-        -------
-        str
-            The proof body (tactic sequence)
-        """
-        if isinstance(child, dict) and "formal_proof" in child and "children" not in child:
-            # This is a FormalTheoremProofState (leaf)
-            formal_proof_state = cast(FormalTheoremProofState, child)
-            if formal_proof_state["formal_proof"] is not None:
-                proof = str(formal_proof_state["formal_proof"])
-                # Extract just the tactics after "by"
-                return self._extract_tactics_after_by(proof)
-            return "sorry"
-        elif isinstance(child, dict) and "children" in child:
-            # This is a DecomposedFormalTheoremState (internal)
-            # Recursively reconstruct this child first
-            child_complete = self._reconstruct_node_proof(child)
-            return self._extract_tactics_after_by(child_complete)
-        return "sorry"
-
-    def _extract_tactics_after_by(self, proof: str) -> str:
-        """
-        Extracts the tactic sequence after 'by' from a proof.
-
-        Parameters
-        ----------
-        proof : str
-            The complete proof text
-
-        Returns
-        -------
-        str
-            The tactic sequence (indented appropriately)
-        """
-        # Check if this looks like a full lemma/theorem statement.
-        #
-        # IMPORTANT: Do NOT treat a leading `have` as a top-level declaration here.
-        # In many prover outputs (and inlining scenarios), the "proof" we receive is already a
-        # tactic script that starts with `have ... := by ...` and ends with `exact ...`.
-        # Stripping tactics after the first `:= by` would remove the binder and leave dangling
-        # references like `exact h_main` (this was observed in partial.log).
-        starts_with_decl = re.search(r"^\s*(lemma|theorem)\s+", proof, re.MULTILINE)
-
-        if starts_with_decl:
-            # This is a full lemma/theorem statement, find the first := by and extract from there
-            match = re.search(r":=\s*by", proof)
-            if match is None:
-                # Has declaration but no := by, return sorry
-                logger.warning(
-                    "_extract_tactics_after_by received a lemma/theorem statement without ':= by'. "
-                    "Returning 'sorry' as fallback."
-                )
-                return "sorry"
-            # Extract everything after the first := by
-            tactics = proof[match.end() :].strip()
-
-            # Check if tactics contain another lemma/theorem (nested)
-            if re.search(r"^\s*(lemma|theorem)\s+", tactics, re.MULTILINE):
-                # Nested lemma, extract from it
-                inner_match = re.search(r":=\s*by", tactics)
-                if inner_match:
-                    tactics = tactics[inner_match.end() :].strip()
-                else:
-                    logger.error("Could not extract tactics from nested lemma/theorem. Returning 'sorry'.")
-                    return "sorry"
-
-            return tactics
-
-        # Not a full declaration, check if it has := by pattern (might be tactics with nested := by)
-        match = re.search(r":=\s*by", proof)
-        if match is None:
-            # No := by pattern, return the whole proof (pure tactics)
-            return proof.strip()
-
-        # Has := by but doesn't start with declaration - this is tactics that contain := by
-        # Return as-is (it's already just tactics)
-        return proof.strip()
-
-    def _dedent_proof_body(self, proof_body: str) -> str:
-        """
-        Dedent a proof body by removing the common leading indentation from non-empty lines.
-
-        This is critical for Lean4 layout-sensitive constructs like `calc`, `match`, `cases`, etc.
-        Child proofs frequently arrive already-indented (e.g. copied from inside a lemma or have),
-        and re-indenting them naively can push lines too far right, changing parse structure.
-        """
-        lines = proof_body.split("\n")
-        indents: list[int] = []
-        for ln in lines:
-            if not ln.strip():
-                continue
-            count = 0
-            for ch in ln:
-                if ch == " ":
-                    count += 1
-                else:
-                    break
-            indents.append(count)
-        if not indents:
-            return proof_body
-        min_indent = min(indents)
-        if min_indent <= 0:
-            return proof_body
-        prefix = " " * min_indent
-        dedented: list[str] = []
-        for ln in lines:
-            if ln.strip():
-                dedented.append(ln[min_indent:] if ln.startswith(prefix) else ln.lstrip(" "))
-            else:
-                dedented.append(ln)
-        return "\n".join(dedented)
-
-    def _snap_proof_indentation_levels(self, text: str) -> str:
-        """
-        Normalize indentation transitions using a simple indent stack.
-
-        When indentation decreases, only allow dedenting to a previously-seen indentation
-        level; otherwise, snap to the nearest enclosing (previous) indentation level.
-        This avoids producing intermediate indentation levels like 2 when the script
-        only used 0 and 4, which can break Lean's layout-sensitive parsing.
-        """
-        lines = text.split("\n")
-        normalized_lines: list[str] = []
-        indent_stack: list[int] = [0]
-
-        for raw in lines:
-            if not raw.strip():
-                normalized_lines.append(raw)
-                continue
-
-            indent = len(raw) - len(raw.lstrip(" "))
-            content = raw.lstrip(" ")
-
-            current = indent_stack[-1]
-            if indent > current:
-                indent_stack.append(indent)
-                normalized_lines.append(raw)
-                continue
-
-            if indent == current:
-                normalized_lines.append(raw)
-                continue
-
-            while len(indent_stack) > 1 and indent < indent_stack[-1]:
-                indent_stack.pop()
-
-            snapped = indent_stack[-1]
-            if indent != snapped:
-                normalized_lines.append((" " * snapped) + content)
-            else:
-                normalized_lines.append(raw)
-
-        return "\n".join(normalized_lines)
-
-    def _fix_dangling_closing_tactics_after_comments(self, text: str) -> str:
-        """
-        Fix a common LLM formatting issue in tactic scripts:
-
-          -- some comment
-            exact h
-
-        where the closing tactic is over-indented relative to the surrounding block. This can
-        break Lean's layout-sensitive parsing after reconstruction.
-
-        This method is intentionally conservative and is only applied for offset-based insertion
-        paths where we know the exact hole indentation.
-        """
-        # Minimal "safe" set of closing tactics to snap when they appear after a comment and are
-        # over-indented. These are common one-line goal-closing tactics in prover outputs.
-        #
-        # Keep this intentionally small to avoid accidentally changing semantics of genuinely
-        # nested tactic blocks.
-        closing_tactic_re = re.compile(
-            r"^(exact|apply|simpa|simp|assumption|trivial|rfl|decide|aesop|omega|linarith|nlinarith|ring_nf|norm_num)\b"
-        )
-        lines = text.split("\n")
-        changed = False
-        prev_nonempty: str | None = None
-        for i, ln in enumerate(lines):
-            if not ln.strip():
-                continue
-            stripped = ln.lstrip(" ")
-            indent = len(ln) - len(stripped)
-            if (
-                prev_nonempty is not None
-                and prev_nonempty.strip().startswith("--")
-                and closing_tactic_re.match(stripped)
-                and indent > 0
-            ):
-                # Snap to column 0 within the child proof body; the caller will indent it to the hole.
-                lines[i] = stripped
-                changed = True
-            prev_nonempty = ln
-
-        if changed:
-            logger.debug("Reconstruction normalized an over-indented closing tactic following a comment.")
-        return "\n".join(lines)
-
-    def _snap_self_reference_closers_to_have_indent(self, text: str) -> str:
-        """
-        Another common LLM formatting error during inlining:
-
-          have h_main : P := by
-            ...
-            exact h_main
-
-        If `exact h_main` is indented under the `have` line, Lean treats it as part of the inner
-        `by` block (where `h_main` is not yet in scope), leading to unsolved goals / layout errors.
-
-        We conservatively snap any self-referencing closing tactics (`exact/apply/simpa using`) back
-        to the indentation level of the corresponding `have` declaration.
-        """
-        have_re = re.compile(r"^(\s*)have\s+([^\s:(]+)\s*:")
-        close_re_tpl = r"^\s*(?:exact|apply)\s+{name}\b|^\s*simpa\s+using\s+{name}\b"
-
-        lines = text.split("\n")
-        have_indents: dict[str, int] = {}
-        for ln in lines:
-            m = have_re.match(ln)
-            if m:
-                have_indents[m.group(2)] = len(m.group(1))
-
-        if not have_indents:
-            return text
-
-        changed = False
-        for i, ln in enumerate(lines):
-            if not ln.strip():
-                continue
-            stripped = ln.lstrip(" ")
-            indent = len(ln) - len(stripped)
-            for name, have_indent in have_indents.items():
-                if indent <= have_indent:
-                    continue
-                close_re = re.compile(close_re_tpl.format(name=re.escape(name)))
-                if close_re.match(stripped):
-                    lines[i] = (" " * have_indent) + stripped
-                    changed = True
-                    break
-
-        if changed:
-            logger.debug("Reconstruction snapped a self-referencing closer back to its `have` indentation.")
-        return "\n".join(lines)
-
-    def _dedent_last_closer_out_of_inner_have_by(self, text: str) -> str:
-        """
-        Handle a common layout pitfall in nested `have ... := by` blocks.
-
-        LLMs often emit a child proof of the form:
-
-          have h_main : P := by
-            simpa using h₁
-            rfl
-
-        where the final line (`rfl` here) is intended to close the *outer* goal, but is indented as
-        if it were still inside the inner `by` block. This can produce "no goals to be solved" or
-        leave the outer goal unsolved after inlining.
-
-        We conservatively dedent the *last non-empty line* if:
-        - it is indented under a `have ... := by` line, and
-        - it matches a small goal-closing tactic set, and
-        - it immediately follows another goal-closing tactic line at the same inner indentation.
-
-        This is only applied for offset-based insertion paths.
-        """
-        lines = text.split("\n")
-        last_nonempty = -1
-        for i in range(len(lines) - 1, -1, -1):
-            if lines[i].strip():
-                last_nonempty = i
-                break
-        if last_nonempty == -1:
-            return text
-
-        have_by_re = re.compile(r"^(\s*)have\s+[^\s:(]+\s*:.*?:=(?:\s|--[^\n]*|/-.*?-/)*by\b")
-        closer_re = re.compile(r"^(exact|apply|simpa|simp|assumption|trivial|rfl|decide)\b")
-
-        current_have_indent: int | None = None
-        inner_indent: int | None = None
-        prev_nonempty_idx: int | None = None
-        prev_nonempty_indent: int | None = None
-
-        for i, ln in enumerate(lines):
-            if not ln.strip():
-                continue
-            stripped = ln.lstrip(" ")
-            indent = len(ln) - len(stripped)
-
-            m_have = have_by_re.match(ln)
-            if m_have:
-                current_have_indent = len(m_have.group(1))
-                inner_indent = current_have_indent + PROOF_BODY_INDENT_SPACES
-
-            # If we've dedented back out, drop the current have context.
-            if current_have_indent is not None and indent <= current_have_indent and not m_have:
-                current_have_indent = None
-                inner_indent = None
-
-            if (
-                i == last_nonempty
-                and current_have_indent is not None
-                and inner_indent is not None
-                and indent == inner_indent
-                and closer_re.match(stripped)
-                and prev_nonempty_idx is not None
-                and prev_nonempty_indent == inner_indent
-                and closer_re.match(lines[prev_nonempty_idx].lstrip(" "))
-            ):
-                lines[i] = (" " * current_have_indent) + stripped
-                logger.debug("Reconstruction dedented final closing tactic out of inner `have ... := by` block.")
-                return "\n".join(lines)
-
-            prev_nonempty_idx = i
-            prev_nonempty_indent = indent
-
-        return text
-
-    def _rewrite_trailing_apply_of_have_to_exact(self, text: str) -> str:
-        """
-        If the last non-empty line is `apply <name>` and the script previously defines
-        `have <name> : ...`, rewrite it to `exact <name>`.
-        """
-        lines = text.split("\n")
-        last_idx = -1
-        for i in range(len(lines) - 1, -1, -1):
-            if lines[i].strip():
-                last_idx = i
-                break
-        if last_idx == -1:
-            return text
-
-        m = re.match(r"^(\s*)apply\s+([^\s]+)\s*$", lines[last_idx])
-        if not m:
-            return text
-
-        base_indent, name = m.group(1), m.group(2)
-        if not re.search(rf"\bhave\s+{re.escape(name)}\s*:", text):
-            return text
-
-        lines[last_idx] = f"{base_indent}exact {name}"
-        return "\n".join(lines)
-
-    def _normalize_child_proof_body(
-        self,
-        proof_body: str,
-        *,
-        offset_insertion: bool = False,
-        variant: ReconstructionVariant | None = None,
-    ) -> str:
-        """
-        Normalize a child proof body to be safe for textual inlining.
-
-        This handles two common failure modes seen in partial logs:
-        1) Mis-indentation where a line dedents to an indentation level that never occurred before
-           (e.g., top-level 0, nested 4, then a line at 2). Lean is layout-sensitive, and this can
-           produce "expected command" errors.
-        2) Prover scripts that build `have h_main : goal := by ...` and then end with
-           `apply h_main` (which often fails to close the goal). Inlining is more reliable when the
-           script ends with `exact h_main`.
-        """
-        # Default behavior (variant=None) matches historical behavior: apply all normalizations.
-        v = variant or self.ReconstructionVariant("default")
-
-        text = proof_body
-        if v.dedent_common:
-            # First remove any common indentation (helps when the entire proof is shifted right).
-            text = self._dedent_proof_body(text)
-        if v.snap_indent_levels:
-            # Then snap indentation transitions to valid previously-seen indentation levels.
-            text = self._snap_proof_indentation_levels(text)
-        if v.rewrite_trailing_apply:
-            # Finally, rewrite trailing `apply <haveName>` into `exact <haveName>` when applicable.
-            text = self._rewrite_trailing_apply_of_have_to_exact(text)
-
-        # Additional normalization is only used for offset-based insertion (AST-guided) paths.
-        if offset_insertion:
-            if v.fix_dangling_closing_tactics_after_comments:
-                text = self._fix_dangling_closing_tactics_after_comments(text)
-            if v.snap_self_reference_closers:
-                text = self._snap_self_reference_closers_to_have_indent(text)
-            if v.dedent_last_closer_out_of_inner_have_by:
-                text = self._dedent_last_closer_out_of_inner_have_by(text)
-        return text
-
-    def _skip_leading_trivia(self, text: str) -> str:
-        """
-        Skip leading empty lines and single-line comments in the given text.
-
-        This removes:
-        - Empty lines
-        - Line comments starting with '--'
-        - Single-line block comments of the form '/- ... -/'
-        """
-        lines = text.split("\n")
-        idx = 0
-        while idx < len(lines):
-            stripped = lines[idx].strip()
-            if stripped == "":
-                idx += 1
-                continue
-            if stripped.startswith("--"):
-                idx += 1
-                continue
-            if stripped.startswith("/-") and stripped.endswith("-/"):
-                idx += 1
-                continue
-            break
-        return "\n".join(lines[idx:]).lstrip()
-
     def _strip_decl_assignment(self, formal_decl: str) -> str:
         """
         Strip any ':= ...' suffix from a declaration, returning only the header/signature.
         """
         idx = formal_decl.find(":=")
         return formal_decl[:idx].rstrip() if idx != -1 else formal_decl
-
-    def _indent_proof_body(self, proof_body: str, indent: str) -> str:
-        """
-        Indents each line of the proof body.
-
-        Parameters
-        ----------
-        proof_body : str
-            The proof body to indent
-        indent : str
-            The indentation string to add
-
-        Returns
-        -------
-        str
-            The indented proof body
-        """
-        lines = proof_body.split("\n")
-        indented_lines = []
-        for line in lines:
-            if line.strip():  # Only indent non-empty lines
-                indented_lines.append(indent + line)
-            else:
-                indented_lines.append(line)
-        return "\n".join(indented_lines)
