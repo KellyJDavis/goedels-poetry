@@ -256,7 +256,7 @@ class GoedelsPoetryFramework:
         # Get formal theorem states and parse their proofs into ASTs
         formal_theorem_states = self._state_manager.get_proofs_to_parse()
         formal_theorem_states = cast(FormalTheoremProofStates, proof_parser_agent.invoke(formal_theorem_states))
-        self._state_manager.set_parsed_proofs(formal_theorem_states)
+        self._state_manager.set_parsed_proofs()
 
     def generate_search_queries(self) -> None:
         """
