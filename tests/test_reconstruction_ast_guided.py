@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from typing import cast
 
-from ast_test_utils import build_simple_ast
+from ast_test_utils import build_simple_ast, find_sorry_spans
 
 from goedels_poetry.agents.state import DecomposedFormalTheoremState, FormalTheoremProofState
 from goedels_poetry.agents.util.common import DEFAULT_IMPORTS
@@ -83,7 +83,7 @@ def test_reconstruction_fills_named_have_holes_by_offsets() -> None:
         formal_theorem_proof: TreeNode | None = None
 
     st = _DummyState()
-    mgr = GoedelsPoetryStateManager(cast(object, st))  # runtime duck-typing
+    mgr = GoedelsPoetryStateManager(cast(object, st))  # type: ignore[arg-type]
 
     root: DecomposedFormalTheoremState = DecomposedFormalTheoremState(
         parent=None,
@@ -102,6 +102,9 @@ def test_reconstruction_fills_named_have_holes_by_offsets() -> None:
         decomposition_history=[],
         search_queries=None,
         search_results=None,
+        hole_name=None,
+        hole_start=None,
+        hole_end=None,
     )
 
     root["children"].append(
@@ -134,3 +137,77 @@ def test_reconstruction_fills_named_have_holes_by_offsets() -> None:
     reconstructed = mgr.reconstruct_complete_proof()
     assert "sorry" not in reconstructed
     assert "exact h_main" in reconstructed
+
+
+def test_reconstruction_prefers_canonical_sketch_text() -> None:
+    canonical_sketch = """theorem recon_canonical (n : Nat) : n = n := by
+  have h₁ : n = n := by
+    sorry
+
+  have h₂ : n = n := by
+    sorry
+  exact h₂
+"""
+    altered_sketch = canonical_sketch.replace("\n\n  have h₂", "\n  have h₂")
+
+    sorry_spans = find_sorry_spans(canonical_sketch)
+    (h1_start, h1_end), (h2_start, h2_end) = sorry_spans
+
+    class _DummyState:
+        _root_preamble = DEFAULT_IMPORTS
+        formal_theorem_proof: TreeNode | None = None
+
+    st = _DummyState()
+    mgr = GoedelsPoetryStateManager(cast(object, st))  # type: ignore[arg-type]
+
+    root: DecomposedFormalTheoremState = DecomposedFormalTheoremState(
+        parent=None,
+        children=[],
+        depth=0,
+        formal_theorem="theorem recon_canonical ...",
+        preamble=DEFAULT_IMPORTS,
+        proof_sketch=altered_sketch,
+        syntactic=True,
+        errors=None,
+        ast=build_simple_ast(
+            canonical_sketch,
+            sorry_spans=[(h1_start, h1_end), (h2_start, h2_end)],
+        ),
+        self_correction_attempts=0,
+        decomposition_history=[],
+        search_queries=None,
+        search_results=None,
+        hole_name=None,
+        hole_start=None,
+        hole_end=None,
+    )
+
+    root["children"].append(
+        cast(
+            TreeNode,
+            _mk_leaf(
+                cast(TreeNode, root),
+                hole_name="h₁",
+                hole_start=h1_start,
+                hole_end=h1_end,
+                proof_body="rfl",
+            ),
+        )
+    )
+    root["children"].append(
+        cast(
+            TreeNode,
+            _mk_leaf(
+                cast(TreeNode, root),
+                hole_name="h₂",
+                hole_start=h2_start,
+                hole_end=h2_end,
+                proof_body="rfl",
+            ),
+        )
+    )
+
+    st.formal_theorem_proof = cast(TreeNode, root)
+    reconstructed = mgr.reconstruct_complete_proof()
+    assert "sorry" not in reconstructed
+    assert "\n\n  have h₂" in reconstructed

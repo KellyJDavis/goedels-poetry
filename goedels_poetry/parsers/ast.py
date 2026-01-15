@@ -173,6 +173,18 @@ class AST:
         """
         return self._body_start
 
+    def get_body_text(self) -> str | None:
+        """
+        Return the exact body text slice from the original source text, if available.
+
+        This preserves the exact character layout used by Kimina parsing, which is required
+        for stable offset-based reconstruction.
+        """
+        if self._source_text is None:
+            return None
+        start = max(0, int(self._body_start))
+        return self._source_text[start:]
+
     def set_source_text(self, source_text: str | None, *, body_start: int | None = None) -> None:
         """
         Set/replace the source text metadata for this AST.
