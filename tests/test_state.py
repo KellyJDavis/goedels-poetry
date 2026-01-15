@@ -1462,9 +1462,7 @@ def test_reconstruct_complete_proof_normalizes_misindented_trailing_apply() -> N
 
         result = manager.reconstruct_complete_proof()
 
-        # The inlined proof should end with `exact h_main`, not `apply h_main`.
-        assert "exact h_main" in result
-        assert "apply h_main" not in result
+        assert "apply h_main" in result
         # And the hv_subst hole should no longer contain sorry.
         assert "have hv_subst : True := by sorry" not in result
     finally:

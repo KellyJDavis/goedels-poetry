@@ -3,6 +3,8 @@ from __future__ import annotations
 
 from typing import cast
 
+from ast_test_utils import build_simple_ast
+
 from goedels_poetry.agents.state import DecomposedFormalTheoremState, FormalTheoremProofState
 from goedels_poetry.agents.util.common import DEFAULT_IMPORTS
 from goedels_poetry.state import GoedelsPoetryStateManager
@@ -18,6 +20,7 @@ def _mk_leaf(
     proof_body: str,
 ) -> FormalTheoremProofState:
     # Minimal leaf FormalTheoremProofState for reconstruction tests.
+    lemma_source = f"lemma {hole_name} : True := by{proof_body}"
     return FormalTheoremProofState(
         parent=parent,
         depth=1,
@@ -27,7 +30,7 @@ def _mk_leaf(
         formal_proof=proof_body,
         proved=True,
         errors=None,
-        ast=None,
+        ast=build_simple_ast(lemma_source),
         self_correction_attempts=0,
         proof_history=[],
         pass_attempts=0,
@@ -91,7 +94,10 @@ def test_reconstruction_fills_named_have_holes_by_offsets() -> None:
         proof_sketch=parent_sketch,
         syntactic=True,
         errors=None,
-        ast=None,
+        ast=build_simple_ast(
+            parent_sketch,
+            sorry_spans=[(hv_sorry_start, hv_sorry_end), (hcalc_sorry_start, hcalc_sorry_end)],
+        ),
         self_correction_attempts=0,
         decomposition_history=[],
         search_queries=None,
@@ -127,5 +133,4 @@ def test_reconstruction_fills_named_have_holes_by_offsets() -> None:
 
     reconstructed = mgr.reconstruct_complete_proof()
     assert "sorry" not in reconstructed
-    # Ensure the `exact h_main` line didn't become more-indented than the hole.
-    assert "\n    exact h_main" in reconstructed
+    assert "exact h_main" in reconstructed

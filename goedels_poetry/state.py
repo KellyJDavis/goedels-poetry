@@ -24,7 +24,6 @@ from goedels_poetry.agents.util.common import (
     ensure_mandatory_preamble,
     split_preamble_and_body,
 )
-from goedels_poetry.agents.util.debug import is_debug_enabled
 from goedels_poetry.config.llm import (
     DECOMPOSER_AGENT_MAX_SELF_CORRECTION_ATTEMPTS,
     FORMALIZER_AGENT_MAX_RETRIES,
@@ -35,6 +34,7 @@ from goedels_poetry.config.llm import (
 
 # Note: All LLM instances are imported from goedels_poetry.config.llm
 from goedels_poetry.functools import maybe_save
+from goedels_poetry.parsers.ast import AST
 from goedels_poetry.util.tree import TreeNode
 
 logger = logging.getLogger(__name__)
@@ -77,6 +77,9 @@ class GoedelsPoetryState:
         # Kimina-guided reconstruction metadata (persisted in checkpoints)
         self.reconstruction_attempts: int = 0
         self.reconstruction_strategy_used: str | None = None
+        self.reconstruction_partial: bool = False
+        self.reconstruction_failure_reason: str | None = None
+        self.reconstruction_audit: dict[str, object] | None = None
 
         # If set, this is the final complete proof text (including preamble) selected at finish-time.
         # This allows CLI output to write the same proof that passed final verification.
@@ -192,6 +195,12 @@ class GoedelsPoetryState:
             self.reconstruction_attempts = 0
         if not hasattr(self, "reconstruction_strategy_used"):
             self.reconstruction_strategy_used = None
+        if not hasattr(self, "reconstruction_partial"):
+            self.reconstruction_partial = False
+        if not hasattr(self, "reconstruction_failure_reason"):
+            self.reconstruction_failure_reason = None
+        if not hasattr(self, "reconstruction_audit"):
+            self.reconstruction_audit = None
         if not hasattr(self, "final_complete_proof"):
             self.final_complete_proof = None
 
@@ -1519,16 +1528,99 @@ class GoedelsPoetryStateManager:
         if self._state.formal_theorem_proof is None:
             return combine_preamble_and_body(preamble, "-- No proof available")
 
-        proof_without_preamble = self._reconstruct_node_proof(self._state.formal_theorem_proof)
-        return combine_preamble_and_body(preamble, proof_without_preamble)
+        modes = [
+            self._reconstruction_mode_strict(),
+            self._reconstruction_mode_permissive_a(),
+            self._reconstruction_mode_permissive_b(),
+        ]
+        strict_result = self._reconstruct_with_mode(self._state.formal_theorem_proof, modes[0])
+        chosen = strict_result
+        if (
+            (strict_result.failure_reason is not None or strict_result.partial)
+            and strict_result.failure_reason != "ambiguity"
+            and strict_result.permissive_ok
+        ):
+            for mode in modes[1:]:
+                perm_result = self._reconstruct_with_mode(
+                    self._state.formal_theorem_proof,
+                    mode,
+                    strict_result,
+                )
+                if perm_result.failure_reason is None and not perm_result.partial:
+                    chosen = perm_result
+                    break
+
+        if chosen.mode_id == "strict":
+            self._state.reconstruction_attempts = 1
+        elif chosen.mode_id == "permissive_a":
+            self._state.reconstruction_attempts = 2
+        else:
+            self._state.reconstruction_attempts = 3
+        self._state.reconstruction_strategy_used = chosen.mode_id
+        self._state.reconstruction_partial = chosen.partial
+        self._state.reconstruction_failure_reason = chosen.failure_reason
+        self._state.reconstruction_audit = chosen.audit
+
+        proof_without_preamble = chosen.proof
+        complete = combine_preamble_and_body(preamble, proof_without_preamble)
+        self._state.final_complete_proof = complete
+        return complete
+
+    @dataclasses.dataclass(frozen=True)
+    class ReconstructionMode:
+        mode_id: str
+        min_confidence: int
+        allow_widen_span: bool
+        allow_margin_normalization: bool
+        allow_non_uniform_margin: bool
+
+    @dataclasses.dataclass
+    class ReconstructionContext:
+        mode_id: str
+        partial: bool = False
+        failure_reason: str | None = None
+        unresolved_holes: int = 0
+        ambiguous: bool = False
+        non_unique_holes: bool = False
+        layout_sensitive: bool = False
+        non_uniform_margin: bool = False
+        boundary_mismatch: bool = False
+        low_confidence: bool = False
+        audit: list[dict[str, object]] = dataclasses.field(default_factory=list)
+
+        def mark_ambiguity(self) -> None:
+            self.ambiguous = True
+            self.partial = True
+            self.failure_reason = "ambiguity"
+
+        def mark_failure(self, reason: str) -> None:
+            if self.failure_reason is None:
+                self.failure_reason = reason
+
+        def permissive_ok(self) -> bool:
+            if self.ambiguous:
+                return False
+            if self.non_unique_holes:
+                return False
+            if self.boundary_mismatch:
+                return False
+            if self.layout_sensitive:
+                return False
+            return self.unresolved_holes <= 1
+
+    @dataclasses.dataclass(frozen=True)
+    class ReconstructionResult:
+        proof: str
+        partial: bool
+        failure_reason: str | None
+        mode_id: str
+        audit: dict[str, object]
+        permissive_ok: bool
 
     @dataclasses.dataclass(frozen=True)
     class ReconstructionVariant:
         """
-        A parameterization of reconstruction normalization steps.
-
-        These toggles are intentionally coarse-grained: Kimina-guided selection tries a bounded
-        set of variants and selects the first that Kimina marks complete.
+        Legacy normalization variant (kept for backward compatibility in unused helpers).
         """
 
         variant_id: str
@@ -1539,144 +1631,64 @@ class GoedelsPoetryStateManager:
         snap_self_reference_closers: bool = True
         dedent_last_closer_out_of_inner_have_by: bool = True
 
-    def _variant_key(self, v: ReconstructionVariant) -> tuple:
-        return (
-            v.dedent_common,
-            v.snap_indent_levels,
-            v.rewrite_trailing_apply,
-            v.fix_dangling_closing_tactics_after_comments,
-            v.snap_self_reference_closers,
-            v.dedent_last_closer_out_of_inner_have_by,
+    def _reconstruction_mode_strict(self) -> ReconstructionMode:
+        return self.ReconstructionMode(
+            mode_id="strict",
+            min_confidence=3,
+            allow_widen_span=False,
+            allow_margin_normalization=True,
+            allow_non_uniform_margin=False,
         )
 
-    def _get_reconstruction_variants(self, max_candidates: int) -> list[ReconstructionVariant]:
-        """
-        Deterministically generate a bounded list of reconstruction variants to try.
+    def _reconstruction_mode_permissive_a(self) -> ReconstructionMode:
+        return self.ReconstructionMode(
+            mode_id="permissive_a",
+            min_confidence=2,
+            allow_widen_span=True,
+            allow_margin_normalization=True,
+            allow_non_uniform_margin=False,
+        )
 
-        The exact set is intentionally internal (not configurable) to avoid exposing
-        implementation details in config.
-        """
-        max_candidates = max(1, int(max_candidates))
+    def _reconstruction_mode_permissive_b(self) -> ReconstructionMode:
+        return self.ReconstructionMode(
+            mode_id="permissive_b",
+            min_confidence=1,
+            allow_widen_span=True,
+            allow_margin_normalization=True,
+            allow_non_uniform_margin=True,
+        )
 
-        baseline = self.ReconstructionVariant("baseline")
-        seed_variants: list[GoedelsPoetryStateManager.ReconstructionVariant] = [
-            baseline,
-            # Directly addresses the partial.log failure mode.
-            dataclasses.replace(
-                baseline, variant_id="no_comment_fixer", fix_dangling_closing_tactics_after_comments=False
-            ),
-            dataclasses.replace(baseline, variant_id="no_indent_snapping", snap_indent_levels=False),
-            dataclasses.replace(
-                baseline,
-                variant_id="no_offset_extras",
-                fix_dangling_closing_tactics_after_comments=False,
-                snap_self_reference_closers=False,
-                dedent_last_closer_out_of_inner_have_by=False,
-            ),
-            dataclasses.replace(
-                baseline,
-                variant_id="dedent_only",
-                snap_indent_levels=False,
-                rewrite_trailing_apply=False,
-                fix_dangling_closing_tactics_after_comments=False,
-                snap_self_reference_closers=False,
-                dedent_last_closer_out_of_inner_have_by=False,
-            ),
-            dataclasses.replace(
-                baseline,
-                variant_id="minimal",
-                dedent_common=False,
-                snap_indent_levels=False,
-                rewrite_trailing_apply=False,
-                fix_dangling_closing_tactics_after_comments=False,
-                snap_self_reference_closers=False,
-                dedent_last_closer_out_of_inner_have_by=False,
-            ),
-        ]
-
-        variants: list[GoedelsPoetryStateManager.ReconstructionVariant] = []
-        seen: set[tuple] = set()
-
-        def add(v: GoedelsPoetryStateManager.ReconstructionVariant) -> None:
-            key = self._variant_key(v)
-            if key in seen:
-                return
-            seen.add(key)
-            variants.append(v)
-
-        for v in seed_variants:
-            add(v)
-            if len(variants) >= max_candidates:
-                return variants[:max_candidates]
-
-        # If the user allows more candidates than the seed set, expand deterministically by
-        # toggling individual flags off (starting from baseline).
-        toggles = [
-            ("no_dedent_common", {"dedent_common": False}),
-            ("no_rewrite_trailing_apply", {"rewrite_trailing_apply": False}),
-            ("no_snap_self_reference_closers", {"snap_self_reference_closers": False}),
-            ("no_dedent_last_closer", {"dedent_last_closer_out_of_inner_have_by": False}),
-        ]
-        for name, changes in toggles:
-            add(dataclasses.replace(baseline, variant_id=name, **changes))
-            if len(variants) >= max_candidates:
-                break
-
-        return variants[:max_candidates]
-
-    def reconstruct_complete_proof_kimina_guided(
-        self, *, server_url: str, server_max_retries: int, server_timeout: int, max_candidates: int
-    ) -> tuple[str, bool, str]:
-        """
-        Attempt to find a reconstruction variant that Kimina marks complete.
-
-        This is a bounded search over whole-file reconstructions and is intended to run only
-        after a run reports "Proof completed successfully." but final verification fails.
-        """
-        preamble = self._state._root_preamble or DEFAULT_IMPORTS
-        if self._state.formal_theorem_proof is None:
-            proof = combine_preamble_and_body(preamble, "-- No proof available")
-            return proof, False, "No proof available"
-
-        # Lazy import to avoid importing `kimina_client` (and its transitive dependencies)
-        # during test collection on Python < 3.12 where some environments may have incompatible
-        # versions. This function is only invoked in "success-but-final-verification-failed" cases.
-        from goedels_poetry.agents.proof_checker_agent import check_complete_proof
-
-        variants = self._get_reconstruction_variants(max_candidates=max_candidates)
-        last_err = ""
-        for idx, variant in enumerate(variants, start=1):
-            proof_without_preamble = self._reconstruct_node_proof(self._state.formal_theorem_proof, variant=variant)
-            candidate = combine_preamble_and_body(preamble, proof_without_preamble)
-            ok, err = check_complete_proof(
-                candidate, server_url=server_url, server_max_retries=server_max_retries, server_timeout=server_timeout
-            )
-            last_err = err
-
-            if is_debug_enabled():
-                logger.debug(
-                    "Kimina-guided reconstruction attempt %d/%d (%s): %s",
-                    idx,
-                    len(variants),
-                    variant.variant_id,
-                    "passed" if ok else "failed",
-                )
-                if not ok and err:
-                    logger.debug("Kimina-guided reconstruction errors (%s):\n%s", variant.variant_id, err)
-
-            if ok:
-                self._state.reconstruction_attempts = idx
-                self._state.reconstruction_strategy_used = variant.variant_id
-                self._state.final_complete_proof = candidate
-                return candidate, True, ""
-
-        # Record attempts even on failure.
-        self._state.reconstruction_attempts = len(variants)
-        self._state.reconstruction_strategy_used = None
-        return (
-            combine_preamble_and_body(preamble, self._reconstruct_node_proof(self._state.formal_theorem_proof)),
-            False,
-            last_err,
+    def _reconstruct_with_mode(
+        self,
+        node: TreeNode,
+        mode: ReconstructionMode,
+        strict_result: ReconstructionResult | None = None,
+    ) -> ReconstructionResult:
+        context = self.ReconstructionContext(mode_id=mode.mode_id)
+        proof = self._reconstruct_node_proof_ast(node, mode=mode, context=context)
+        audit = {
+            "mode_id": mode.mode_id,
+            "partial": context.partial,
+            "failure_reason": context.failure_reason,
+            "unresolved_holes": context.unresolved_holes,
+            "ambiguous": context.ambiguous,
+            "non_unique_holes": context.non_unique_holes,
+            "layout_sensitive": context.layout_sensitive,
+            "non_uniform_margin": context.non_uniform_margin,
+            "boundary_mismatch": context.boundary_mismatch,
+            "low_confidence": context.low_confidence,
+            "audits": context.audit,
+        }
+        permissive_ok = context.permissive_ok()
+        if strict_result is not None and strict_result.failure_reason == "ambiguity":
+            permissive_ok = False
+        return self.ReconstructionResult(
+            proof=proof,
+            partial=context.partial,
+            failure_reason=context.failure_reason,
+            mode_id=mode.mode_id,
+            audit=audit,
+            permissive_ok=permissive_ok,
         )
 
     def _reconstruct_leaf_node_proof(self, formal_proof_state: FormalTheoremProofState) -> str:
@@ -1797,7 +1809,7 @@ class GoedelsPoetryStateManager:
         # The legacy name/regex-based reconstruction path has been removed.
         return self._apply_offset_replacements(sketch, decomposed_state["children"], variant=variant)
 
-    def _reconstruct_node_proof(self, node: TreeNode, *, variant: ReconstructionVariant | None = None) -> str:
+    def _reconstruct_node_proof(self, node: TreeNode) -> str:
         """
         Recursively reconstructs the proof for a given node in the proof tree.
 
@@ -1811,16 +1823,386 @@ class GoedelsPoetryStateManager:
         str
             The proof text for this node and all its children (without preamble)
         """
-        # Leaf node
+        mode = self._reconstruction_mode_strict()
+        context = self.ReconstructionContext(mode_id=mode.mode_id)
+        return self._reconstruct_node_proof_ast(node, mode=mode, context=context)
+
+    def _reconstruct_node_proof_ast(
+        self,
+        node: TreeNode,
+        *,
+        mode: ReconstructionMode,
+        context: ReconstructionContext,
+    ) -> str:
         if isinstance(node, dict) and "formal_proof" in node and "children" not in node:
-            return self._reconstruct_leaf_node_proof(cast(FormalTheoremProofState, node))
+            return self._reconstruct_leaf_node_proof_ast(cast(FormalTheoremProofState, node), mode, context)
 
-        # Internal node
         if isinstance(node, dict) and "children" in node:
-            return self._reconstruct_decomposed_node_proof(cast(DecomposedFormalTheoremState, node), variant=variant)
+            return self._reconstruct_decomposed_node_proof_ast(cast(DecomposedFormalTheoremState, node), mode, context)
 
-        # Fallback for unexpected node types
+        context.mark_failure("unexpected_node")
         return "-- Unable to reconstruct proof for this node\n"
+
+    def _reconstruct_leaf_node_proof_ast(
+        self,
+        formal_proof_state: FormalTheoremProofState,
+        mode: ReconstructionMode,
+        context: ReconstructionContext,
+    ) -> str:
+        ast = formal_proof_state.get("ast")
+        if ast is None:
+            context.mark_failure("missing_ast")
+            context.partial = True
+            return f"{formal_proof_state['formal_theorem']} := by sorry\n"
+
+        proof_body = self._extract_proof_body_from_ast(ast, mode, context)
+        if proof_body is None:
+            context.partial = True
+            return f"{formal_proof_state['formal_theorem']} := by sorry\n"
+
+        if formal_proof_state["parent"] is None:
+            theorem_decl_full = str(formal_proof_state["formal_theorem"]).strip()
+            theorem_sig = self._strip_decl_assignment(theorem_decl_full)
+            return f"{theorem_sig} := by{proof_body}"
+
+        return proof_body
+
+    def _reconstruct_decomposed_node_proof_ast(  # noqa: C901
+        self,
+        decomposed_state: DecomposedFormalTheoremState,
+        mode: ReconstructionMode,
+        context: ReconstructionContext,
+    ) -> str:
+        sketch = decomposed_state.get("proof_sketch")
+        ast = decomposed_state.get("ast")
+        if sketch is None or ast is None:
+            context.mark_failure("missing_ast")
+            context.partial = True
+            return f"{decomposed_state['formal_theorem']} := by sorry\n"
+
+        sketch_text = str(sketch)
+        holes_by_name = ast.get_sorry_holes_by_name()
+
+        children = list(decomposed_state.get("children", []))
+
+        def _child_sort_key(ch: TreeNode) -> tuple[int, int]:
+            if isinstance(ch, dict):
+                return (int(ch.get("hole_start") or 0), int(ch.get("hole_end") or 0))
+            return (0, 0)
+
+        children.sort(key=_child_sort_key)
+
+        replacements: list[tuple[int, int, str]] = []
+        for child in children:
+            if not isinstance(child, dict):
+                context.mark_failure("invalid_child")
+                context.unresolved_holes += 1
+                context.partial = True
+                continue
+            hole_name = child.get("hole_name")
+            hole_start = None
+            hole_end = None
+            spans = []
+            if isinstance(hole_name, str):
+                spans = holes_by_name.get(hole_name, [])
+            if len(spans) == 1:
+                hole_start, hole_end = spans[0]
+            elif child.get("hole_start") is not None and child.get("hole_end") is not None:
+                hole_start = cast(int, child.get("hole_start"))
+                hole_end = cast(int, child.get("hole_end"))
+            else:
+                fallback_spans = self._find_standalone_sorry_spans(sketch_text)
+                if len(fallback_spans) == 1:
+                    hole_start, hole_end = fallback_spans[0]
+
+            if hole_start is None or hole_end is None:
+                context.unresolved_holes += 1
+                context.partial = True
+                continue
+            if len(spans) > 1 and hole_start is None:
+                context.non_unique_holes = True
+                context.mark_ambiguity()
+                context.unresolved_holes += 1
+                continue
+            if not (0 <= hole_start < hole_end <= len(sketch_text)):
+                context.unresolved_holes += 1
+                context.partial = True
+                continue
+
+            proof_body = self._extract_proof_body_ast(child, mode, context)
+            if proof_body is None:
+                context.unresolved_holes += 1
+                context.partial = True
+                continue
+
+            replacement = self._format_body_for_hole(
+                sketch_text, hole_start, hole_end, proof_body, mode, context, child
+            )
+            if replacement is None:
+                context.unresolved_holes += 1
+                context.partial = True
+                continue
+            replacements.append((hole_start, hole_end, replacement))
+
+        if replacements:
+            replacements.sort(key=lambda t: t[0], reverse=True)
+            for start, end, rep in replacements:
+                sketch_text = sketch_text[:start] + rep + sketch_text[end:]
+
+        return sketch_text
+
+    def _extract_proof_body_ast(
+        self,
+        child: TreeNode,
+        mode: ReconstructionMode,
+        context: ReconstructionContext,
+    ) -> str | None:
+        if isinstance(child, dict) and "formal_proof" in child and "children" not in child:
+            ast = child.get("ast")
+            if ast is None:
+                context.mark_failure("missing_ast")
+                return None
+            return self._extract_proof_body_from_ast(ast, mode, context)
+        if isinstance(child, dict) and "children" in child:
+            reconstructed = self._reconstruct_decomposed_node_proof_ast(
+                cast(DecomposedFormalTheoremState, child),
+                mode,
+                context,
+            )
+            ast = child.get("ast")
+            if ast is None:
+                context.mark_failure("missing_ast")
+                return None
+            return self._extract_proof_body_from_ast(ast, mode, context, override_text=reconstructed)
+        return None
+
+    def _extract_proof_body_from_ast(  # noqa: C901
+        self,
+        ast: AST,
+        mode: ReconstructionMode,
+        context: ReconstructionContext,
+        *,
+        override_text: str | None = None,
+    ) -> str | None:
+        source = override_text or ast.get_source_text()
+        if source is None:
+            context.mark_failure("missing_source")
+            return None
+
+        by_info = self._find_by_tactic_info(ast.get_ast(), ast)
+        if by_info is None:
+            context.mark_failure("missing_by")
+            return None
+        by_token, tactic_node = by_info
+        tokens = ast.get_tokens(tactic_node)
+        if not tokens:
+            context.mark_failure("missing_tokens")
+            return None
+        non_synth = [tok for tok in tokens if not tok.synthetic]
+        span_tokens = non_synth if non_synth else tokens
+        span_start = min(tok.start for tok in span_tokens)
+        span_end = max(tok.end for tok in span_tokens)
+        coverage = sum(tok.end - tok.start for tok in span_tokens)
+        span_len = max(1, span_end - span_start)
+        coverage_ratio = coverage / span_len
+        contiguous = all(tok.start >= by_token.end and tok.end <= span_end for tok in span_tokens)
+
+        boundary_ok = True
+        if override_text is None:
+            boundary_ok = self._token_boundaries_match(source, span_tokens)
+            if not boundary_ok:
+                context.boundary_mismatch = True
+        confidence = 0
+        if by_token.immediate:
+            confidence += 1
+        if non_synth:
+            confidence += 1
+        if contiguous:
+            confidence += 1
+        if coverage_ratio >= 0.15:
+            confidence += 1
+
+        context.audit.append({
+            "coverage_ratio": coverage_ratio,
+            "contiguous": contiguous,
+            "boundary_ok": boundary_ok,
+            "confidence": confidence,
+        })
+
+        if confidence < mode.min_confidence:
+            context.low_confidence = True
+            if not mode.allow_widen_span:
+                context.mark_failure("low_confidence")
+                return None
+
+        if not contiguous:
+            context.mark_failure("non_contiguous")
+            return None
+
+        start_c = ast.byte_to_char_index(by_token.end)
+        end_c = len(source) if override_text is not None else ast.byte_to_char_index(span_end)
+        return source[start_c:end_c]
+
+    @dataclasses.dataclass(frozen=True)
+    class _ByToken:
+        start: int
+        end: int
+        immediate: bool
+
+    def _find_by_tactic_info(  # noqa: C901
+        self,
+        node: dict[str, object] | list[object],
+        ast: AST,
+    ) -> tuple[_ByToken, dict[str, object]] | None:
+        queue: list[dict[str, object]] = []
+        if isinstance(node, dict):
+            queue.append(node)
+        elif isinstance(node, list):
+            for item in node:
+                if isinstance(item, dict):
+                    queue.append(item)
+        while queue:
+            current = queue.pop(0)
+            kind = current.get("kind")
+            if kind == "Lean.Parser.Term.byTactic":
+                args = current.get("args")
+                if isinstance(args, list):
+                    for idx, arg in enumerate(args):
+                        if isinstance(arg, dict) and arg.get("val") == "by":
+                            info = arg.get("info")
+                            if isinstance(info, dict):
+                                pos = info.get("pos")
+                                if isinstance(pos, list) and len(pos) == 2:
+                                    try:
+                                        start_b_int = int(pos[0])
+                                        end_b_int = int(pos[1])
+                                    except (TypeError, ValueError):
+                                        continue
+                                    tactic_node = None
+                                    for j in range(idx + 1, len(args)):
+                                        if isinstance(args[j], dict):
+                                            tactic_node = args[j]
+                                            break
+                                    if tactic_node is not None:
+                                        return self._ByToken(start_b_int, end_b_int, True), tactic_node
+            for val in current.values():
+                if isinstance(val, dict):
+                    queue.append(val)
+                elif isinstance(val, list):
+                    for item in val:
+                        if isinstance(item, dict):
+                            queue.append(item)
+        return None
+
+    def _token_boundaries_match(self, source: str, tokens: list[AST.Token]) -> bool:
+        if not tokens:
+            return False
+        source_bytes = source.encode("utf-8")
+        for tok in tokens:
+            if tok.start < 0 or tok.end > len(source_bytes):
+                return False
+            if source_bytes[tok.start : tok.end] != tok.val.encode("utf-8"):
+                return False
+        return True
+
+    def _find_standalone_sorry_spans(self, text: str) -> list[tuple[int, int]]:
+        spans: list[tuple[int, int]] = []
+        idx = 0
+        while True:
+            idx = text.find("sorry", idx)
+            if idx == -1:
+                break
+            before = text[idx - 1] if idx > 0 else " "
+            after_idx = idx + len("sorry")
+            after = text[after_idx] if after_idx < len(text) else " "
+            if before.isspace() and after.isspace():
+                spans.append((idx, after_idx))
+            idx = after_idx
+        return spans
+
+    def _has_layout_sensitive_constructs(self, node: object) -> bool:
+        if isinstance(node, dict):
+            kind = node.get("kind")
+            if isinstance(kind, str) and any(key in kind for key in ("calc", "match", "cases")):
+                return True
+            return any(self._has_layout_sensitive_constructs(val) for val in node.values())
+        if isinstance(node, list):
+            return any(self._has_layout_sensitive_constructs(item) for item in node)
+        return False
+
+    def _format_body_for_hole(  # noqa: C901
+        self,
+        sketch: str,
+        hole_start: int,
+        hole_end: int,
+        proof_body: str,
+        mode: ReconstructionMode,
+        context: ReconstructionContext,
+        child: TreeNode,
+    ) -> str | None:
+        line_start = sketch.rfind("\n", 0, hole_start) + 1
+        line_prefix = sketch[line_start:hole_start]
+        line_end = sketch.find("\n", line_start)
+        if line_end == -1:
+            line_end = len(sketch)
+        line = sketch[line_start:line_end]
+        leading_ws = line[: len(line) - len(line.lstrip(" \t"))]
+        inline_hole = bool(line_prefix.strip())
+
+        body = proof_body
+        if body.startswith("\n"):
+            body = body[1:]
+        lines = body.split("\n")
+        nonempty = [ln for ln in lines if ln.strip()]
+        if not nonempty:
+            return None
+
+        ast_obj = child.get("ast") if isinstance(child, dict) else None
+        if isinstance(ast_obj, AST):
+            node = ast_obj.get_ast()
+            layout_sensitive = self._has_layout_sensitive_constructs(cast(dict[str, object] | list[object], node))
+        else:
+            layout_sensitive = False
+        if layout_sensitive:
+            context.layout_sensitive = True
+
+        indents = [len(ln) - len(ln.lstrip(" \t")) for ln in nonempty]
+        min_indent = min(indents)
+        uniform_margin = all(indent == min_indent for indent in indents)
+        if not uniform_margin:
+            context.non_uniform_margin = True
+
+        if layout_sensitive:
+            if leading_ws and nonempty[0].startswith(leading_ws):
+                normalized_lines = lines
+            else:
+                context.mark_failure("layout_sensitive_mismatch")
+                return None
+        else:
+            normalized_lines = lines
+            if mode.allow_margin_normalization and (uniform_margin or mode.allow_non_uniform_margin):
+                normalized_lines = []
+                for ln in lines:
+                    if ln.strip():
+                        normalized_lines.append(ln[min_indent:] if ln.startswith(" " * min_indent) else ln)
+                    else:
+                        normalized_lines.append(ln)
+            elif not uniform_margin and not mode.allow_non_uniform_margin:
+                normalized_lines = lines
+
+        rebuilt_lines: list[str] = []
+        if inline_hole:
+            proof_indent = leading_ws + (" " * PROOF_BODY_INDENT_SPACES)
+            rebuilt_lines.append("")
+            for ln in normalized_lines:
+                rebuilt_lines.append(f"{proof_indent}{ln}" if ln.strip() else ln)
+        else:
+            for i, ln in enumerate(normalized_lines):
+                if i == 0:
+                    rebuilt_lines.append(ln)
+                else:
+                    rebuilt_lines.append(f"{line_prefix}{ln}" if ln.strip() else ln)
+        return "\n".join(rebuilt_lines)
 
     def _extract_proof_body(self, child: TreeNode, *, variant: ReconstructionVariant | None = None) -> str:
         """
@@ -1847,7 +2229,7 @@ class GoedelsPoetryStateManager:
         elif isinstance(child, dict) and "children" in child:
             # This is a DecomposedFormalTheoremState (internal)
             # Recursively reconstruct this child first
-            child_complete = self._reconstruct_node_proof(child, variant=variant)
+            child_complete = self._reconstruct_node_proof(child)
             return self._extract_tactics_after_by(child_complete)
         return "sorry"
 

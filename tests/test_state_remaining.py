@@ -1,6 +1,9 @@
 """Tests for proof composition with various edge cases and scenarios."""
 
 from contextlib import suppress
+from typing import cast
+
+from ast_test_utils import build_simple_ast, find_sorry_spans
 
 from goedels_poetry.agents.util.common import DEFAULT_IMPORTS, combine_preamble_and_body
 from goedels_poetry.state import GoedelsPoetryState
@@ -8,6 +11,23 @@ from goedels_poetry.state import GoedelsPoetryState
 
 def with_default_preamble(body: str) -> str:
     return combine_preamble_and_body(DEFAULT_IMPORTS, body)
+
+
+def _attach_ast(node: dict) -> None:
+    if "children" in node:
+        sketch = str(node.get("proof_sketch") or "")
+        if "by" in sketch:
+            node["ast"] = build_simple_ast(sketch, sorry_spans=find_sorry_spans(sketch))
+        for child in node.get("children", []):
+            _attach_ast(cast(dict, child))
+    else:
+        proof = str(node.get("formal_proof") or "")
+        formal_theorem = str(node.get("formal_theorem") or "")
+        idx = formal_theorem.find(":=")
+        theorem_sig = formal_theorem[:idx].rstrip() if idx != -1 else formal_theorem
+        is_full = proof.lstrip().startswith(("theorem", "lemma", "example"))
+        source = proof if is_full else f"{theorem_sig} := by{proof}"
+        node["ast"] = build_simple_ast(source)
 
 
 def _annotate_hole_offsets(node: dict, sketch: str, *, hole_name: str, anchor: str | None = None) -> None:
@@ -126,6 +146,7 @@ def test_reconstruct_complete_proof_nested_with_non_ascii_names() -> None:
         child_decomposed["children"].append(cast(TreeNode, grandchild))
         root["children"].append(cast(TreeNode, child_decomposed))
         state.formal_theorem_proof = cast(TreeNode, root)
+        _attach_ast(cast(dict, root))
         manager = GoedelsPoetryStateManager(state)
 
         result = manager.reconstruct_complete_proof()
@@ -201,6 +222,7 @@ def test_reconstruct_complete_proof_with_let_statement() -> None:
 
         decomposed["children"].append(cast(TreeNode, child))
         state.formal_theorem_proof = cast(TreeNode, decomposed)
+        _attach_ast(cast(dict, decomposed))
         manager = GoedelsPoetryStateManager(state)
 
         result = manager.reconstruct_complete_proof()
@@ -275,6 +297,7 @@ def test_reconstruct_complete_proof_with_obtain_statement() -> None:
 
         decomposed["children"].append(cast(TreeNode, child))
         state.formal_theorem_proof = cast(TreeNode, decomposed)
+        _attach_ast(cast(dict, decomposed))
         manager = GoedelsPoetryStateManager(state)
 
         result = manager.reconstruct_complete_proof()
@@ -369,6 +392,7 @@ def test_reconstruct_complete_proof_with_let_and_have_nested() -> None:
         child_decomposed["children"].append(cast(TreeNode, grandchild))
         root["children"].append(cast(TreeNode, child_decomposed))
         state.formal_theorem_proof = cast(TreeNode, root)
+        _attach_ast(cast(dict, root))
         manager = GoedelsPoetryStateManager(state)
 
         result = manager.reconstruct_complete_proof()
@@ -483,6 +507,7 @@ def test_reconstruct_complete_proof_mixed_bindings_deep_nested() -> None:
         level1["children"].append(cast(TreeNode, level2))
         root["children"].append(cast(TreeNode, level1))
         state.formal_theorem_proof = cast(TreeNode, root)
+        _attach_ast(cast(dict, root))
         manager = GoedelsPoetryStateManager(state)
 
         result = manager.reconstruct_complete_proof()
@@ -563,6 +588,7 @@ def test_reconstruct_complete_proof_non_ascii_with_let_obtain() -> None:
 
         decomposed["children"].append(cast(TreeNode, child))
         state.formal_theorem_proof = cast(TreeNode, decomposed)
+        _attach_ast(cast(dict, decomposed))
         manager = GoedelsPoetryStateManager(state)
 
         result = manager.reconstruct_complete_proof()
@@ -709,6 +735,7 @@ def test_reconstruct_complete_proof_multiple_children_at_each_level() -> None:
         child2_decomposed["children"].append(cast(TreeNode, grandchild2a))
         root["children"].extend([cast(TreeNode, child1_decomposed), cast(TreeNode, child2_decomposed)])
         state.formal_theorem_proof = cast(TreeNode, root)
+        _attach_ast(cast(dict, root))
         manager = GoedelsPoetryStateManager(state)
 
         result = manager.reconstruct_complete_proof()
@@ -766,6 +793,7 @@ def test_reconstruct_complete_proof_edge_case_empty_children() -> None:
         )
 
         state.formal_theorem_proof = cast(TreeNode, decomposed)
+        _attach_ast(cast(dict, decomposed))
         manager = GoedelsPoetryStateManager(state)
 
         result = manager.reconstruct_complete_proof()
@@ -835,6 +863,7 @@ def test_reconstruct_complete_proof_edge_case_missing_proof() -> None:
 
         decomposed["children"].append(cast(TreeNode, child))
         state.formal_theorem_proof = cast(TreeNode, decomposed)
+        _attach_ast(cast(dict, decomposed))
         manager = GoedelsPoetryStateManager(state)
 
         result = manager.reconstruct_complete_proof()
@@ -918,6 +947,7 @@ def test_reconstruct_complete_proof_edge_case_nested_missing_proof() -> None:
         child_decomposed["children"].append(cast(TreeNode, grandchild))
         root["children"].append(cast(TreeNode, child_decomposed))
         state.formal_theorem_proof = cast(TreeNode, root)
+        _attach_ast(cast(dict, root))
         manager = GoedelsPoetryStateManager(state)
 
         result = manager.reconstruct_complete_proof()
@@ -966,6 +996,7 @@ def test_reconstruct_complete_proof_edge_case_no_sketch() -> None:
         )
 
         state.formal_theorem_proof = cast(TreeNode, decomposed)
+        _attach_ast(cast(dict, decomposed))
         manager = GoedelsPoetryStateManager(state)
 
         result = manager.reconstruct_complete_proof()
@@ -1048,6 +1079,7 @@ def test_reconstruct_complete_proof_edge_case_very_deep_nesting() -> None:
         levels[-1]["children"].append(cast(TreeNode, leaf))
 
         state.formal_theorem_proof = cast(TreeNode, levels[0])
+        _attach_ast(cast(dict, levels[0]))
         manager = GoedelsPoetryStateManager(state)
 
         result = manager.reconstruct_complete_proof()

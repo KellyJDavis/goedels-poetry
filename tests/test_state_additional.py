@@ -1,6 +1,9 @@
 """Tests for proof composition with deep nested decomposition."""
 
 from contextlib import suppress
+from typing import cast
+
+from ast_test_utils import build_simple_ast, find_sorry_spans
 
 from goedels_poetry.agents.util.common import DEFAULT_IMPORTS, combine_preamble_and_body
 from goedels_poetry.state import GoedelsPoetryState
@@ -8,6 +11,23 @@ from goedels_poetry.state import GoedelsPoetryState
 
 def with_default_preamble(body: str) -> str:
     return combine_preamble_and_body(DEFAULT_IMPORTS, body)
+
+
+def _attach_ast(node: dict) -> None:
+    if "children" in node:
+        sketch = str(node.get("proof_sketch") or "")
+        if "by" in sketch:
+            node["ast"] = build_simple_ast(sketch, sorry_spans=find_sorry_spans(sketch))
+        for child in node.get("children", []):
+            _attach_ast(cast(dict, child))
+    else:
+        proof = str(node.get("formal_proof") or "")
+        formal_theorem = str(node.get("formal_theorem") or "")
+        idx = formal_theorem.find(":=")
+        theorem_sig = formal_theorem[:idx].rstrip() if idx != -1 else formal_theorem
+        is_full = proof.lstrip().startswith(("theorem", "lemma", "example"))
+        source = proof if is_full else f"{theorem_sig} := by{proof}"
+        node["ast"] = build_simple_ast(source)
 
 
 def _annotate_hole_offsets(node: dict, sketch: str, *, hole_name: str, anchor: str) -> None:
@@ -136,6 +156,7 @@ def test_reconstruct_complete_proof_deep_nested_decomposition_4_levels() -> None
         level1["children"].append(cast(TreeNode, level2))
         root["children"].append(cast(TreeNode, level1))
         state.formal_theorem_proof = cast(TreeNode, root)
+        _attach_ast(cast(dict, root))
         manager = GoedelsPoetryStateManager(state)
 
         result = manager.reconstruct_complete_proof()
