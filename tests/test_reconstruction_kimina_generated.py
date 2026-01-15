@@ -33,6 +33,7 @@ try:
     from goedels_poetry.agents.util.common import (
         DEFAULT_IMPORTS,
         combine_preamble_and_body,
+        combine_theorem_with_proof,
         remove_default_imports_from_ast,
     )
     from goedels_poetry.agents.util.kimina_server import parse_kimina_ast_code_response, parse_kimina_check_response
@@ -322,6 +323,29 @@ if IMPORTS_AVAILABLE:
         ast_without_imports = remove_default_imports_from_ast(parsed["ast"], preamble=DEFAULT_IMPORTS)
         return AST(ast_without_imports, source_text=full, body_start=body_start)
 
+    def _parse_child_ast(client: KiminaClient, formal_theorem: str, formal_proof: str) -> AST:
+        theorem_with_proof = combine_theorem_with_proof(str(formal_theorem), str(formal_proof))
+        normalized_preamble = DEFAULT_IMPORTS.strip()
+        normalized_body = theorem_with_proof.strip()
+        full = combine_preamble_and_body(normalized_preamble, normalized_body)
+
+        if normalized_preamble and normalized_body:
+            body_start = full.find(normalized_body, len(normalized_preamble))
+            body_start = body_start if body_start != -1 else len(normalized_preamble)
+        else:
+            body_start = 0
+
+        ast_code_response = client.ast_code(full)
+        parsed = parse_kimina_ast_code_response(ast_code_response)
+        assert parsed["error"] is None, parsed["error"]
+        ast_without_imports = remove_default_imports_from_ast(parsed["ast"], preamble=DEFAULT_IMPORTS)
+        return AST(
+            ast_without_imports,
+            sorries=parsed.get("sorries"),
+            source_text=full,
+            body_start=body_start,
+        )
+
     def _reconstruct_and_check(
         client: KiminaClient, server_url: str, server_max_retries: int, server_timeout: int, case: ReconCase
     ) -> None:
@@ -366,6 +390,8 @@ if IMPORTS_AVAILABLE:
             child_dict["formal_proof"] = case.child_proofs[hole_name]
             child_dict["proved"] = True
             child_dict["errors"] = ""
+            formal_theorem = str(child_dict.get("formal_theorem") or "")
+            child_dict["ast"] = _parse_child_ast(client, formal_theorem, child_dict["formal_proof"])
 
         # Reconstruct using state manager helper on the decomposed node.
         dummy_state = cast(Any, type("_S", (), {})())
