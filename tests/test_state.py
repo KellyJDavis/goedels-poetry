@@ -548,6 +548,8 @@ def test_state_init_creates_directory() -> None:
         try:
             os.environ["GOEDELS_POETRY_DIR"] = tmpdir
             theorem = with_default_preamble("theorem test_directory_creation : True := by sorry")
+            with suppress(Exception):
+                GoedelsPoetryState.clear_theorem_directory(theorem)
             state = GoedelsPoetryState(formal_theorem=theorem)
 
             # Directory should exist
@@ -603,6 +605,8 @@ def test_state_init_directory_exists_error() -> None:
         try:
             os.environ["GOEDELS_POETRY_DIR"] = tmpdir
             theorem = with_default_preamble("theorem test_duplicate_directory : True := by sorry")
+            with suppress(Exception):
+                GoedelsPoetryState.clear_theorem_directory(theorem)
 
             # Create first state
             GoedelsPoetryState(formal_theorem=theorem)
