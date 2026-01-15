@@ -1682,6 +1682,14 @@ class GoedelsPoetryStateManager:
         context.mark_failure("unexpected_node")
         return "-- Unable to reconstruct proof for this node\n"
 
+    def _reconstruct_decomposed_node_proof(self, decomposed_state: DecomposedFormalTheoremState) -> str:
+        """
+        Reconstruct proof text for an internal `DecomposedFormalTheoremState` using AST-guided logic.
+        """
+        mode = self._reconstruction_mode_strict()
+        context = self.ReconstructionContext(mode_id=mode.mode_id)
+        return self._reconstruct_decomposed_node_proof_ast(decomposed_state, mode=mode, context=context)
+
     def _reconstruct_leaf_node_proof_ast(
         self,
         formal_proof_state: FormalTheoremProofState,
