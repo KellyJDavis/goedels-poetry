@@ -85,8 +85,7 @@ def _mk_case_named_haves(case_id: str, *, closer: str, comment_before_close: boo
     """
     Two named holes: `h₁` and `h₂`. `h₂` depends on `h₁`.
 
-    `h₂`'s child proof includes the formatting pattern seen in partial.log:
-    a comment line followed by an over-indented closing tactic.
+    `h₂`'s child proof includes a comment line followed by a closing tactic.
     """
     thm_name = f"recon_named_haves_{case_id}"
     parent_body = f"""theorem {thm_name} (n : Nat) : n = n := by
@@ -100,8 +99,8 @@ def _mk_case_named_haves(case_id: str, *, closer: str, comment_before_close: boo
     # h₁ is straightforward.
     proof_h1 = "rfl"
 
-    # h₂: inner have + comment + closing tactic. The closing line is intentionally indented by 2,
-    # so the reconstructor must not create a new indentation level when it splices under the hole.
+    # h₂: inner have + comment + closing tactic. The closing line aligns with the outer block so
+    # the proof fragment remains valid Lean when inserted under the hole.
     if closer == "exact":
         close_line = "exact h_main"
     elif closer == "simpa":
@@ -117,7 +116,7 @@ def _mk_case_named_haves(case_id: str, *, closer: str, comment_before_close: boo
         proof_h2_lines.append("")
     if comment_before_close:
         proof_h2_lines.append(comment)
-    proof_h2_lines.append(f"  {close_line}")
+    proof_h2_lines.append(close_line)
     proof_h2 = "\n".join(proof_h2_lines)
 
     return ReconCase(case_id=case_id, parent_body=parent_body, child_proofs={"h₁": proof_h1, "h₂": proof_h2})
@@ -150,7 +149,7 @@ def _mk_case_calc(case_id: str, *, closer: str, comment_before_close: bool) -> R
     proof_step_lines = ["have h_main : n = n := by", "  simpa using h₁"]
     if comment_before_close:
         proof_step_lines.append("-- close step")
-    proof_step_lines.append(f"  {close_line if closer != 'rfl' else 'exact h_main'}")
+    proof_step_lines.append(close_line if closer != "rfl" else "exact h_main")
     proof_h_step = "\n".join(proof_step_lines)
     return ReconCase(case_id=case_id, parent_body=parent_body, child_proofs={"h₁": proof_h1, "h_step": proof_h_step})
 
