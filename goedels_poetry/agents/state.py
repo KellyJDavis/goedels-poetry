@@ -4,7 +4,7 @@ from operator import add
 from typing import Annotated, Any
 
 from langchain_core.messages import AnyMessage
-from typing_extensions import NotRequired, Required, TypedDict
+from typing_extensions import Required, TypedDict
 
 from goedels_poetry.parsers.ast import AST
 from goedels_poetry.util.tree import TreeNode
@@ -105,10 +105,6 @@ class FormalTheoremProofState(TypedDict):
     hole_name: Required[str | None]
     hole_start: Required[int | None]
     hole_end: Required[int | None]
-    reconstruction_mode: NotRequired[str]
-    reconstruction_partial: NotRequired[bool]
-    reconstruction_failure_reason: NotRequired[str]
-    reconstruction_audit: NotRequired[dict[str, Any]]
 
 
 class FormalTheoremProofStates(TypedDict):
@@ -236,10 +232,6 @@ class DecomposedFormalTheoremState(TypedDict):
     hole_name: Required[str | None]
     hole_start: Required[int | None]
     hole_end: Required[int | None]
-    reconstruction_mode: NotRequired[str]
-    reconstruction_partial: NotRequired[bool]
-    reconstruction_failure_reason: NotRequired[str]
-    reconstruction_audit: NotRequired[dict[str, Any]]
 
 
 class DecomposedFormalTheoremStates(TypedDict):

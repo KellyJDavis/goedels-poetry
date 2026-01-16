@@ -548,8 +548,6 @@ def test_state_init_creates_directory() -> None:
         try:
             os.environ["GOEDELS_POETRY_DIR"] = tmpdir
             theorem = with_default_preamble("theorem test_directory_creation : True := by sorry")
-            with suppress(Exception):
-                GoedelsPoetryState.clear_theorem_directory(theorem)
             state = GoedelsPoetryState(formal_theorem=theorem)
 
             # Directory should exist
@@ -605,8 +603,6 @@ def test_state_init_directory_exists_error() -> None:
         try:
             os.environ["GOEDELS_POETRY_DIR"] = tmpdir
             theorem = with_default_preamble("theorem test_duplicate_directory : True := by sorry")
-            with suppress(Exception):
-                GoedelsPoetryState.clear_theorem_directory(theorem)
 
             # Create first state
             GoedelsPoetryState(formal_theorem=theorem)
@@ -1466,7 +1462,9 @@ def test_reconstruct_complete_proof_normalizes_misindented_trailing_apply() -> N
 
         result = manager.reconstruct_complete_proof()
 
-        assert "apply h_main" in result
+        # The inlined proof should end with `exact h_main`, not `apply h_main`.
+        assert "exact h_main" in result
+        assert "apply h_main" not in result
         # And the hv_subst hole should no longer contain sorry.
         assert "have hv_subst : True := by sorry" not in result
     finally:

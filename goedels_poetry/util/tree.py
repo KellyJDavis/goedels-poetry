@@ -32,3 +32,22 @@ class TreeNode(Protocol):
             Depth of this TreeNode from the root; root has depth 0.
         """
         ...
+
+
+@runtime_checkable
+class InternalTreeNode(TreeNode, Protocol):
+    """
+    Protocol supposed by all internal tree nodes.
+    """
+
+    @property
+    def children(self) -> list[TreeNode]:
+        """
+        The children of this internal tree node.
+
+        Returns
+        -------
+        list[TreeNode]
+            The children of this internal tree node.
+        """
+        ...
