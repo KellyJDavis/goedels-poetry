@@ -83,6 +83,9 @@ show_error_codes = true
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+markers = [
+    "kimina: marks tests that require the Kimina server to be running",
+]
 
 [tool.ruff]
 target-version = "py310"

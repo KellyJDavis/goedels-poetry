@@ -447,4 +447,6 @@ def _create_formal_theorem_proof_state(
         hole_name=hole_name,
         hole_start=hole_start,
         hole_end=hole_end,
+        source_hash_raw=None,
+        source_hash_normalized=None,
     )

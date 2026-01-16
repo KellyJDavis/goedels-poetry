@@ -20,10 +20,12 @@ from goedels_poetry.agents.state import (
 from goedels_poetry.agents.util.common import (
     DEFAULT_IMPORTS,
     combine_preamble_and_body,
+    compute_source_hashes,
     ensure_mandatory_preamble,
     split_preamble_and_body,
 )
-from goedels_poetry.agents.util.debug import log_reconstruction_event
+from goedels_poetry.agents.util.debug import is_debug_enabled, log_reconstruction_event
+from goedels_poetry.agents.util.kimina_server import check_code_with_infotree, detect_position_semantics
 from goedels_poetry.config.llm import (
     DECOMPOSER_AGENT_MAX_SELF_CORRECTION_ATTEMPTS,
     FORMALIZER_AGENT_MAX_RETRIES,
@@ -112,6 +114,8 @@ class GoedelsPoetryState:
                 hole_name=None,
                 hole_start=None,
                 hole_end=None,
+                source_hash_raw=None,
+                source_hash_normalized=None,
             )
             self.formal_theorem_proof = cast(TreeNode, initial_formal_state)
             theorem_for_metadata = combine_preamble_and_body(preamble, body)
@@ -592,6 +596,8 @@ class GoedelsPoetryStateManager:
                 hole_name=None,
                 hole_start=None,
                 hole_end=None,
+                source_hash_raw=None,
+                source_hash_normalized=None,
             )
             # Queue theorem_to_prove to be proven
             self._state.proof_prove_queue += [theorem_to_prove]
@@ -830,6 +836,8 @@ class GoedelsPoetryStateManager:
                 hole_name=proof_too_difficult.get("hole_name"),
                 hole_start=proof_too_difficult.get("hole_start"),
                 hole_end=proof_too_difficult.get("hole_end"),
+                source_hash_raw=proof_too_difficult.get("source_hash_raw"),
+                source_hash_normalized=proof_too_difficult.get("source_hash_normalized"),
             )
             self._state.decomposition_search_queue.append(formal_theorem_to_decompose)
 
@@ -1576,6 +1584,7 @@ class GoedelsPoetryStateManager:
         non_uniform_margin: bool = False
         boundary_mismatch: bool = False
         low_confidence: bool = False
+        source_mismatch: bool = False
         audit: list[dict[str, object]] = dataclasses.field(default_factory=list)
 
         def mark_ambiguity(self) -> None:
@@ -1593,6 +1602,8 @@ class GoedelsPoetryStateManager:
             if self.non_unique_holes:
                 return False
             if self.boundary_mismatch:
+                return False
+            if self.source_mismatch:
                 return False
             if self.layout_sensitive:
                 return False
@@ -1653,6 +1664,7 @@ class GoedelsPoetryStateManager:
             "non_uniform_margin": context.non_uniform_margin,
             "boundary_mismatch": context.boundary_mismatch,
             "low_confidence": context.low_confidence,
+            "source_mismatch": context.source_mismatch,
             "audits": context.audit,
         }
         permissive_ok = context.permissive_ok()
@@ -1666,6 +1678,310 @@ class GoedelsPoetryStateManager:
             audit=audit,
             permissive_ok=permissive_ok,
         )
+
+    def _source_hash_matches(
+        self,
+        node: dict,
+        body_text: str,
+        context: ReconstructionContext,
+    ) -> bool:
+        raw_hash, normalized_hash = compute_source_hashes(body_text)
+        stored_raw = node.get("source_hash_raw")
+        stored_norm = node.get("source_hash_normalized")
+        if stored_raw is None or stored_norm is None:
+            context.source_mismatch = True
+            context.mark_failure("missing_source_hash")
+            if is_debug_enabled():
+                log_reconstruction_event(
+                    "source_hash_mismatch",
+                    {"reason": "missing", "stored_raw": stored_raw, "stored_norm": stored_norm},
+                )
+            return False
+        if stored_raw == raw_hash:
+            return True
+        if stored_norm == normalized_hash:
+            return True
+        context.source_mismatch = True
+        context.mark_failure("source_hash_mismatch")
+        if is_debug_enabled():
+            log_reconstruction_event(
+                "source_hash_mismatch",
+                {
+                    "reason": "mismatch",
+                    "stored_raw": stored_raw,
+                    "stored_norm": stored_norm,
+                    "raw_hash": raw_hash,
+                    "normalized_hash": normalized_hash,
+                },
+            )
+        return False
+
+    def _build_line_start_bytes(self, text: str) -> list[int]:
+        starts: list[int] = [0]
+        byte_count = 0
+        for ch in text:
+            if ch == "\n":
+                starts.append(byte_count + len(ch.encode("utf-8")))
+            byte_count += len(ch.encode("utf-8"))
+        return starts
+
+    def _line_col_to_body_byte(
+        self,
+        text: str,
+        line: int,
+        column: int,
+        *,
+        column_is_byte: bool,
+        line_base: int,
+    ) -> int:
+        starts = self._build_line_start_bytes(text)
+        if not starts:
+            return 0
+        line_idx = line - line_base
+        if line_idx < 0:
+            line_idx = 0
+        if line_idx >= len(starts):
+            line_idx = len(starts) - 1
+        line_start = starts[line_idx]
+        if column_is_byte:
+            return line_start + max(0, column)
+        lines = text.splitlines(keepends=True)
+        line_text = lines[line_idx] if line_idx < len(lines) else ""
+        if column <= 0:
+            return line_start
+        if column >= len(line_text):
+            column = len(line_text)
+        prefix = line_text[:column]
+        return line_start + len(prefix.encode("utf-8"))
+
+    def _compute_preamble_line_offset(self, ast: AST, source_text: str | None) -> int:
+        """Compute the line offset to convert full-source line numbers to body-relative."""
+        if not source_text:
+            return 0
+        body_start_byte = ast.get_body_start_byte()
+        preamble_text = source_text[:body_start_byte]
+        newline_count = preamble_text.count("\n")
+        return newline_count + 1 if preamble_text.endswith("\n") else newline_count
+
+    def _convert_check_sorry_to_target(
+        self,
+        sorry: dict[str, object],
+        body_text: str,
+        preamble_line_offset: int,
+        column_is_byte: bool,
+        line_base: int,
+        ast: AST,
+        source_text: str | None,
+    ) -> tuple[int, int]:
+        """Convert a check sorry's position to a body-relative byte target."""
+        pos = cast(dict[str, int], sorry.get("pos", {}))
+        end_pos = cast(dict[str, int], sorry.get("endPos", {}))
+        original_line = int(pos.get("line", 1))
+        original_end_line = int(end_pos.get("line", int(pos.get("line", 1))))
+        check_line_1idx = original_line - preamble_line_offset
+        check_end_line_1idx = original_end_line - preamble_line_offset
+        check_line_0idx = original_line - preamble_line_offset + 1
+        check_end_line_0idx = original_end_line - preamble_line_offset + 1
+        if check_line_1idx >= 1:
+            check_line = check_line_1idx
+            check_end_line = check_end_line_1idx
+        elif check_line_0idx >= 1:
+            check_line = check_line_0idx
+            check_end_line = check_end_line_0idx
+        else:
+            check_line = max(1, check_line_1idx)
+            check_end_line = max(1, check_end_line_1idx)
+        if is_debug_enabled():
+            log_reconstruction_event(
+                "match_check_line_conversion",
+                {
+                    "original_line": original_line,
+                    "preamble_line_offset": preamble_line_offset,
+                    "check_line_body_relative": check_line,
+                    "body_start_byte": ast.get_body_start_byte() if source_text else None,
+                },
+            )
+        start_b = self._line_col_to_body_byte(
+            body_text,
+            check_line,
+            int(pos.get("column", 0)),
+            column_is_byte=column_is_byte,
+            line_base=line_base,
+        )
+        end_b = self._line_col_to_body_byte(
+            body_text,
+            check_end_line,
+            int(end_pos.get("column", int(pos.get("column", 0)))),
+            column_is_byte=column_is_byte,
+            line_base=line_base,
+        )
+        return (start_b, end_b)
+
+    def _try_match_by_goal(
+        self,
+        sorry: dict[str, object],
+        ast_spans_by_name: dict[str, list[tuple[int, int]]],
+        matched_spans: set[tuple[int, int]],
+        matched_by_name: dict[str, list[tuple[int, int]]],
+    ) -> bool:
+        """Try to match a check sorry to an AST span by extracting subgoal name from goal."""
+        goal = str(sorry.get("goal", ""))
+        if not goal:
+            return False
+        import re
+
+        goal_match = re.search(r"^([a-zA-Z_][a-zA-Z0-9_']*)\s*:", goal)
+        if not goal_match:
+            return False
+        goal_name = goal_match.group(1)
+        if goal_name not in ast_spans_by_name:
+            return False
+        for goal_span in ast_spans_by_name[goal_name]:
+            if goal_span not in matched_spans:
+                matched_by_name[goal_name].append(goal_span)
+                matched_spans.add(goal_span)
+                if is_debug_enabled():
+                    log_reconstruction_event(
+                        "match_check_sorry_by_goal",
+                        {
+                            "goal": goal,
+                            "extracted_name": goal_name,
+                            "matched_span": goal_span,
+                        },
+                    )
+                return True
+        return False
+
+    def _try_match_by_elimination(
+        self,
+        unmatched_sorries: list[tuple[dict[str, object], tuple[int, int]]],
+        ast_spans_by_name: dict[str, list[tuple[int, int]]],
+        matched_spans: set[tuple[int, int]],
+        matched_by_name: dict[str, list[tuple[int, int]]],
+        context: ReconstructionContext,
+    ) -> None:
+        """Try to match unmatched sorries to unmatched spans by elimination."""
+        unmatched_spans_by_name: dict[str, list[tuple[int, int]]] = {}
+        for name, spans in ast_spans_by_name.items():
+            unmatched = [s for s in spans if s not in matched_spans]
+            if unmatched:
+                unmatched_spans_by_name[name] = unmatched
+
+        total_unmatched_spans = sum(len(spans) for spans in unmatched_spans_by_name.values())
+        if len(unmatched_sorries) == 1 and total_unmatched_spans == 1:
+            sorry, _target = unmatched_sorries[0]
+            for name, spans in unmatched_spans_by_name.items():
+                if len(spans) == 1:
+                    span = spans[0]
+                    matched_by_name[name].append(span)
+                    matched_spans.add(span)
+                    if is_debug_enabled():
+                        log_reconstruction_event(
+                            "match_check_sorry_by_elimination",
+                            {
+                                "hole_name": name,
+                                "matched_span": span,
+                                "goal": str(sorry.get("goal", "")),
+                            },
+                        )
+                    break
+        else:
+            for sorry, target in unmatched_sorries:
+                context.unresolved_holes += 1
+                context.partial = True
+                context.mark_failure("ambiguity")
+                log_reconstruction_event(
+                    "hole_unresolved",
+                    {
+                        "reason": "check_span_unmatched",
+                        "target": target,
+                        "goal": str(sorry.get("goal", "")),
+                        "unmatched_spans_count": total_unmatched_spans,
+                    },
+                )
+
+    def _match_check_sorries_to_ast(  # noqa: C901
+        self,
+        ast: AST,
+        body_text: str,
+        check_sorries: list[dict[str, object]],
+        context: ReconstructionContext,
+        source_text: str | None = None,
+    ) -> dict[str, list[tuple[int, int]]]:
+        semantics = detect_position_semantics()
+        column_is_byte = bool(semantics.get("column_is_byte", False))
+        line_base = int(semantics.get("line_base", 1))
+        preamble_line_offset = self._compute_preamble_line_offset(ast, source_text)
+
+        ast_spans_by_name = ast.get_sorry_holes_by_name_bytes()
+        all_spans: list[tuple[tuple[int, int], str]] = []
+        for name, spans in ast_spans_by_name.items():
+            for span in spans:
+                all_spans.append((span, name))
+
+        matched_by_name: dict[str, list[tuple[int, int]]] = {name: [] for name in ast_spans_by_name}
+
+        def _find_candidates(target: tuple[int, int]) -> list[tuple[int, int]]:
+            start_b, end_b = target
+            candidates: list[tuple[int, int]] = []
+            for span, _name in all_spans:
+                if abs(span[0] - start_b) <= 2 and abs(span[1] - end_b) <= 2:
+                    candidates.append(span)
+            return candidates
+
+        span_to_name = dict(all_spans)
+        matched_spans: set[tuple[int, int]] = set()
+
+        if is_debug_enabled():
+            log_reconstruction_event(
+                "match_check_sorries_start",
+                {
+                    "ast_spans_by_name": ast_spans_by_name,
+                    "check_sorries_count": len(check_sorries),
+                    "semantics": semantics,
+                    "preamble_line_offset": preamble_line_offset,
+                },
+            )
+
+        unmatched_sorries: list[tuple[dict[str, object], tuple[int, int]]] = []
+        for sorry in check_sorries:
+            target = self._convert_check_sorry_to_target(
+                sorry, body_text, preamble_line_offset, column_is_byte, line_base, ast, source_text
+            )
+            if is_debug_enabled():
+                pos = cast(dict[str, int], sorry.get("pos", {}))
+                end_pos = cast(dict[str, int], sorry.get("endPos", {}))
+                log_reconstruction_event(
+                    "match_check_sorry",
+                    {
+                        "pos": pos,
+                        "end_pos": end_pos,
+                        "target_bytes": target,
+                        "span_to_name_keys": list(span_to_name.keys()),
+                    },
+                )
+            if target in span_to_name:
+                name = span_to_name[target]
+                matched_by_name[name].append(target)
+                matched_spans.add(target)
+                continue
+            candidates = _find_candidates(target)
+            if len(candidates) == 1:
+                name = span_to_name[candidates[0]]
+                matched_by_name[name].append(candidates[0])
+                matched_spans.add(candidates[0])
+                continue
+            if self._try_match_by_goal(sorry, ast_spans_by_name, matched_spans, matched_by_name):
+                continue
+            unmatched_sorries.append((sorry, target))
+
+        if unmatched_sorries:
+            self._try_match_by_elimination(
+                unmatched_sorries, ast_spans_by_name, matched_spans, matched_by_name, context
+            )
+
+        # Return the matched mapping (may be partial if some sorries couldn't be matched)
+        return matched_by_name
 
     def _reconstruct_node_proof_ast(
         self,
@@ -1729,6 +2045,18 @@ class GoedelsPoetryStateManager:
             return f"{decomposed_state['formal_theorem']} := by sorry\n"
 
         canonical_sketch = ast.get_body_text() if isinstance(ast, AST) else None
+        if is_debug_enabled():
+            log_reconstruction_event(
+                "reconstruct_decomposed_start",
+                {
+                    "theorem": decomposed_state.get("formal_theorem"),
+                    "sketch_len": len(str(sketch)) if sketch else 0,
+                    "sketch_preview": repr(str(sketch)[:80]) if sketch else None,
+                    "canonical_sketch_len": len(canonical_sketch) if canonical_sketch else 0,
+                    "canonical_sketch_preview": repr(canonical_sketch[:80]) if canonical_sketch else None,
+                    "ast_id": id(ast) if isinstance(ast, AST) else None,
+                },
+            )
         if canonical_sketch:
             sketch_text = canonical_sketch
             log_reconstruction_event(
@@ -1740,7 +2068,60 @@ class GoedelsPoetryStateManager:
             )
         else:
             sketch_text = str(sketch)
-        holes_by_name = ast.get_sorry_holes_by_name()
+
+        if not self._source_hash_matches(cast(dict, decomposed_state), sketch_text, context):
+            context.partial = True
+            return f"{decomposed_state['formal_theorem']} := by sorry\n"
+
+        source_text = ast.get_source_text() if isinstance(ast, AST) else None
+        if not source_text:
+            context.mark_failure("missing_source")
+            context.partial = True
+            return f"{decomposed_state['formal_theorem']} := by sorry\n"
+
+        if is_debug_enabled():
+            log_reconstruction_event(
+                "before_check_code",
+                {
+                    "source_text_len": len(source_text),
+                    "source_text_preview": repr(source_text[:100]),
+                    "ast_id": id(ast) if isinstance(ast, AST) else None,
+                },
+            )
+        check_response = check_code_with_infotree(source_text, infotree=None)
+        check_sorries = check_response.get("sorries", [])
+        if is_debug_enabled():
+            log_reconstruction_event(
+                "after_check_code",
+                {
+                    "check_sorries_count": len(check_sorries),
+                    "check_sorries": [str(s) for s in check_sorries[:3]],
+                },
+            )
+        if not check_sorries:
+            context.mark_failure("missing_check_sorries")
+            context.partial = True
+            return f"{decomposed_state['formal_theorem']} := by sorry\n"
+
+        if is_debug_enabled():
+            log_reconstruction_event(
+                "before_match_check_sorries",
+                {
+                    "sketch_text_len": len(sketch_text),
+                    "sketch_text_preview": repr(sketch_text[:100]),
+                    "ast_id": id(ast) if isinstance(ast, AST) else None,
+                },
+            )
+        holes_by_name_bytes = self._match_check_sorries_to_ast(
+            ast,
+            sketch_text,
+            cast(list[dict[str, object]], check_sorries),
+            context,
+            source_text=source_text,
+        )
+        if not holes_by_name_bytes:
+            context.partial = True
+            return f"{decomposed_state['formal_theorem']} := by sorry\n"
 
         children = list(decomposed_state.get("children", []))
 
@@ -1761,34 +2142,73 @@ class GoedelsPoetryStateManager:
             hole_name = child.get("hole_name")
             hole_start = None
             hole_end = None
-            spans = []
+            spans_b: list[tuple[int, int]] = []
             if isinstance(hole_name, str):
-                spans = holes_by_name.get(hole_name, [])
-            if len(spans) == 1:
-                hole_start, hole_end = spans[0]
-            elif child.get("hole_start") is not None and child.get("hole_end") is not None:
-                hole_start = cast(int, child.get("hole_start"))
-                hole_end = cast(int, child.get("hole_end"))
-            else:
-                fallback_spans = self._find_standalone_sorry_spans(sketch_text)
-                if len(fallback_spans) == 1:
-                    hole_start, hole_end = fallback_spans[0]
+                spans_b = holes_by_name_bytes.get(hole_name, [])
+            if is_debug_enabled():
+                log_reconstruction_event(
+                    "hole_spans_check",
+                    {
+                        "hole_name": hole_name,
+                        "spans_b": spans_b,
+                        "spans_b_len": len(spans_b),
+                        "child_hole_start": child.get("hole_start"),
+                        "child_hole_end": child.get("hole_end"),
+                    },
+                )
+            if len(spans_b) == 1:
+                hole_start_b, hole_end_b = spans_b[0]
 
-            if hole_start is None or hole_end is None:
+                # Convert byte offsets to character indices in sketch_text directly
+                # (not using ast.body_byte_to_char_index which uses AST's internal body text)
+                # The stub computes byte offsets in body_text (which is sketch_text), so we need
+                # to convert those byte offsets to character indices in sketch_text
+                # Iterate through characters, accumulating bytes until we reach the target byte offset
+                def byte_to_char_index(text: str, byte_offset: int) -> int:
+                    byte_count = 0
+                    for char_idx, char in enumerate(text):
+                        char_bytes = char.encode("utf-8")
+                        if byte_count + len(char_bytes) > byte_offset:
+                            return char_idx
+                        byte_count += len(char_bytes)
+                    return len(text)
+
+                hole_start = byte_to_char_index(sketch_text, hole_start_b)
+                hole_end = byte_to_char_index(sketch_text, hole_end_b)
+                if is_debug_enabled():
+                    log_reconstruction_event(
+                        "hole_using_ast_offsets",
+                        {
+                            "hole_name": hole_name,
+                            "hole_start_b": hole_start_b,
+                            "hole_end_b": hole_end_b,
+                            "hole_start": hole_start,
+                            "hole_end": hole_end,
+                            "child_hole_start": child.get("hole_start"),
+                            "child_hole_end": child.get("hole_end"),
+                            "sketch_slice": repr(sketch_text[hole_start:hole_end]),
+                        },
+                    )
+            elif child.get("hole_start") is not None and child.get("hole_end") is not None:
+                # Fallback: use hole_start/hole_end from child node (set by tests or legacy code)
+                hole_start = int(child.get("hole_start", 0))
+                hole_end = int(child.get("hole_end", 0))
+                if is_debug_enabled():
+                    log_reconstruction_event(
+                        "hole_using_child_offsets",
+                        {
+                            "hole_name": hole_name,
+                            "hole_start": hole_start,
+                            "hole_end": hole_end,
+                            "spans_from_ast": spans_b,
+                        },
+                    )
+            else:
                 context.unresolved_holes += 1
                 context.partial = True
                 log_reconstruction_event(
                     "hole_unresolved",
-                    {"hole_name": hole_name, "reason": "missing_span", "spans": spans},
-                )
-                continue
-            if len(spans) > 1 and hole_start is None:
-                context.non_unique_holes = True
-                context.mark_ambiguity()
-                context.unresolved_holes += 1
-                log_reconstruction_event(
-                    "hole_unresolved",
-                    {"hole_name": hole_name, "reason": "ambiguous_span", "spans": spans},
+                    {"hole_name": hole_name, "reason": "missing_span", "spans": spans_b},
                 )
                 continue
             if not (0 <= hole_start < hole_end <= len(sketch_text)):
@@ -1816,6 +2236,17 @@ class GoedelsPoetryStateManager:
                 )
                 continue
 
+            if is_debug_enabled():
+                log_reconstruction_event(
+                    "before_format_body",
+                    {
+                        "hole_name": hole_name,
+                        "hole_start": hole_start,
+                        "hole_end": hole_end,
+                        "proof_body": repr(proof_body),
+                        "sketch_slice": repr(sketch_text[hole_start:hole_end]),
+                    },
+                )
             replacement = self._format_body_for_hole(
                 sketch_text, hole_start, hole_end, proof_body, mode, context, child
             )
@@ -1827,16 +2258,89 @@ class GoedelsPoetryStateManager:
                     {"hole_name": hole_name, "reason": "format_failure"},
                 )
                 continue
+            if is_debug_enabled():
+                log_reconstruction_event(
+                    "replacement_added",
+                    {
+                        "hole_name": hole_name,
+                        "hole_start": hole_start,
+                        "hole_end": hole_end,
+                        "replacement_preview": repr(replacement[:100]) if replacement else None,
+                        "replacement_len": len(replacement) if replacement else 0,
+                    },
+                )
             replacements.append((hole_start, hole_end, replacement))
 
         if replacements:
+            if is_debug_enabled():
+                log_reconstruction_event(
+                    "applying_replacements",
+                    {
+                        "replacements_count": len(replacements),
+                        "replacements": [(s, e, repr(r[:50])) for s, e, r in replacements],
+                        "sketch_text_len_before": len(sketch_text),
+                        "sketch_text_sorry_count": sketch_text.count("sorry"),
+                    },
+                )
             replacements.sort(key=lambda t: t[0], reverse=True)
             for start, end, rep in replacements:
+                if is_debug_enabled():
+                    log_reconstruction_event(
+                        "applying_replacement",
+                        {
+                            "start": start,
+                            "end": end,
+                            "rep_preview": repr(rep[:100]),
+                            "sketch_slice_before": repr(sketch_text[start:end]),
+                        },
+                    )
                 sketch_text = sketch_text[:start] + rep + sketch_text[end:]
+            if is_debug_enabled():
+                # Check if sorry is still in sketch_text
+                sorry_positions = []
+                idx = 0
+                while True:
+                    idx = sketch_text.find("sorry", idx)
+                    if idx == -1:
+                        break
+                    # Check if it's a standalone sorry (whitespace before and after)
+                    before = sketch_text[idx - 1] if idx > 0 else " "
+                    after_idx = idx + len("sorry")
+                    after = sketch_text[after_idx] if after_idx < len(sketch_text) else " "
+                    if before.isspace() and after.isspace():
+                        sorry_positions.append(idx)
+                    idx = after_idx
+                log_reconstruction_event(
+                    "replacements_applied",
+                    {
+                        "sketch_text_len_after": len(sketch_text),
+                        "sketch_text_preview": repr(sketch_text[:200]),
+                        "sketch_text_sorry_count": sketch_text.count("sorry"),
+                        "sketch_text_standalone_sorry_positions": sorry_positions,
+                    },
+                )
 
         return sketch_text
 
-    def _extract_proof_body_ast(
+    def _extract_proof_from_formal_proof(self, formal_proof: object, hole_name: str | None) -> str | None:
+        """Extract proof body from formal_proof string, skipping 'by' prefix if present."""
+        if not isinstance(formal_proof, str) or not formal_proof.strip():
+            return None
+        proof_text = formal_proof.strip()
+        if proof_text.startswith("by"):
+            proof_text = proof_text[2:].lstrip()
+        if is_debug_enabled() and hole_name:
+            log_reconstruction_event(
+                "extract_proof_body_fallback_to_formal_proof",
+                {
+                    "hole_name": hole_name,
+                    "formal_proof": formal_proof,
+                    "extracted": proof_text,
+                },
+            )
+        return proof_text
+
+    def _extract_proof_body_ast(  # noqa: C901
         self,
         child: TreeNode,
         mode: ReconstructionMode,
@@ -1844,21 +2348,71 @@ class GoedelsPoetryStateManager:
     ) -> str | None:
         if isinstance(child, dict) and "formal_proof" in child and "children" not in child:
             ast = child.get("ast")
+            formal_proof = child.get("formal_proof")
+            hole_name = child.get("hole_name")
             if ast is None:
-                context.mark_failure("missing_ast")
-                return None
-            return self._extract_proof_body_from_ast(ast, mode, context)
+                result = self._extract_proof_from_formal_proof(formal_proof, hole_name)
+                if result is None:
+                    context.mark_failure("missing_ast")
+                    if is_debug_enabled():
+                        log_reconstruction_event(
+                            "extract_proof_body_missing_ast",
+                            {"child_keys": list(child.keys()) if isinstance(child, dict) else None},
+                        )
+                return result
+            result = self._extract_proof_body_from_ast(ast, mode, context)
+            if result is None:
+                result = self._extract_proof_from_formal_proof(formal_proof, hole_name)
+                if result is None and is_debug_enabled():
+                    log_reconstruction_event(
+                        "extract_proof_body_from_ast_returned_none",
+                        {
+                            "hole_name": hole_name,
+                            "formal_proof": formal_proof,
+                        },
+                    )
+            return result
         if isinstance(child, dict) and "children" in child:
             reconstructed = self._reconstruct_decomposed_node_proof_ast(
                 cast(DecomposedFormalTheoremState, child),
                 mode,
                 context,
             )
+            if is_debug_enabled():
+                log_reconstruction_event(
+                    "extract_proof_body_reconstructed",
+                    {
+                        "hole_name": child.get("hole_name"),
+                        "reconstructed": repr(reconstructed[:200]) if reconstructed else None,
+                    },
+                )
             ast = child.get("ast")
             if ast is None:
                 context.mark_failure("missing_ast")
                 return None
-            return self._extract_proof_body_from_ast(ast, mode, context, override_text=reconstructed)
+            result = self._extract_proof_body_from_ast(ast, mode, context, override_text=reconstructed)
+            if is_debug_enabled():
+                log_reconstruction_event(
+                    "extract_proof_body_result",
+                    {
+                        "hole_name": child.get("hole_name"),
+                        "result": repr(result[:200]) if result else None,
+                    },
+                )
+            return result
+        if is_debug_enabled():
+            log_reconstruction_event(
+                "extract_proof_body_no_match",
+                {
+                    "is_dict": isinstance(child, dict),
+                    "has_formal_proof": isinstance(child, dict) and "formal_proof" in child
+                    if isinstance(child, dict)
+                    else False,
+                    "has_children": isinstance(child, dict) and "children" in child
+                    if isinstance(child, dict)
+                    else False,
+                },
+            )
         return None
 
     def _extract_proof_body_from_ast(  # noqa: C901
@@ -1874,7 +2428,9 @@ class GoedelsPoetryStateManager:
             context.mark_failure("missing_source")
             return None
 
-        by_info = self._find_by_tactic_info(ast.get_ast(), ast)
+        decl_node = self._find_decl_subtree(ast.get_ast())
+        search_root = decl_node if decl_node is not None else ast.get_ast()
+        by_info = self._find_by_tactic_info(search_root, ast)
         if by_info is None:
             context.mark_failure("missing_by")
             return None
@@ -1897,6 +2453,8 @@ class GoedelsPoetryStateManager:
             boundary_ok = self._token_boundaries_match(source, span_tokens)
             if not boundary_ok:
                 context.boundary_mismatch = True
+                context.mark_failure("boundary_mismatch")
+                return None
         confidence = 0
         if by_token.immediate:
             confidence += 1
@@ -1924,8 +2482,20 @@ class GoedelsPoetryStateManager:
             context.mark_failure("non_contiguous")
             return None
 
+        if override_text is not None:
+            # When override_text is provided, extract proof body directly from it
+            # by finding ":=" and "by" pattern, since AST offsets are for original text
+            import re
+
+            by_match = re.search(r":=\s*by\b", override_text)
+            if by_match:
+                start_c = by_match.end()
+                return override_text[start_c:]
+            # Fallback: try to use AST offset but this may be inaccurate
+            start_c = ast.byte_to_char_index(by_token.end)
+            return override_text[start_c:]
         start_c = ast.byte_to_char_index(by_token.end)
-        end_c = len(source) if override_text is not None else ast.byte_to_char_index(span_end)
+        end_c = ast.byte_to_char_index(span_end)
         return source[start_c:end_c]
 
     def _extract_tactics_after_by(self, proof: str) -> str:
@@ -1987,18 +2557,38 @@ class GoedelsPoetryStateManager:
         end: int
         immediate: bool
 
-    def _find_by_tactic_info(  # noqa: C901
-        self,
-        node: dict[str, object] | list[object],
-        ast: AST,
-    ) -> tuple[_ByToken, dict[str, object]] | None:
+    def _find_decl_subtree(self, node: dict[str, object] | list[object]) -> dict[str, object] | None:
         queue: list[dict[str, object]] = []
         if isinstance(node, dict):
             queue.append(node)
         elif isinstance(node, list):
-            for item in node:
-                if isinstance(item, dict):
-                    queue.append(item)
+            queue.extend([item for item in node if isinstance(item, dict)])
+        while queue:
+            current = queue.pop(0)
+            kind = current.get("kind")
+            if isinstance(kind, str) and "declVal" in kind:
+                return current
+            for val in current.values():
+                if isinstance(val, dict):
+                    queue.append(val)
+                elif isinstance(val, list):
+                    queue.extend([item for item in val if isinstance(item, dict)])
+        return None
+
+    def _find_by_tactic_info(  # noqa: C901
+        self,
+        node: dict[str, object] | list[object],
+        ast: AST,
+        *,
+        hole_span_b: tuple[int, int] | None = None,
+    ) -> tuple[GoedelsPoetryStateManager._ByToken, dict[str, object]] | None:
+        candidates: list[tuple[GoedelsPoetryStateManager._ByToken, dict[str, object], tuple[int, int]]] = []
+        queue: list[dict[str, object]] = []
+        if isinstance(node, dict):
+            queue.append(node)
+        elif isinstance(node, list):
+            queue.extend([item for item in node if isinstance(item, dict)])
+
         while queue:
             current = queue.pop(0)
             kind = current.get("kind")
@@ -2022,15 +2612,37 @@ class GoedelsPoetryStateManager:
                                             tactic_node = args[j]
                                             break
                                     if tactic_node is not None:
-                                        return self._ByToken(start_b_int, end_b_int, True), tactic_node
+                                        span = ast.get_token_span(tactic_node, include_synthetic=True)
+                                        if span is not None:
+                                            candidates.append((
+                                                self._ByToken(start_b_int, end_b_int, True),
+                                                tactic_node,
+                                                span,
+                                            ))
             for val in current.values():
                 if isinstance(val, dict):
                     queue.append(val)
                 elif isinstance(val, list):
-                    for item in val:
-                        if isinstance(item, dict):
-                            queue.append(item)
-        return None
+                    queue.extend([item for item in val if isinstance(item, dict)])
+
+        if not candidates:
+            return None
+
+        if hole_span_b is not None:
+            containing = [
+                (tok, node, span)
+                for tok, node, span in candidates
+                if span[0] <= hole_span_b[0] and span[1] >= hole_span_b[1]
+            ]
+            if containing:
+                containing.sort(key=lambda c: (c[2][1] - c[2][0], c[2][0]))
+                tok, node, _span = containing[0]
+                return tok, node
+
+        # Default: choose outermost by (largest span)
+        candidates.sort(key=lambda c: (c[2][1] - c[2][0]), reverse=True)
+        tok, node, _span = candidates[0]
+        return tok, node
 
     def _token_boundaries_match(self, source: str, tokens: list[AST.Token]) -> bool:
         if not tokens:
@@ -2061,7 +2673,18 @@ class GoedelsPoetryStateManager:
     def _has_layout_sensitive_constructs(self, node: object) -> bool:
         if isinstance(node, dict):
             kind = node.get("kind")
-            if isinstance(kind, str) and any(key in kind for key in ("calc", "match", "cases")):
+            if isinstance(kind, str) and any(
+                key in kind
+                for key in (
+                    "calc",
+                    "match",
+                    "cases",
+                    "byCases",
+                    "byContra",
+                    "bullet",
+                    "tacticSeq1Indented",
+                )
+            ):
                 return True
             return any(self._has_layout_sensitive_constructs(val) for val in node.values())
         if isinstance(node, list):
@@ -2111,14 +2734,61 @@ class GoedelsPoetryStateManager:
             context.non_uniform_margin = True
 
         if layout_sensitive:
-            if leading_ws and nonempty[0].startswith(leading_ws):
+            # For layout-sensitive constructs, require that the proof body's first line
+            # starts with at least the same leading whitespace as the line containing the sorry.
+            # However, if the proof body is simple (single tactic or minimal indentation),
+            # allow it to be re-indented to match the context.
+            first_line_indent = len(nonempty[0]) - len(nonempty[0].lstrip(" \t")) if nonempty else 0
+            leading_ws_len = len(leading_ws)
+            if leading_ws and first_line_indent < leading_ws_len:
+                # Proof body has less indentation than the context - this is OK for simple proofs
+                # We'll re-indent it to match the context
+                if is_debug_enabled():
+                    log_reconstruction_event(
+                        "format_body_reindent_layout_sensitive",
+                        {
+                            "leading_ws": repr(leading_ws),
+                            "first_line_indent": first_line_indent,
+                            "first_nonempty": repr(nonempty[0]) if nonempty else None,
+                        },
+                    )
+                # Re-indent the first line to match leading_ws
+                if nonempty:
+                    first_line = nonempty[0]
+                    rest_indent = len(first_line) - len(first_line.lstrip(" \t"))
+                    if rest_indent < leading_ws_len:
+                        # Add enough spaces to match leading_ws
+                        indent_diff = leading_ws_len - rest_indent
+                        normalized_lines = []
+                        for i, ln in enumerate(lines):
+                            if i == 0 and ln.strip():
+                                normalized_lines.append(" " * indent_diff + ln)
+                            else:
+                                normalized_lines.append(ln)
+                    else:
+                        normalized_lines = lines
+                else:
+                    normalized_lines = lines
+            elif leading_ws and nonempty[0].startswith(leading_ws):
+                # Already matches - use as-is
                 normalized_lines = lines
             else:
+                # Mismatch that can't be fixed by re-indenting
                 context.mark_failure("layout_sensitive_mismatch")
+                if is_debug_enabled():
+                    log_reconstruction_event(
+                        "format_body_layout_mismatch",
+                        {
+                            "leading_ws": repr(leading_ws),
+                            "first_nonempty": repr(nonempty[0]) if nonempty else None,
+                            "proof_body": repr(proof_body),
+                        },
+                    )
                 return None
         else:
             normalized_lines = lines
-            if mode.allow_margin_normalization and (uniform_margin or mode.allow_non_uniform_margin):
+            safe_to_normalize = mode.allow_margin_normalization and uniform_margin and not context.non_uniform_margin
+            if safe_to_normalize:
                 normalized_lines = []
                 for ln in lines:
                     if ln.strip():
@@ -2140,7 +2810,20 @@ class GoedelsPoetryStateManager:
                     rebuilt_lines.append(ln)
                 else:
                     rebuilt_lines.append(f"{line_prefix}{ln}" if ln.strip() else ln)
-        return "\n".join(rebuilt_lines)
+        result = "\n".join(rebuilt_lines)
+        if is_debug_enabled():
+            log_reconstruction_event(
+                "format_body_result",
+                {
+                    "hole_start": hole_start,
+                    "hole_end": hole_end,
+                    "proof_body": repr(proof_body),
+                    "replacement": repr(result),
+                    "inline_hole": inline_hole,
+                    "layout_sensitive": layout_sensitive,
+                },
+            )
+        return result
 
     def _strip_decl_assignment(self, formal_decl: str) -> str:
         """

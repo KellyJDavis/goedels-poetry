@@ -1,4 +1,5 @@
 from functools import partial
+from typing import cast
 
 from kimina_client import KiminaClient
 from langgraph.graph import END, START, StateGraph
@@ -9,6 +10,7 @@ from goedels_poetry.agents.state import FormalTheoremProofState, FormalTheoremPr
 from goedels_poetry.agents.util.common import (
     combine_preamble_and_body,
     combine_theorem_with_proof,
+    compute_source_hashes,
     remove_default_imports_from_ast,
 )
 from goedels_poetry.agents.util.debug import log_kimina_response
@@ -157,6 +159,11 @@ def _parse_proof(
         source_text=proof_with_imports,
         body_start=body_start,
     )
+    ast_obj = cast(AST, state["ast"])
+    body_text = ast_obj.get_body_text() if ast_obj is not None else normalized_body
+    raw_hash, normalized_hash = compute_source_hashes(body_text or "")
+    state["source_hash_raw"] = raw_hash
+    state["source_hash_normalized"] = normalized_hash
 
     # Return a FormalTheoremProofStates with state added to its outputs
     return {"outputs": [state]}  # type: ignore[typeddict-item]

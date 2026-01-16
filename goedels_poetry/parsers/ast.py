@@ -52,6 +52,7 @@ class AST:
         self._source_text: str | None = source_text
         self._body_start: int = max(0, int(body_start))
         self._byte_prefix: list[int] | None = None
+        self._line_start_bytes: list[int] | None = None
 
     @dataclass(frozen=True)
     class Token:
@@ -88,6 +89,59 @@ class AST:
             self._byte_prefix = prefix
         return self._byte_prefix
 
+    def _ensure_line_start_bytes(self) -> list[int]:
+        source = self._source_text
+        if source is None:
+            return []
+        if self._line_start_bytes is None:
+            starts: list[int] = [0]
+            byte_count = 0
+            for ch in source:
+                if ch == "\n":
+                    starts.append(byte_count + len(ch.encode("utf-8")))
+                byte_count += len(ch.encode("utf-8"))
+            self._line_start_bytes = starts
+        return self._line_start_bytes
+
+    def line_col_to_byte_offset(
+        self,
+        line: int,
+        column: int,
+        *,
+        column_is_byte: bool,
+        line_base: int = 1,
+    ) -> int:
+        """
+        Convert a (line, column) pair to a byte offset in source_text.
+
+        Parameters are expected to be 0- or 1-based depending on line_base and column semantics.
+        """
+        source = self._source_text
+        if source is None:
+            return 0
+        starts = self._ensure_line_start_bytes()
+        if not starts:
+            return 0
+        line_idx = line - line_base
+        if line_idx < 0:
+            line_idx = 0
+        if line_idx >= len(starts):
+            line_idx = len(starts) - 1
+        line_start = starts[line_idx]
+
+        if column_is_byte:
+            return line_start + max(0, column)
+
+        # column is character-based: convert to byte offset within the line.
+        # Compute line text in characters.
+        line_text = source.splitlines(keepends=True)[line_idx]
+        if column <= 0:
+            return line_start
+        if column >= len(line_text):
+            column = len(line_text)
+        prefix = line_text[:column]
+        return line_start + len(prefix.encode("utf-8"))
+
     def _byte_to_char_index(self, byte_off: int) -> int:
         source = self._source_text
         if source is None:
@@ -112,6 +166,14 @@ class AST:
 
     def translate_span_to_body(self, start_b: int, end_b: int) -> tuple[int, int]:
         return self._translate_span_to_body(start_b, end_b)
+
+    def body_byte_to_char_index(self, body_byte_off: int) -> int:
+        """
+        Convert a body-relative byte offset to a body-relative character index.
+        """
+        start_b = self.get_body_start_byte()
+        full_b = start_b + max(0, body_byte_off)
+        return self._byte_to_char_index(full_b) - self._body_start
 
     @staticmethod
     def _is_synthetic_info(info: dict[str, Any] | None) -> bool:
@@ -173,6 +235,21 @@ class AST:
         """
         return self._body_start
 
+    def get_body_start_byte(self) -> int:
+        """
+        Return the byte offset for body_start in source_text.
+        """
+        if self._source_text is None:
+            return 0
+        prefix = self._ensure_byte_prefix()
+        if not prefix:
+            return 0
+        if self._body_start < 0:
+            return 0
+        if self._body_start >= len(prefix):
+            return prefix[-1]
+        return prefix[self._body_start]
+
     def get_body_text(self) -> str | None:
         """
         Return the exact body text slice from the original source text, if available.
@@ -190,6 +267,8 @@ class AST:
         Set/replace the source text metadata for this AST.
         """
         self._source_text = source_text
+        self._byte_prefix = None
+        self._line_start_bytes = None
         if body_start is not None:
             self._body_start = max(0, int(body_start))
 
@@ -276,4 +355,18 @@ class AST:
                 out_spans.append(self._translate_span_to_body(start_b, end_b))
             translated[name] = out_spans
 
+        return translated
+
+    def get_sorry_holes_by_name_bytes(self) -> dict[str, list[tuple[int, int]]]:
+        """
+        Returns a mapping of subgoal-name -> (start, end) byte offsets, body-relative.
+        """
+        holes = _get_sorry_holes_by_name(self._ast)
+        body_start_b = self.get_body_start_byte()
+        translated: dict[str, list[tuple[int, int]]] = {}
+        for name, spans in holes.items():
+            out_spans: list[tuple[int, int]] = []
+            for start_b, end_b in spans:
+                out_spans.append((start_b - body_start_b, end_b - body_start_b))
+            translated[name] = out_spans
         return translated

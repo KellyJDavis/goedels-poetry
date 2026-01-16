@@ -2,7 +2,17 @@ from __future__ import annotations
 
 from typing import Any, cast
 
-from kimina_client.models import AstModuleResponse, CheckResponse, CommandResponse, Message
+from kimina_client import KiminaClient
+from kimina_client.models import (
+    AstModuleResponse,
+    CheckResponse,
+    CommandResponse,
+    Infotree,
+    Message,
+)
+
+from goedels_poetry.agents.util.common import DEFAULT_IMPORTS, combine_preamble_and_body, split_preamble_and_body
+from goedels_poetry.config.kimina_server import KIMINA_LEAN_SERVER
 
 
 def parse_kimina_check_response(check_response: CheckResponse) -> dict:
@@ -86,6 +96,81 @@ def parse_kimina_ast_code_response(ast_code_response: AstModuleResponse) -> dict
             parsed_response[field] = value
 
     return parsed_response
+
+
+_POSITION_SEMANTICS: dict[str, int | bool] | None = None
+
+
+def get_kimina_client() -> KiminaClient:
+    return KiminaClient(
+        api_url=KIMINA_LEAN_SERVER["url"],
+        http_timeout=KIMINA_LEAN_SERVER["timeout"],
+        n_retries=KIMINA_LEAN_SERVER["max_retries"],
+    )
+
+
+def detect_position_semantics(client: KiminaClient | None = None) -> dict[str, int | bool]:
+    """
+    Detect whether Kimina uses character-based or byte-based columns, and line base.
+    """
+    global _POSITION_SEMANTICS
+    if _POSITION_SEMANTICS is not None:
+        return _POSITION_SEMANTICS
+
+    client = client or get_kimina_client()
+    body = "theorem gp_pos_semantics : True := by\n  have h₁ : True := by\n    trivial\n  sorry\n"
+    code = combine_preamble_and_body(DEFAULT_IMPORTS, body)
+    check_response = client.check(code, timeout=KIMINA_LEAN_SERVER["timeout"], infotree=None, show_progress=False)
+    parsed = parse_kimina_check_response(check_response)
+    sorries = parsed.get("sorries", [])
+    if not sorries:
+        _POSITION_SEMANTICS = {"column_is_byte": False, "line_base": 1}
+        return _POSITION_SEMANTICS
+
+    pos = sorries[0].get("pos", {})
+    pos_line = int(pos.get("line", 1))
+    pos_col = int(pos.get("column", 0))
+
+    _preamble, body_only = split_preamble_and_body(code)
+    lines = body_only.splitlines()
+    sorry_line_idx = 0
+    for idx, line in enumerate(lines):
+        if "sorry" in line:
+            sorry_line_idx = idx
+            break
+    line_base = 1 if pos_line == sorry_line_idx + 1 else 0 if pos_line == sorry_line_idx else 1
+
+    line_text = lines[sorry_line_idx] if lines else ""
+    char_col = line_text.find("sorry")
+    if char_col == -1:
+        char_col = 0
+    byte_col = len(line_text[:char_col].encode("utf-8"))
+
+    if pos_col == byte_col and pos_col != char_col:
+        column_is_byte = True
+    elif pos_col == char_col and pos_col != byte_col:
+        column_is_byte = False
+    else:
+        column_is_byte = False
+
+    _POSITION_SEMANTICS = {"column_is_byte": column_is_byte, "line_base": line_base}
+    return _POSITION_SEMANTICS
+
+
+def check_code_with_infotree(
+    code: str,
+    *,
+    infotree: Infotree | None = None,
+    client: KiminaClient | None = None,
+) -> dict:
+    client = client or get_kimina_client()
+    check_response = client.check(
+        code,
+        timeout=KIMINA_LEAN_SERVER["timeout"],
+        infotree=infotree,
+        show_progress=False,
+    )
+    return parse_kimina_check_response(check_response)
 
 
 def extract_hypotheses_from_check_response(parsed_check_response: dict) -> list[str]:  # noqa: C901

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import re
+from hashlib import sha256
 from typing import Any
 
 from jinja2 import Environment, FileSystemLoader, select_autoescape
@@ -140,6 +141,25 @@ def normalize_escape_sequences(content: str) -> str:
             result.append(content[i])
             i += 1
     return "".join(result)
+
+
+def normalize_source_for_hash(source: str) -> str:
+    """
+    Normalize source text for hashing by removing trailing whitespace only.
+    """
+    if not source:
+        return ""
+    return source.rstrip(" \t\r\n")
+
+
+def compute_source_hashes(source: str) -> tuple[str, str]:
+    """
+    Compute raw and normalized hashes for a source string.
+    """
+    raw_hash = sha256(source.encode("utf-8")).hexdigest()
+    normalized = normalize_source_for_hash(source)
+    normalized_hash = sha256(normalized.encode("utf-8")).hexdigest()
+    return raw_hash, normalized_hash
 
 
 def _normalize_block(block: str) -> str:

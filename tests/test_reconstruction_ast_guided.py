@@ -6,7 +6,7 @@ from typing import cast
 from ast_test_utils import build_simple_ast, find_sorry_spans
 
 from goedels_poetry.agents.state import DecomposedFormalTheoremState, FormalTheoremProofState
-from goedels_poetry.agents.util.common import DEFAULT_IMPORTS
+from goedels_poetry.agents.util.common import DEFAULT_IMPORTS, compute_source_hashes
 from goedels_poetry.state import GoedelsPoetryStateManager
 from goedels_poetry.util.tree import TreeNode
 
@@ -105,7 +105,13 @@ def test_reconstruction_fills_named_have_holes_by_offsets() -> None:
         hole_name=None,
         hole_start=None,
         hole_end=None,
+        source_hash_raw=None,
+        source_hash_normalized=None,
     )
+    ast_text = root["ast"].get_body_text() if root.get("ast") is not None else parent_sketch
+    raw_hash, normalized_hash = compute_source_hashes(ast_text)
+    root["source_hash_raw"] = raw_hash
+    root["source_hash_normalized"] = normalized_hash
 
     root["children"].append(
         cast(
@@ -180,7 +186,13 @@ def test_reconstruction_prefers_canonical_sketch_text() -> None:
         hole_name=None,
         hole_start=None,
         hole_end=None,
+        source_hash_raw=None,
+        source_hash_normalized=None,
     )
+    ast_text = root["ast"].get_body_text() if root.get("ast") is not None else canonical_sketch
+    raw_hash, normalized_hash = compute_source_hashes(ast_text)
+    root["source_hash_raw"] = raw_hash
+    root["source_hash_normalized"] = normalized_hash
 
     root["children"].append(
         cast(

@@ -153,6 +153,8 @@ def process_single_theorem(
                 hole_name=None,
                 hole_start=None,
                 hole_end=None,
+                source_hash_raw=None,
+                source_hash_normalized=None,
             )
             # Clear proof queues to avoid running prove pipeline
             state_manager._state.proof_syntax_queue.clear()
@@ -250,6 +252,8 @@ def process_theorems_from_directory(
                     hole_name=None,
                     hole_start=None,
                     hole_end=None,
+                    source_hash_raw=None,
+                    source_hash_normalized=None,
                 )
                 # Clear proof queues to avoid running prove pipeline
                 state_manager._state.proof_syntax_queue.clear()

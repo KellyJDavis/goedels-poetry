@@ -131,6 +131,7 @@ def _install_kimina_stub(monkeypatch: pytest.MonkeyPatch, kimina_client_cls: typ
     models_mod.CheckResponse = object
     models_mod.CommandResponse = dict
     models_mod.Message = dict
+    models_mod.Infotree = type("Infotree", (), {"full": "full", "tactics": "tactics", "original": "original"})
 
     monkeypatch.setitem(sys.modules, "kimina_client", kimina_mod)
     monkeypatch.setitem(sys.modules, "kimina_client.models", models_mod)
