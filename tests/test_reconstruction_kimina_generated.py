@@ -6,7 +6,7 @@ variations) so we can iterate on reconstruction correctness without proving real
 
 Configuration (env vars)
 ------------------------
-- RECONSTRUCTION_TEST_CASES: number of generated cases to run (default: 200). Set to 0 to skip.
+- RECONSTRUCTION_TEST_CASES: number of generated cases to run (default: 600). Set to 0 to skip.
 - RECONSTRUCTION_TEST_SEED: seed used to shuffle the deterministic corpus (default: 0).
 
 These tests match the conventions in `tests/test_kimina_agents.py`:
@@ -33,7 +33,6 @@ try:
     from goedels_poetry.agents.util.common import (
         DEFAULT_IMPORTS,
         combine_preamble_and_body,
-        combine_theorem_with_proof,
         remove_default_imports_from_ast,
     )
     from goedels_poetry.agents.util.kimina_server import parse_kimina_ast_code_response, parse_kimina_check_response
@@ -85,7 +84,8 @@ def _mk_case_named_haves(case_id: str, *, closer: str, comment_before_close: boo
     """
     Two named holes: `h₁` and `h₂`. `h₂` depends on `h₁`.
 
-    `h₂`'s child proof includes a comment line followed by a closing tactic.
+    `h₂`'s child proof includes the formatting pattern seen in partial.log:
+    a comment line followed by an over-indented closing tactic.
     """
     thm_name = f"recon_named_haves_{case_id}"
     parent_body = f"""theorem {thm_name} (n : Nat) : n = n := by
@@ -99,8 +99,8 @@ def _mk_case_named_haves(case_id: str, *, closer: str, comment_before_close: boo
     # h₁ is straightforward.
     proof_h1 = "rfl"
 
-    # h₂: inner have + comment + closing tactic. The closing line aligns with the outer block so
-    # the proof fragment remains valid Lean when inserted under the hole.
+    # h₂: inner have + comment + closing tactic. The closing line is intentionally indented by 2,
+    # so the reconstructor must not create a new indentation level when it splices under the hole.
     if closer == "exact":
         close_line = "exact h_main"
     elif closer == "simpa":
@@ -116,7 +116,7 @@ def _mk_case_named_haves(case_id: str, *, closer: str, comment_before_close: boo
         proof_h2_lines.append("")
     if comment_before_close:
         proof_h2_lines.append(comment)
-    proof_h2_lines.append(close_line)
+    proof_h2_lines.append(f"  {close_line}")
     proof_h2 = "\n".join(proof_h2_lines)
 
     return ReconCase(case_id=case_id, parent_body=parent_body, child_proofs={"h₁": proof_h1, "h₂": proof_h2})
@@ -149,7 +149,7 @@ def _mk_case_calc(case_id: str, *, closer: str, comment_before_close: bool) -> R
     proof_step_lines = ["have h_main : n = n := by", "  simpa using h₁"]
     if comment_before_close:
         proof_step_lines.append("-- close step")
-    proof_step_lines.append(close_line if closer != "rfl" else "exact h_main")
+    proof_step_lines.append(f"  {close_line if closer != 'rfl' else 'exact h_main'}")
     proof_h_step = "\n".join(proof_step_lines)
     return ReconCase(case_id=case_id, parent_body=parent_body, child_proofs={"h₁": proof_h1, "h_step": proof_h_step})
 
@@ -322,29 +322,6 @@ if IMPORTS_AVAILABLE:
         ast_without_imports = remove_default_imports_from_ast(parsed["ast"], preamble=DEFAULT_IMPORTS)
         return AST(ast_without_imports, source_text=full, body_start=body_start)
 
-    def _parse_child_ast(client: KiminaClient, formal_theorem: str, formal_proof: str) -> AST:
-        theorem_with_proof = combine_theorem_with_proof(str(formal_theorem), str(formal_proof))
-        normalized_preamble = DEFAULT_IMPORTS.strip()
-        normalized_body = theorem_with_proof.strip()
-        full = combine_preamble_and_body(normalized_preamble, normalized_body)
-
-        if normalized_preamble and normalized_body:
-            body_start = full.find(normalized_body, len(normalized_preamble))
-            body_start = body_start if body_start != -1 else len(normalized_preamble)
-        else:
-            body_start = 0
-
-        ast_code_response = client.ast_code(full)
-        parsed = parse_kimina_ast_code_response(ast_code_response)
-        assert parsed["error"] is None, parsed["error"]
-        ast_without_imports = remove_default_imports_from_ast(parsed["ast"], preamble=DEFAULT_IMPORTS)
-        return AST(
-            ast_without_imports,
-            sorries=parsed.get("sorries"),
-            source_text=full,
-            body_start=body_start,
-        )
-
     def _reconstruct_and_check(
         client: KiminaClient, server_url: str, server_max_retries: int, server_timeout: int, case: ReconCase
     ) -> None:
@@ -389,8 +366,6 @@ if IMPORTS_AVAILABLE:
             child_dict["formal_proof"] = case.child_proofs[hole_name]
             child_dict["proved"] = True
             child_dict["errors"] = ""
-            formal_theorem = str(child_dict.get("formal_theorem") or "")
-            child_dict["ast"] = _parse_child_ast(client, formal_theorem, child_dict["formal_proof"])
 
         # Reconstruct using state manager helper on the decomposed node.
         dummy_state = cast(Any, type("_S", (), {})())
@@ -409,7 +384,7 @@ if IMPORTS_AVAILABLE:
         assert parsed_check["complete"] is True, parsed_check
 
     def _selected_cases() -> list[ReconCase]:
-        n = _env_int("RECONSTRUCTION_TEST_CASES", 200)
+        n = _env_int("RECONSTRUCTION_TEST_CASES", 600)
         seed = _env_int("RECONSTRUCTION_TEST_SEED", 0)
         if n <= 0:
             return []

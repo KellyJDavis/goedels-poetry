@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import dataclasses
+import logging
 import os
 import pickle
 import re
@@ -23,7 +24,7 @@ from goedels_poetry.agents.util.common import (
     ensure_mandatory_preamble,
     split_preamble_and_body,
 )
-from goedels_poetry.agents.util.debug import log_reconstruction_event
+from goedels_poetry.agents.util.debug import is_debug_enabled
 from goedels_poetry.config.llm import (
     DECOMPOSER_AGENT_MAX_SELF_CORRECTION_ATTEMPTS,
     FORMALIZER_AGENT_MAX_RETRIES,
@@ -34,11 +35,13 @@ from goedels_poetry.config.llm import (
 
 # Note: All LLM instances are imported from goedels_poetry.config.llm
 from goedels_poetry.functools import maybe_save
-from goedels_poetry.parsers.ast import AST
 from goedels_poetry.util.tree import TreeNode
+
+logger = logging.getLogger(__name__)
 
 # Global configuration for output directory
 _OUTPUT_DIR = os.environ.get("GOEDELS_POETRY_DIR", os.path.expanduser("~/.goedels_poetry"))
+
 # Configuration constants for proof reconstruction
 # PROOF_BODY_INDENT_SPACES: Number of spaces to indent proof bodies in Lean4 code.
 # Set to 2 to follow Lean4's standard indentation convention, where tactics inside
@@ -74,9 +77,6 @@ class GoedelsPoetryState:
         # Kimina-guided reconstruction metadata (persisted in checkpoints)
         self.reconstruction_attempts: int = 0
         self.reconstruction_strategy_used: str | None = None
-        self.reconstruction_partial: bool = False
-        self.reconstruction_failure_reason: str | None = None
-        self.reconstruction_audit: dict[str, object] | None = None
 
         # If set, this is the final complete proof text (including preamble) selected at finish-time.
         # This allows CLI output to write the same proof that passed final verification.
@@ -192,12 +192,6 @@ class GoedelsPoetryState:
             self.reconstruction_attempts = 0
         if not hasattr(self, "reconstruction_strategy_used"):
             self.reconstruction_strategy_used = None
-        if not hasattr(self, "reconstruction_partial"):
-            self.reconstruction_partial = False
-        if not hasattr(self, "reconstruction_failure_reason"):
-            self.reconstruction_failure_reason = None
-        if not hasattr(self, "reconstruction_audit"):
-            self.reconstruction_audit = None
         if not hasattr(self, "final_complete_proof"):
             self.final_complete_proof = None
 
@@ -312,8 +306,8 @@ class GoedelsPoetryState:
 
         return checkpoint_files
 
-    @staticmethod
-    def load(filepath: str) -> GoedelsPoetryState:
+    @classmethod
+    def load(cls, filepath: str) -> GoedelsPoetryState:
         """
         Load a GoedelsPoetryState from a pickle file.
 
@@ -899,9 +893,16 @@ class GoedelsPoetryStateManager:
         return FormalTheoremProofStates(inputs=self._state.proof_ast_queue, outputs=[])
 
     @maybe_save(n=1)
-    def set_parsed_proofs(self) -> None:
+    def set_parsed_proofs(self, parsed_proofs: FormalTheoremProofStates) -> None:
         """
-        Clears the queue of proofs that needed AST parsing.
+        Sets FormalTheoremProofStates containing parsed_proofs["outputs"] the list of
+        FormalTheoremProofState with proofs with associated ASTs.
+
+        Parameters
+        ---------
+        parsed_proofs: FormalTheoremProofStates
+            FormalTheoremProofStates containing parsed_proofs["outputs"] the list of
+            FormalTheoremProofState each of which has a proof associated AST.
         """
         # Remove all elements from the queue of proofs to generate ASTs for
         self._state.proof_ast_queue.clear()
@@ -1518,415 +1519,337 @@ class GoedelsPoetryStateManager:
         if self._state.formal_theorem_proof is None:
             return combine_preamble_and_body(preamble, "-- No proof available")
 
-        modes = [
-            self._reconstruction_mode_strict(),
-            self._reconstruction_mode_permissive_a(),
-            self._reconstruction_mode_permissive_b(),
+        proof_without_preamble = self._reconstruct_node_proof(self._state.formal_theorem_proof)
+        return combine_preamble_and_body(preamble, proof_without_preamble)
+
+    @dataclasses.dataclass(frozen=True)
+    class ReconstructionVariant:
+        """
+        A parameterization of reconstruction normalization steps.
+
+        These toggles are intentionally coarse-grained: Kimina-guided selection tries a bounded
+        set of variants and selects the first that Kimina marks complete.
+        """
+
+        variant_id: str
+        dedent_common: bool = True
+        snap_indent_levels: bool = True
+        rewrite_trailing_apply: bool = True
+        fix_dangling_closing_tactics_after_comments: bool = True
+        snap_self_reference_closers: bool = True
+        dedent_last_closer_out_of_inner_have_by: bool = True
+
+    def _variant_key(self, v: ReconstructionVariant) -> tuple:
+        return (
+            v.dedent_common,
+            v.snap_indent_levels,
+            v.rewrite_trailing_apply,
+            v.fix_dangling_closing_tactics_after_comments,
+            v.snap_self_reference_closers,
+            v.dedent_last_closer_out_of_inner_have_by,
+        )
+
+    def _get_reconstruction_variants(self, max_candidates: int) -> list[ReconstructionVariant]:
+        """
+        Deterministically generate a bounded list of reconstruction variants to try.
+
+        The exact set is intentionally internal (not configurable) to avoid exposing
+        implementation details in config.
+        """
+        max_candidates = max(1, int(max_candidates))
+
+        baseline = self.ReconstructionVariant("baseline")
+        seed_variants: list[GoedelsPoetryStateManager.ReconstructionVariant] = [
+            baseline,
+            # Directly addresses the partial.log failure mode.
+            dataclasses.replace(
+                baseline, variant_id="no_comment_fixer", fix_dangling_closing_tactics_after_comments=False
+            ),
+            dataclasses.replace(baseline, variant_id="no_indent_snapping", snap_indent_levels=False),
+            dataclasses.replace(
+                baseline,
+                variant_id="no_offset_extras",
+                fix_dangling_closing_tactics_after_comments=False,
+                snap_self_reference_closers=False,
+                dedent_last_closer_out_of_inner_have_by=False,
+            ),
+            dataclasses.replace(
+                baseline,
+                variant_id="dedent_only",
+                snap_indent_levels=False,
+                rewrite_trailing_apply=False,
+                fix_dangling_closing_tactics_after_comments=False,
+                snap_self_reference_closers=False,
+                dedent_last_closer_out_of_inner_have_by=False,
+            ),
+            dataclasses.replace(
+                baseline,
+                variant_id="minimal",
+                dedent_common=False,
+                snap_indent_levels=False,
+                rewrite_trailing_apply=False,
+                fix_dangling_closing_tactics_after_comments=False,
+                snap_self_reference_closers=False,
+                dedent_last_closer_out_of_inner_have_by=False,
+            ),
         ]
-        strict_result = self._reconstruct_with_mode(self._state.formal_theorem_proof, modes[0])
-        chosen = strict_result
-        if (
-            (strict_result.failure_reason is not None or strict_result.partial)
-            and strict_result.failure_reason != "ambiguity"
-            and strict_result.permissive_ok
-        ):
-            for mode in modes[1:]:
-                perm_result = self._reconstruct_with_mode(
-                    self._state.formal_theorem_proof,
-                    mode,
-                    strict_result,
-                )
-                if perm_result.failure_reason is None and not perm_result.partial:
-                    chosen = perm_result
-                    break
 
-        if chosen.mode_id == "strict":
-            self._state.reconstruction_attempts = 1
-        elif chosen.mode_id == "permissive_a":
-            self._state.reconstruction_attempts = 2
-        else:
-            self._state.reconstruction_attempts = 3
-        self._state.reconstruction_strategy_used = chosen.mode_id
-        self._state.reconstruction_partial = chosen.partial
-        self._state.reconstruction_failure_reason = chosen.failure_reason
-        self._state.reconstruction_audit = chosen.audit
+        variants: list[GoedelsPoetryStateManager.ReconstructionVariant] = []
+        seen: set[tuple] = set()
 
-        proof_without_preamble = chosen.proof
-        complete = combine_preamble_and_body(preamble, proof_without_preamble)
-        self._state.final_complete_proof = complete
-        return complete
+        def add(v: GoedelsPoetryStateManager.ReconstructionVariant) -> None:
+            key = self._variant_key(v)
+            if key in seen:
+                return
+            seen.add(key)
+            variants.append(v)
 
-    @dataclasses.dataclass(frozen=True)
-    class ReconstructionMode:
-        mode_id: str
-        min_confidence: int
-        allow_widen_span: bool
-        allow_margin_normalization: bool
-        allow_non_uniform_margin: bool
+        for v in seed_variants:
+            add(v)
+            if len(variants) >= max_candidates:
+                return variants[:max_candidates]
 
-    @dataclasses.dataclass
-    class ReconstructionContext:
-        mode_id: str
-        partial: bool = False
-        failure_reason: str | None = None
-        unresolved_holes: int = 0
-        ambiguous: bool = False
-        non_unique_holes: bool = False
-        layout_sensitive: bool = False
-        non_uniform_margin: bool = False
-        boundary_mismatch: bool = False
-        low_confidence: bool = False
-        audit: list[dict[str, object]] = dataclasses.field(default_factory=list)
+        # If the user allows more candidates than the seed set, expand deterministically by
+        # toggling individual flags off (starting from baseline).
+        toggles = [
+            ("no_dedent_common", {"dedent_common": False}),
+            ("no_rewrite_trailing_apply", {"rewrite_trailing_apply": False}),
+            ("no_snap_self_reference_closers", {"snap_self_reference_closers": False}),
+            ("no_dedent_last_closer", {"dedent_last_closer_out_of_inner_have_by": False}),
+        ]
+        for name, changes in toggles:
+            add(dataclasses.replace(baseline, variant_id=name, **changes))
+            if len(variants) >= max_candidates:
+                break
 
-        def mark_ambiguity(self) -> None:
-            self.ambiguous = True
-            self.partial = True
-            self.failure_reason = "ambiguity"
+        return variants[:max_candidates]
 
-        def mark_failure(self, reason: str) -> None:
-            if self.failure_reason is None:
-                self.failure_reason = reason
-
-        def permissive_ok(self) -> bool:
-            if self.ambiguous:
-                return False
-            if self.non_unique_holes:
-                return False
-            if self.boundary_mismatch:
-                return False
-            if self.layout_sensitive:
-                return False
-            return self.unresolved_holes <= 1
-
-    @dataclasses.dataclass(frozen=True)
-    class ReconstructionResult:
-        proof: str
-        partial: bool
-        failure_reason: str | None
-        mode_id: str
-        audit: dict[str, object]
-        permissive_ok: bool
-
-    def _reconstruction_mode_strict(self) -> ReconstructionMode:
-        return self.ReconstructionMode(
-            mode_id="strict",
-            min_confidence=3,
-            allow_widen_span=False,
-            allow_margin_normalization=True,
-            allow_non_uniform_margin=False,
-        )
-
-    def _reconstruction_mode_permissive_a(self) -> ReconstructionMode:
-        return self.ReconstructionMode(
-            mode_id="permissive_a",
-            min_confidence=2,
-            allow_widen_span=True,
-            allow_margin_normalization=True,
-            allow_non_uniform_margin=False,
-        )
-
-    def _reconstruction_mode_permissive_b(self) -> ReconstructionMode:
-        return self.ReconstructionMode(
-            mode_id="permissive_b",
-            min_confidence=1,
-            allow_widen_span=True,
-            allow_margin_normalization=True,
-            allow_non_uniform_margin=True,
-        )
-
-    def _reconstruct_with_mode(
-        self,
-        node: TreeNode,
-        mode: ReconstructionMode,
-        strict_result: ReconstructionResult | None = None,
-    ) -> ReconstructionResult:
-        context = self.ReconstructionContext(mode_id=mode.mode_id)
-        proof = self._reconstruct_node_proof_ast(node, mode=mode, context=context)
-        audit = {
-            "mode_id": mode.mode_id,
-            "partial": context.partial,
-            "failure_reason": context.failure_reason,
-            "unresolved_holes": context.unresolved_holes,
-            "ambiguous": context.ambiguous,
-            "non_unique_holes": context.non_unique_holes,
-            "layout_sensitive": context.layout_sensitive,
-            "non_uniform_margin": context.non_uniform_margin,
-            "boundary_mismatch": context.boundary_mismatch,
-            "low_confidence": context.low_confidence,
-            "audits": context.audit,
-        }
-        permissive_ok = context.permissive_ok()
-        if strict_result is not None and strict_result.failure_reason == "ambiguity":
-            permissive_ok = False
-        return self.ReconstructionResult(
-            proof=proof,
-            partial=context.partial,
-            failure_reason=context.failure_reason,
-            mode_id=mode.mode_id,
-            audit=audit,
-            permissive_ok=permissive_ok,
-        )
-
-    def _reconstruct_node_proof_ast(
-        self,
-        node: TreeNode,
-        *,
-        mode: ReconstructionMode,
-        context: ReconstructionContext,
-    ) -> str:
-        if isinstance(node, dict) and "formal_proof" in node and "children" not in node:
-            return self._reconstruct_leaf_node_proof_ast(cast(FormalTheoremProofState, node), mode, context)
-
-        if isinstance(node, dict) and "children" in node:
-            return self._reconstruct_decomposed_node_proof_ast(cast(DecomposedFormalTheoremState, node), mode, context)
-
-        context.mark_failure("unexpected_node")
-        return "-- Unable to reconstruct proof for this node\n"
-
-    def _reconstruct_decomposed_node_proof(self, decomposed_state: DecomposedFormalTheoremState) -> str:
+    def reconstruct_complete_proof_kimina_guided(
+        self, *, server_url: str, server_max_retries: int, server_timeout: int, max_candidates: int
+    ) -> tuple[str, bool, str]:
         """
-        Reconstruct proof text for an internal `DecomposedFormalTheoremState` using AST-guided logic.
+        Attempt to find a reconstruction variant that Kimina marks complete.
+
+        This is a bounded search over whole-file reconstructions and is intended to run only
+        after a run reports "Proof completed successfully." but final verification fails.
         """
-        mode = self._reconstruction_mode_strict()
-        context = self.ReconstructionContext(mode_id=mode.mode_id)
-        return self._reconstruct_decomposed_node_proof_ast(decomposed_state, mode=mode, context=context)
+        preamble = self._state._root_preamble or DEFAULT_IMPORTS
+        if self._state.formal_theorem_proof is None:
+            proof = combine_preamble_and_body(preamble, "-- No proof available")
+            return proof, False, "No proof available"
 
-    def _reconstruct_leaf_node_proof_ast(
-        self,
-        formal_proof_state: FormalTheoremProofState,
-        mode: ReconstructionMode,
-        context: ReconstructionContext,
-    ) -> str:
-        ast = formal_proof_state.get("ast")
-        if ast is None:
-            context.mark_failure("missing_ast")
-            context.partial = True
-            return f"{formal_proof_state['formal_theorem']} := by sorry\n"
+        # Lazy import to avoid importing `kimina_client` (and its transitive dependencies)
+        # during test collection on Python < 3.12 where some environments may have incompatible
+        # versions. This function is only invoked in "success-but-final-verification-failed" cases.
+        from goedels_poetry.agents.proof_checker_agent import check_complete_proof
 
-        proof_body = self._extract_proof_body_from_ast(ast, mode, context)
-        if proof_body is None:
-            context.partial = True
-            return f"{formal_proof_state['formal_theorem']} := by sorry\n"
-
-        if formal_proof_state["parent"] is None:
-            theorem_decl_full = str(formal_proof_state["formal_theorem"]).strip()
-            theorem_sig = self._strip_decl_assignment(theorem_decl_full)
-            return f"{theorem_sig} := by{proof_body}"
-
-        return proof_body
-
-    def _reconstruct_decomposed_node_proof_ast(  # noqa: C901
-        self,
-        decomposed_state: DecomposedFormalTheoremState,
-        mode: ReconstructionMode,
-        context: ReconstructionContext,
-    ) -> str:
-        sketch = decomposed_state.get("proof_sketch")
-        ast = decomposed_state.get("ast")
-        if sketch is None or ast is None:
-            context.mark_failure("missing_ast")
-            context.partial = True
-            return f"{decomposed_state['formal_theorem']} := by sorry\n"
-
-        canonical_sketch = ast.get_body_text() if isinstance(ast, AST) else None
-        if canonical_sketch:
-            sketch_text = canonical_sketch
-            log_reconstruction_event(
-                "use_canonical_sketch",
-                {
-                    "source_len": len(canonical_sketch),
-                    "body_start": ast.get_body_start() if isinstance(ast, AST) else None,
-                },
+        variants = self._get_reconstruction_variants(max_candidates=max_candidates)
+        last_err = ""
+        for idx, variant in enumerate(variants, start=1):
+            proof_without_preamble = self._reconstruct_node_proof(self._state.formal_theorem_proof, variant=variant)
+            candidate = combine_preamble_and_body(preamble, proof_without_preamble)
+            ok, err = check_complete_proof(
+                candidate, server_url=server_url, server_max_retries=server_max_retries, server_timeout=server_timeout
             )
-        else:
-            sketch_text = str(sketch)
-        holes_by_name = ast.get_sorry_holes_by_name()
+            last_err = err
 
-        children = list(decomposed_state.get("children", []))
+            if is_debug_enabled():
+                logger.debug(
+                    "Kimina-guided reconstruction attempt %d/%d (%s): %s",
+                    idx,
+                    len(variants),
+                    variant.variant_id,
+                    "passed" if ok else "failed",
+                )
+                if not ok and err:
+                    logger.debug("Kimina-guided reconstruction errors (%s):\n%s", variant.variant_id, err)
 
-        def _child_sort_key(ch: TreeNode) -> tuple[int, int]:
-            if isinstance(ch, dict):
-                return (int(ch.get("hole_start") or 0), int(ch.get("hole_end") or 0))
-            return (0, 0)
+            if ok:
+                self._state.reconstruction_attempts = idx
+                self._state.reconstruction_strategy_used = variant.variant_id
+                self._state.final_complete_proof = candidate
+                return candidate, True, ""
 
-        children.sort(key=_child_sort_key)
+        # Record attempts even on failure.
+        self._state.reconstruction_attempts = len(variants)
+        self._state.reconstruction_strategy_used = None
+        return (
+            combine_preamble_and_body(preamble, self._reconstruct_node_proof(self._state.formal_theorem_proof)),
+            False,
+            last_err,
+        )
 
+    def _reconstruct_leaf_node_proof(self, formal_proof_state: FormalTheoremProofState) -> str:
+        """
+        Reconstruct proof text for a leaf `FormalTheoremProofState`.
+        """
+        if formal_proof_state["formal_proof"] is not None:
+            proof_text = str(formal_proof_state["formal_proof"])
+            # If this is the root leaf (no parent), ensure the output includes the theorem header.
+            # Avoid regex: if it already starts with the theorem signature, return as-is.
+            if formal_proof_state["parent"] is None:
+                theorem_decl_full = str(formal_proof_state["formal_theorem"]).strip()
+                theorem_sig = self._strip_decl_assignment(theorem_decl_full)
+                # Skip leading empty lines and single-line comments to avoid redundant wrapping
+                leading_skipped = self._skip_leading_trivia(proof_text)
+                if leading_skipped.startswith(theorem_sig):
+                    return proof_text
+                # Otherwise treat stored proof as tactics and wrap once.
+                indent = " " * PROOF_BODY_INDENT_SPACES
+                indented_body = self._indent_proof_body(proof_text, indent)
+                return f"{theorem_sig} := by\n{indented_body}"
+            # Non-root leaves are always tactic bodies used for inlining; return as-is.
+            return proof_text
+        # No proof yet, return the theorem with sorry
+        return f"{formal_proof_state['formal_theorem']} := by sorry\n"
+
+    def _apply_offset_replacements(  # noqa: C901
+        self, sketch: str, children: list[TreeNode], *, variant: ReconstructionVariant | None = None
+    ) -> str:
+        """
+        Apply offset-based replacements for children that have hole metadata.
+        """
         replacements: list[tuple[int, int, str]] = []
+        missing: list[TreeNode] = []
+
         for child in children:
-            if not isinstance(child, dict):
-                context.mark_failure("invalid_child")
-                context.unresolved_holes += 1
-                context.partial = True
-                continue
-            hole_name = child.get("hole_name")
-            hole_start = None
-            hole_end = None
-            spans = []
-            if isinstance(hole_name, str):
-                spans = holes_by_name.get(hole_name, [])
-            if len(spans) == 1:
-                hole_start, hole_end = spans[0]
-            elif child.get("hole_start") is not None and child.get("hole_end") is not None:
-                hole_start = cast(int, child.get("hole_start"))
-                hole_end = cast(int, child.get("hole_end"))
-            else:
-                fallback_spans = self._find_standalone_sorry_spans(sketch_text)
-                if len(fallback_spans) == 1:
-                    hole_start, hole_end = fallback_spans[0]
+            child_proof_body = self._extract_proof_body(child, variant=variant)
 
-            if hole_start is None or hole_end is None:
-                context.unresolved_holes += 1
-                context.partial = True
-                log_reconstruction_event(
-                    "hole_unresolved",
-                    {"hole_name": hole_name, "reason": "missing_span", "spans": spans},
-                )
-                continue
-            if len(spans) > 1 and hole_start is None:
-                context.non_unique_holes = True
-                context.mark_ambiguity()
-                context.unresolved_holes += 1
-                log_reconstruction_event(
-                    "hole_unresolved",
-                    {"hole_name": hole_name, "reason": "ambiguous_span", "spans": spans},
-                )
-                continue
-            if not (0 <= hole_start < hole_end <= len(sketch_text)):
-                context.unresolved_holes += 1
-                context.partial = True
-                log_reconstruction_event(
-                    "hole_unresolved",
-                    {
-                        "hole_name": hole_name,
-                        "reason": "span_out_of_range",
-                        "hole_start": hole_start,
-                        "hole_end": hole_end,
-                        "sketch_len": len(sketch_text),
-                    },
-                )
-                continue
+            if isinstance(child, dict) and "hole_start" in child and "hole_end" in child:
+                hole_start = cast(int | None, child.get("hole_start"))
+                hole_end = cast(int | None, child.get("hole_end"))
+                if (
+                    isinstance(hole_start, int)
+                    and isinstance(hole_end, int)
+                    and 0 <= hole_start < hole_end <= len(sketch)
+                ):
+                    # Determine indentation prefix on the line containing the hole.
+                    line_start = sketch.rfind("\n", 0, hole_start) + 1
+                    line_prefix = sketch[line_start:hole_start]
+                    # Leading whitespace at the start of this line (used for inline `by sorry` holes).
+                    line = sketch[
+                        line_start : sketch.find("\n", line_start) if "\n" in sketch[line_start:] else len(sketch)
+                    ]
+                    leading_ws = line[: len(line) - len(line.lstrip(" \t"))]
 
-            proof_body = self._extract_proof_body_ast(child, mode, context)
-            if proof_body is None:
-                context.unresolved_holes += 1
-                context.partial = True
-                log_reconstruction_event(
-                    "hole_unresolved",
-                    {"hole_name": hole_name, "reason": "missing_proof_body"},
-                )
-                continue
+                    normalized_body = self._normalize_child_proof_body(
+                        child_proof_body, offset_insertion=True, variant=variant
+                    )
+                    body_lines = normalized_body.split("\n")
+                    if not body_lines:
+                        body_lines = ["sorry"]
 
-            replacement = self._format_body_for_hole(
-                sketch_text, hole_start, hole_end, proof_body, mode, context, child
-            )
-            if replacement is None:
-                context.unresolved_holes += 1
-                context.partial = True
-                log_reconstruction_event(
-                    "hole_unresolved",
-                    {"hole_name": hole_name, "reason": "format_failure"},
-                )
-                continue
-            replacements.append((hole_start, hole_end, replacement))
+                    # Two forms of `sorry` holes exist in sketches:
+                    # 1) Standalone line: `    sorry` (hole indentation is pure whitespace)
+                    # 2) Inline: `have h : T := by sorry` (hole indentation includes non-whitespace)
+                    #
+                    # For (1), we can replace the token in-place: the line already contains the correct
+                    # indentation prefix before the token. We only need to indent subsequent lines.
+                    #
+                    # For (2), replacing `sorry` with a multi-line proof must insert a newline and indent
+                    # the *entire* proof body under the surrounding `by`.
+                    inline_hole = bool(line_prefix.strip())
+                    rebuilt_lines: list[str] = []
+                    if inline_hole:
+                        proof_indent = leading_ws + (" " * PROOF_BODY_INDENT_SPACES)
+                        rebuilt_lines.append("")  # turn `by sorry` into `by\n<proof>`
+                        for ln in body_lines:
+                            rebuilt_lines.append(f"{proof_indent}{ln}" if ln.strip() else ln)
+                    else:
+                        indent_prefix = line_prefix
+                        for i, ln in enumerate(body_lines):
+                            if i == 0:
+                                rebuilt_lines.append(ln)
+                            else:
+                                rebuilt_lines.append(f"{indent_prefix}{ln}" if ln.strip() else ln)
+
+                    replacement_text = "\n".join(rebuilt_lines)
+                    replacements.append((hole_start, hole_end, replacement_text))
+                    continue
+
+            missing.append(child)
 
         if replacements:
             replacements.sort(key=lambda t: t[0], reverse=True)
             for start, end, rep in replacements:
-                sketch_text = sketch_text[:start] + rep + sketch_text[end:]
+                sketch = sketch[:start] + rep + sketch[end:]
 
-        return sketch_text
-
-    def _extract_proof_body_ast(
-        self,
-        child: TreeNode,
-        mode: ReconstructionMode,
-        context: ReconstructionContext,
-    ) -> str | None:
-        if isinstance(child, dict) and "formal_proof" in child and "children" not in child:
-            ast = child.get("ast")
-            if ast is None:
-                context.mark_failure("missing_ast")
-                return None
-            return self._extract_proof_body_from_ast(ast, mode, context)
-        if isinstance(child, dict) and "children" in child:
-            reconstructed = self._reconstruct_decomposed_node_proof_ast(
-                cast(DecomposedFormalTheoremState, child),
-                mode,
-                context,
+        if missing:
+            logger.warning(
+                "Reconstruction skipped %d child(ren) missing valid hole offsets; "
+                "their `sorry` placeholders will remain in the parent sketch.",
+                len(missing),
             )
-            ast = child.get("ast")
-            if ast is None:
-                context.mark_failure("missing_ast")
-                return None
-            return self._extract_proof_body_from_ast(ast, mode, context, override_text=reconstructed)
-        return None
+        return sketch
 
-    def _extract_proof_body_from_ast(  # noqa: C901
-        self,
-        ast: AST,
-        mode: ReconstructionMode,
-        context: ReconstructionContext,
-        *,
-        override_text: str | None = None,
-    ) -> str | None:
-        source = override_text or ast.get_source_text()
-        if source is None:
-            context.mark_failure("missing_source")
-            return None
+    def _reconstruct_decomposed_node_proof(
+        self, decomposed_state: DecomposedFormalTheoremState, *, variant: ReconstructionVariant | None = None
+    ) -> str:
+        """
+        Reconstruct proof text for an internal `DecomposedFormalTheoremState` by filling holes.
+        """
+        if decomposed_state["proof_sketch"] is None:
+            return f"{decomposed_state['formal_theorem']} := by sorry\n"
 
-        by_info = self._find_by_tactic_info(ast.get_ast(), ast)
-        if by_info is None:
-            context.mark_failure("missing_by")
-            return None
-        by_token, tactic_node = by_info
-        tokens = ast.get_tokens(tactic_node)
-        if not tokens:
-            context.mark_failure("missing_tokens")
-            return None
-        non_synth = [tok for tok in tokens if not tok.synthetic]
-        span_tokens = non_synth if non_synth else tokens
-        span_start = min(tok.start for tok in span_tokens)
-        span_end = max(tok.end for tok in span_tokens)
-        coverage = sum(tok.end - tok.start for tok in span_tokens)
-        span_len = max(1, span_end - span_start)
-        coverage_ratio = coverage / span_len
-        contiguous = all(tok.start >= by_token.end and tok.end <= span_end for tok in span_tokens)
+        sketch = str(decomposed_state["proof_sketch"])
 
-        boundary_ok = True
-        if override_text is None:
-            boundary_ok = self._token_boundaries_match(source, span_tokens)
-            if not boundary_ok:
-                context.boundary_mismatch = True
-        confidence = 0
-        if by_token.immediate:
-            confidence += 1
-        if non_synth:
-            confidence += 1
-        if contiguous:
-            confidence += 1
-        if coverage_ratio >= 0.15:
-            confidence += 1
+        # Fill holes using absolute offsets recorded during decomposition (hole_start/hole_end).
+        # The legacy name/regex-based reconstruction path has been removed.
+        return self._apply_offset_replacements(sketch, decomposed_state["children"], variant=variant)
 
-        context.audit.append({
-            "coverage_ratio": coverage_ratio,
-            "contiguous": contiguous,
-            "boundary_ok": boundary_ok,
-            "confidence": confidence,
-        })
+    def _reconstruct_node_proof(self, node: TreeNode, *, variant: ReconstructionVariant | None = None) -> str:
+        """
+        Recursively reconstructs the proof for a given node in the proof tree.
 
-        if confidence < mode.min_confidence:
-            context.low_confidence = True
-            if not mode.allow_widen_span:
-                context.mark_failure("low_confidence")
-                return None
+        Parameters
+        ----------
+        node : TreeNode
+            The node to reconstruct proof for
 
-        if not contiguous:
-            context.mark_failure("non_contiguous")
-            return None
+        Returns
+        -------
+        str
+            The proof text for this node and all its children (without preamble)
+        """
+        # Leaf node
+        if isinstance(node, dict) and "formal_proof" in node and "children" not in node:
+            return self._reconstruct_leaf_node_proof(cast(FormalTheoremProofState, node))
 
-        start_c = ast.byte_to_char_index(by_token.end)
-        end_c = len(source) if override_text is not None else ast.byte_to_char_index(span_end)
-        return source[start_c:end_c]
+        # Internal node
+        if isinstance(node, dict) and "children" in node:
+            return self._reconstruct_decomposed_node_proof(cast(DecomposedFormalTheoremState, node), variant=variant)
+
+        # Fallback for unexpected node types
+        return "-- Unable to reconstruct proof for this node\n"
+
+    def _extract_proof_body(self, child: TreeNode, *, variant: ReconstructionVariant | None = None) -> str:
+        """
+        Extracts the proof body (tactics after 'by') from a child node.
+
+        Parameters
+        ----------
+        child : TreeNode
+            The child node to extract proof body from
+
+        Returns
+        -------
+        str
+            The proof body (tactic sequence)
+        """
+        if isinstance(child, dict) and "formal_proof" in child and "children" not in child:
+            # This is a FormalTheoremProofState (leaf)
+            formal_proof_state = cast(FormalTheoremProofState, child)
+            if formal_proof_state["formal_proof"] is not None:
+                proof = str(formal_proof_state["formal_proof"])
+                # Extract just the tactics after "by"
+                return self._extract_tactics_after_by(proof)
+            return "sorry"
+        elif isinstance(child, dict) and "children" in child:
+            # This is a DecomposedFormalTheoremState (internal)
+            # Recursively reconstruct this child first
+            child_complete = self._reconstruct_node_proof(child, variant=variant)
+            return self._extract_tactics_after_by(child_complete)
+        return "sorry"
 
     def _extract_tactics_after_by(self, proof: str) -> str:
         """
@@ -1956,6 +1879,10 @@ class GoedelsPoetryStateManager:
             match = re.search(r":=\s*by", proof)
             if match is None:
                 # Has declaration but no := by, return sorry
+                logger.warning(
+                    "_extract_tactics_after_by received a lemma/theorem statement without ':= by'. "
+                    "Returning 'sorry' as fallback."
+                )
                 return "sorry"
             # Extract everything after the first := by
             tactics = proof[match.end() :].strip()
@@ -1967,6 +1894,7 @@ class GoedelsPoetryStateManager:
                 if inner_match:
                     tactics = tactics[inner_match.end() :].strip()
                 else:
+                    logger.error("Could not extract tactics from nested lemma/theorem. Returning 'sorry'.")
                     return "sorry"
 
             return tactics
@@ -1981,166 +1909,336 @@ class GoedelsPoetryStateManager:
         # Return as-is (it's already just tactics)
         return proof.strip()
 
-    @dataclasses.dataclass(frozen=True)
-    class _ByToken:
-        start: int
-        end: int
-        immediate: bool
+    def _dedent_proof_body(self, proof_body: str) -> str:
+        """
+        Dedent a proof body by removing the common leading indentation from non-empty lines.
 
-    def _find_by_tactic_info(  # noqa: C901
-        self,
-        node: dict[str, object] | list[object],
-        ast: AST,
-    ) -> tuple[_ByToken, dict[str, object]] | None:
-        queue: list[dict[str, object]] = []
-        if isinstance(node, dict):
-            queue.append(node)
-        elif isinstance(node, list):
-            for item in node:
-                if isinstance(item, dict):
-                    queue.append(item)
-        while queue:
-            current = queue.pop(0)
-            kind = current.get("kind")
-            if kind == "Lean.Parser.Term.byTactic":
-                args = current.get("args")
-                if isinstance(args, list):
-                    for idx, arg in enumerate(args):
-                        if isinstance(arg, dict) and arg.get("val") == "by":
-                            info = arg.get("info")
-                            if isinstance(info, dict):
-                                pos = info.get("pos")
-                                if isinstance(pos, list) and len(pos) == 2:
-                                    try:
-                                        start_b_int = int(pos[0])
-                                        end_b_int = int(pos[1])
-                                    except (TypeError, ValueError):
-                                        continue
-                                    tactic_node = None
-                                    for j in range(idx + 1, len(args)):
-                                        if isinstance(args[j], dict):
-                                            tactic_node = args[j]
-                                            break
-                                    if tactic_node is not None:
-                                        return self._ByToken(start_b_int, end_b_int, True), tactic_node
-            for val in current.values():
-                if isinstance(val, dict):
-                    queue.append(val)
-                elif isinstance(val, list):
-                    for item in val:
-                        if isinstance(item, dict):
-                            queue.append(item)
-        return None
-
-    def _token_boundaries_match(self, source: str, tokens: list[AST.Token]) -> bool:
-        if not tokens:
-            return False
-        source_bytes = source.encode("utf-8")
-        for tok in tokens:
-            if tok.start < 0 or tok.end > len(source_bytes):
-                return False
-            if source_bytes[tok.start : tok.end] != tok.val.encode("utf-8"):
-                return False
-        return True
-
-    def _find_standalone_sorry_spans(self, text: str) -> list[tuple[int, int]]:
-        spans: list[tuple[int, int]] = []
-        idx = 0
-        while True:
-            idx = text.find("sorry", idx)
-            if idx == -1:
-                break
-            before = text[idx - 1] if idx > 0 else " "
-            after_idx = idx + len("sorry")
-            after = text[after_idx] if after_idx < len(text) else " "
-            if before.isspace() and after.isspace():
-                spans.append((idx, after_idx))
-            idx = after_idx
-        return spans
-
-    def _has_layout_sensitive_constructs(self, node: object) -> bool:
-        if isinstance(node, dict):
-            kind = node.get("kind")
-            if isinstance(kind, str) and any(key in kind for key in ("calc", "match", "cases")):
-                return True
-            return any(self._has_layout_sensitive_constructs(val) for val in node.values())
-        if isinstance(node, list):
-            return any(self._has_layout_sensitive_constructs(item) for item in node)
-        return False
-
-    def _format_body_for_hole(  # noqa: C901
-        self,
-        sketch: str,
-        hole_start: int,
-        hole_end: int,
-        proof_body: str,
-        mode: ReconstructionMode,
-        context: ReconstructionContext,
-        child: TreeNode,
-    ) -> str | None:
-        line_start = sketch.rfind("\n", 0, hole_start) + 1
-        line_prefix = sketch[line_start:hole_start]
-        line_end = sketch.find("\n", line_start)
-        if line_end == -1:
-            line_end = len(sketch)
-        line = sketch[line_start:line_end]
-        leading_ws = line[: len(line) - len(line.lstrip(" \t"))]
-        inline_hole = bool(line_prefix.strip())
-
-        body = proof_body
-        if body.startswith("\n"):
-            body = body[1:]
-        lines = body.split("\n")
-        nonempty = [ln for ln in lines if ln.strip()]
-        if not nonempty:
-            return None
-
-        ast_obj = child.get("ast") if isinstance(child, dict) else None
-        if isinstance(ast_obj, AST):
-            node = ast_obj.get_ast()
-            layout_sensitive = self._has_layout_sensitive_constructs(cast(dict[str, object] | list[object], node))
-        else:
-            layout_sensitive = False
-        if layout_sensitive:
-            context.layout_sensitive = True
-
-        indents = [len(ln) - len(ln.lstrip(" \t")) for ln in nonempty]
-        min_indent = min(indents)
-        uniform_margin = all(indent == min_indent for indent in indents)
-        if not uniform_margin:
-            context.non_uniform_margin = True
-
-        if layout_sensitive:
-            if leading_ws and nonempty[0].startswith(leading_ws):
-                normalized_lines = lines
-            else:
-                context.mark_failure("layout_sensitive_mismatch")
-                return None
-        else:
-            normalized_lines = lines
-            if mode.allow_margin_normalization and (uniform_margin or mode.allow_non_uniform_margin):
-                normalized_lines = []
-                for ln in lines:
-                    if ln.strip():
-                        normalized_lines.append(ln[min_indent:] if ln.startswith(" " * min_indent) else ln)
-                    else:
-                        normalized_lines.append(ln)
-            elif not uniform_margin and not mode.allow_non_uniform_margin:
-                normalized_lines = lines
-
-        rebuilt_lines: list[str] = []
-        if inline_hole:
-            proof_indent = leading_ws + (" " * PROOF_BODY_INDENT_SPACES)
-            rebuilt_lines.append("")
-            for ln in normalized_lines:
-                rebuilt_lines.append(f"{proof_indent}{ln}" if ln.strip() else ln)
-        else:
-            for i, ln in enumerate(normalized_lines):
-                if i == 0:
-                    rebuilt_lines.append(ln)
+        This is critical for Lean4 layout-sensitive constructs like `calc`, `match`, `cases`, etc.
+        Child proofs frequently arrive already-indented (e.g. copied from inside a lemma or have),
+        and re-indenting them naively can push lines too far right, changing parse structure.
+        """
+        lines = proof_body.split("\n")
+        indents: list[int] = []
+        for ln in lines:
+            if not ln.strip():
+                continue
+            count = 0
+            for ch in ln:
+                if ch == " ":
+                    count += 1
                 else:
-                    rebuilt_lines.append(f"{line_prefix}{ln}" if ln.strip() else ln)
-        return "\n".join(rebuilt_lines)
+                    break
+            indents.append(count)
+        if not indents:
+            return proof_body
+        min_indent = min(indents)
+        if min_indent <= 0:
+            return proof_body
+        prefix = " " * min_indent
+        dedented: list[str] = []
+        for ln in lines:
+            if ln.strip():
+                dedented.append(ln[min_indent:] if ln.startswith(prefix) else ln.lstrip(" "))
+            else:
+                dedented.append(ln)
+        return "\n".join(dedented)
+
+    def _snap_proof_indentation_levels(self, text: str) -> str:
+        """
+        Normalize indentation transitions using a simple indent stack.
+
+        When indentation decreases, only allow dedenting to a previously-seen indentation
+        level; otherwise, snap to the nearest enclosing (previous) indentation level.
+        This avoids producing intermediate indentation levels like 2 when the script
+        only used 0 and 4, which can break Lean's layout-sensitive parsing.
+        """
+        lines = text.split("\n")
+        normalized_lines: list[str] = []
+        indent_stack: list[int] = [0]
+
+        for raw in lines:
+            if not raw.strip():
+                normalized_lines.append(raw)
+                continue
+
+            indent = len(raw) - len(raw.lstrip(" "))
+            content = raw.lstrip(" ")
+
+            current = indent_stack[-1]
+            if indent > current:
+                indent_stack.append(indent)
+                normalized_lines.append(raw)
+                continue
+
+            if indent == current:
+                normalized_lines.append(raw)
+                continue
+
+            while len(indent_stack) > 1 and indent < indent_stack[-1]:
+                indent_stack.pop()
+
+            snapped = indent_stack[-1]
+            if indent != snapped:
+                normalized_lines.append((" " * snapped) + content)
+            else:
+                normalized_lines.append(raw)
+
+        return "\n".join(normalized_lines)
+
+    def _fix_dangling_closing_tactics_after_comments(self, text: str) -> str:
+        """
+        Fix a common LLM formatting issue in tactic scripts:
+
+          -- some comment
+            exact h
+
+        where the closing tactic is over-indented relative to the surrounding block. This can
+        break Lean's layout-sensitive parsing after reconstruction.
+
+        This method is intentionally conservative and is only applied for offset-based insertion
+        paths where we know the exact hole indentation.
+        """
+        # Minimal "safe" set of closing tactics to snap when they appear after a comment and are
+        # over-indented. These are common one-line goal-closing tactics in prover outputs.
+        #
+        # Keep this intentionally small to avoid accidentally changing semantics of genuinely
+        # nested tactic blocks.
+        closing_tactic_re = re.compile(
+            r"^(exact|apply|simpa|simp|assumption|trivial|rfl|decide|aesop|omega|linarith|nlinarith|ring_nf|norm_num)\b"
+        )
+        lines = text.split("\n")
+        changed = False
+        prev_nonempty: str | None = None
+        for i, ln in enumerate(lines):
+            if not ln.strip():
+                continue
+            stripped = ln.lstrip(" ")
+            indent = len(ln) - len(stripped)
+            if (
+                prev_nonempty is not None
+                and prev_nonempty.strip().startswith("--")
+                and closing_tactic_re.match(stripped)
+                and indent > 0
+            ):
+                # Snap to column 0 within the child proof body; the caller will indent it to the hole.
+                lines[i] = stripped
+                changed = True
+            prev_nonempty = ln
+
+        if changed:
+            logger.debug("Reconstruction normalized an over-indented closing tactic following a comment.")
+        return "\n".join(lines)
+
+    def _snap_self_reference_closers_to_have_indent(self, text: str) -> str:
+        """
+        Another common LLM formatting error during inlining:
+
+          have h_main : P := by
+            ...
+            exact h_main
+
+        If `exact h_main` is indented under the `have` line, Lean treats it as part of the inner
+        `by` block (where `h_main` is not yet in scope), leading to unsolved goals / layout errors.
+
+        We conservatively snap any self-referencing closing tactics (`exact/apply/simpa using`) back
+        to the indentation level of the corresponding `have` declaration.
+        """
+        have_re = re.compile(r"^(\s*)have\s+([^\s:(]+)\s*:")
+        close_re_tpl = r"^\s*(?:exact|apply)\s+{name}\b|^\s*simpa\s+using\s+{name}\b"
+
+        lines = text.split("\n")
+        have_indents: dict[str, int] = {}
+        for ln in lines:
+            m = have_re.match(ln)
+            if m:
+                have_indents[m.group(2)] = len(m.group(1))
+
+        if not have_indents:
+            return text
+
+        changed = False
+        for i, ln in enumerate(lines):
+            if not ln.strip():
+                continue
+            stripped = ln.lstrip(" ")
+            indent = len(ln) - len(stripped)
+            for name, have_indent in have_indents.items():
+                if indent <= have_indent:
+                    continue
+                close_re = re.compile(close_re_tpl.format(name=re.escape(name)))
+                if close_re.match(stripped):
+                    lines[i] = (" " * have_indent) + stripped
+                    changed = True
+                    break
+
+        if changed:
+            logger.debug("Reconstruction snapped a self-referencing closer back to its `have` indentation.")
+        return "\n".join(lines)
+
+    def _dedent_last_closer_out_of_inner_have_by(self, text: str) -> str:
+        """
+        Handle a common layout pitfall in nested `have ... := by` blocks.
+
+        LLMs often emit a child proof of the form:
+
+          have h_main : P := by
+            simpa using h₁
+            rfl
+
+        where the final line (`rfl` here) is intended to close the *outer* goal, but is indented as
+        if it were still inside the inner `by` block. This can produce "no goals to be solved" or
+        leave the outer goal unsolved after inlining.
+
+        We conservatively dedent the *last non-empty line* if:
+        - it is indented under a `have ... := by` line, and
+        - it matches a small goal-closing tactic set, and
+        - it immediately follows another goal-closing tactic line at the same inner indentation.
+
+        This is only applied for offset-based insertion paths.
+        """
+        lines = text.split("\n")
+        last_nonempty = -1
+        for i in range(len(lines) - 1, -1, -1):
+            if lines[i].strip():
+                last_nonempty = i
+                break
+        if last_nonempty == -1:
+            return text
+
+        have_by_re = re.compile(r"^(\s*)have\s+[^\s:(]+\s*:.*?:=(?:\s|--[^\n]*|/-.*?-/)*by\b")
+        closer_re = re.compile(r"^(exact|apply|simpa|simp|assumption|trivial|rfl|decide)\b")
+
+        current_have_indent: int | None = None
+        inner_indent: int | None = None
+        prev_nonempty_idx: int | None = None
+        prev_nonempty_indent: int | None = None
+
+        for i, ln in enumerate(lines):
+            if not ln.strip():
+                continue
+            stripped = ln.lstrip(" ")
+            indent = len(ln) - len(stripped)
+
+            m_have = have_by_re.match(ln)
+            if m_have:
+                current_have_indent = len(m_have.group(1))
+                inner_indent = current_have_indent + PROOF_BODY_INDENT_SPACES
+
+            # If we've dedented back out, drop the current have context.
+            if current_have_indent is not None and indent <= current_have_indent and not m_have:
+                current_have_indent = None
+                inner_indent = None
+
+            if (
+                i == last_nonempty
+                and current_have_indent is not None
+                and inner_indent is not None
+                and indent == inner_indent
+                and closer_re.match(stripped)
+                and prev_nonempty_idx is not None
+                and prev_nonempty_indent == inner_indent
+                and closer_re.match(lines[prev_nonempty_idx].lstrip(" "))
+            ):
+                lines[i] = (" " * current_have_indent) + stripped
+                logger.debug("Reconstruction dedented final closing tactic out of inner `have ... := by` block.")
+                return "\n".join(lines)
+
+            prev_nonempty_idx = i
+            prev_nonempty_indent = indent
+
+        return text
+
+    def _rewrite_trailing_apply_of_have_to_exact(self, text: str) -> str:
+        """
+        If the last non-empty line is `apply <name>` and the script previously defines
+        `have <name> : ...`, rewrite it to `exact <name>`.
+        """
+        lines = text.split("\n")
+        last_idx = -1
+        for i in range(len(lines) - 1, -1, -1):
+            if lines[i].strip():
+                last_idx = i
+                break
+        if last_idx == -1:
+            return text
+
+        m = re.match(r"^(\s*)apply\s+([^\s]+)\s*$", lines[last_idx])
+        if not m:
+            return text
+
+        base_indent, name = m.group(1), m.group(2)
+        if not re.search(rf"\bhave\s+{re.escape(name)}\s*:", text):
+            return text
+
+        lines[last_idx] = f"{base_indent}exact {name}"
+        return "\n".join(lines)
+
+    def _normalize_child_proof_body(
+        self,
+        proof_body: str,
+        *,
+        offset_insertion: bool = False,
+        variant: ReconstructionVariant | None = None,
+    ) -> str:
+        """
+        Normalize a child proof body to be safe for textual inlining.
+
+        This handles two common failure modes seen in partial logs:
+        1) Mis-indentation where a line dedents to an indentation level that never occurred before
+           (e.g., top-level 0, nested 4, then a line at 2). Lean is layout-sensitive, and this can
+           produce "expected command" errors.
+        2) Prover scripts that build `have h_main : goal := by ...` and then end with
+           `apply h_main` (which often fails to close the goal). Inlining is more reliable when the
+           script ends with `exact h_main`.
+        """
+        # Default behavior (variant=None) matches historical behavior: apply all normalizations.
+        v = variant or self.ReconstructionVariant("default")
+
+        text = proof_body
+        if v.dedent_common:
+            # First remove any common indentation (helps when the entire proof is shifted right).
+            text = self._dedent_proof_body(text)
+        if v.snap_indent_levels:
+            # Then snap indentation transitions to valid previously-seen indentation levels.
+            text = self._snap_proof_indentation_levels(text)
+        if v.rewrite_trailing_apply:
+            # Finally, rewrite trailing `apply <haveName>` into `exact <haveName>` when applicable.
+            text = self._rewrite_trailing_apply_of_have_to_exact(text)
+
+        # Additional normalization is only used for offset-based insertion (AST-guided) paths.
+        if offset_insertion:
+            if v.fix_dangling_closing_tactics_after_comments:
+                text = self._fix_dangling_closing_tactics_after_comments(text)
+            if v.snap_self_reference_closers:
+                text = self._snap_self_reference_closers_to_have_indent(text)
+            if v.dedent_last_closer_out_of_inner_have_by:
+                text = self._dedent_last_closer_out_of_inner_have_by(text)
+        return text
+
+    def _skip_leading_trivia(self, text: str) -> str:
+        """
+        Skip leading empty lines and single-line comments in the given text.
+
+        This removes:
+        - Empty lines
+        - Line comments starting with '--'
+        - Single-line block comments of the form '/- ... -/'
+        """
+        lines = text.split("\n")
+        idx = 0
+        while idx < len(lines):
+            stripped = lines[idx].strip()
+            if stripped == "":
+                idx += 1
+                continue
+            if stripped.startswith("--"):
+                idx += 1
+                continue
+            if stripped.startswith("/-") and stripped.endswith("-/"):
+                idx += 1
+                continue
+            break
+        return "\n".join(lines[idx:]).lstrip()
 
     def _strip_decl_assignment(self, formal_decl: str) -> str:
         """
@@ -2148,3 +2246,28 @@ class GoedelsPoetryStateManager:
         """
         idx = formal_decl.find(":=")
         return formal_decl[:idx].rstrip() if idx != -1 else formal_decl
+
+    def _indent_proof_body(self, proof_body: str, indent: str) -> str:
+        """
+        Indents each line of the proof body.
+
+        Parameters
+        ----------
+        proof_body : str
+            The proof body to indent
+        indent : str
+            The indentation string to add
+
+        Returns
+        -------
+        str
+            The indented proof body
+        """
+        lines = proof_body.split("\n")
+        indented_lines = []
+        for line in lines:
+            if line.strip():  # Only indent non-empty lines
+                indented_lines.append(indent + line)
+            else:
+                indented_lines.append(line)
+        return "\n".join(indented_lines)

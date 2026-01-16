@@ -256,7 +256,7 @@ class GoedelsPoetryFramework:
         # Get formal theorem states and parse their proofs into ASTs
         formal_theorem_states = self._state_manager.get_proofs_to_parse()
         formal_theorem_states = cast(FormalTheoremProofStates, proof_parser_agent.invoke(formal_theorem_states))
-        self._state_manager.set_parsed_proofs()
+        self._state_manager.set_parsed_proofs(formal_theorem_states)
 
     def generate_search_queries(self) -> None:
         """
@@ -398,6 +398,29 @@ class GoedelsPoetryFramework:
                     server_max_retries=self._config.kimina_lean_server_max_retries,
                     server_timeout=self._config.kimina_lean_server_timeout,
                 )
+
+                # If final verification fails, try Kimina-guided reconstruction variants.
+                if not is_valid:
+                    self._console.print(
+                        "[bold yellow]⚠ Final verification failed. Trying Kimina-guided reconstruction variants...[/bold yellow]"
+                    )
+                    guided_proof, guided_ok, guided_err = self._state_manager.reconstruct_complete_proof_kimina_guided(
+                        server_url=self._config.kimina_lean_server_url,
+                        server_max_retries=self._config.kimina_lean_server_max_retries,
+                        server_timeout=self._config.kimina_lean_server_timeout,
+                        max_candidates=self._config.proof_reconstruction_max_candidates,
+                    )
+                    if guided_ok:
+                        complete_proof = guided_proof
+                        is_valid = True
+                        error_msg = ""
+                        self._console.print(
+                            "[bold green]✓ Kimina-guided reconstruction succeeded: Proof is valid[/bold green]"
+                        )
+                    else:
+                        # Keep the original failing proof for display, but show the last guided error.
+                        if guided_err:
+                            error_msg = guided_err
 
                 # Store validation result in state (used by CLI for .proof vs .failed-proof)
                 self._state_manager._state.proof_validation_result = is_valid

@@ -48,6 +48,7 @@ def __extract_let_value(let_node: dict, binding_name: str | None = None) -> dict
     if not ld_args:
         logging.debug("__extract_let_value: letDecl.args is empty")
         return None
+        ld_args = let_decl.get("args", [])
     # Iterate through letDecl.args to find all letIdDecl nodes
     # Structure: letDecl.args[i] = letIdDecl
     # Inside letIdDecl: args[0]=name, args[1]=[], args[2]=type_or_empty, args[3]=":=", args[4]=value
