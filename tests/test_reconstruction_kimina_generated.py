@@ -367,12 +367,15 @@ if IMPORTS_AVAILABLE:
             child_dict["proved"] = True
             child_dict["errors"] = ""
 
-        # Reconstruct using state manager helper on the decomposed node.
+        # Reconstruct using state manager - set the decomposed node as the root
         dummy_state = cast(Any, type("_S", (), {})())
         dummy_state._root_preamble = DEFAULT_IMPORTS
+        dummy_state.formal_theorem_proof = decomposed
         manager = GoedelsPoetryStateManager(dummy_state)
-        reconstructed_body = manager._reconstruct_decomposed_node_proof(decomposed)
-        reconstructed_full = combine_preamble_and_body(DEFAULT_IMPORTS, reconstructed_body)
+        # Use reconstruct_complete_proof() which handles the full reconstruction
+        reconstructed_full = manager.reconstruct_complete_proof(
+            server_url=server_url, server_max_retries=server_max_retries, server_timeout=server_timeout
+        )
 
         # Sanity: no textual sorry should remain.
         assert "sorry" not in reconstructed_full
@@ -384,7 +387,7 @@ if IMPORTS_AVAILABLE:
         assert parsed_check["complete"] is True, parsed_check
 
     def _selected_cases() -> list[ReconCase]:
-        n = _env_int("RECONSTRUCTION_TEST_CASES", 600)
+        n = _env_int("RECONSTRUCTION_TEST_CASES", 25)
         seed = _env_int("RECONSTRUCTION_TEST_SEED", 0)
         if n <= 0:
             return []

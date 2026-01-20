@@ -8,7 +8,7 @@ from goedels_poetry.agents.formal_theorem_syntax_agent import FormalTheoremSynta
 from goedels_poetry.agents.formalizer_agent import FormalizerAgentFactory
 from goedels_poetry.agents.informal_theorem_semantics_agent import InformalTheoremSemanticsAgentFactory
 from goedels_poetry.agents.informal_theorem_syntax_agent import InformalTheoremSyntaxAgentFactory
-from goedels_poetry.agents.proof_checker_agent import ProofCheckerAgentFactory, check_complete_proof
+from goedels_poetry.agents.proof_checker_agent import ProofCheckerAgentFactory
 from goedels_poetry.agents.proof_corrector_agent import ProofCorrectorAgentFactory
 from goedels_poetry.agents.proof_parser_agent import ProofParserAgentFactory
 from goedels_poetry.agents.proof_sketcher_agent import ProofSketcherAgentFactory
@@ -388,51 +388,45 @@ class GoedelsPoetryFramework:
         # If successful, print the complete proof
         if self._state_manager.reason == "Proof completed successfully.":
             try:
-                complete_proof = self._state_manager.reconstruct_complete_proof()
+                from goedels_poetry.state import ProofReconstructionError
 
-                # Perform final verification of the complete proof
-                self._console.print("\n[bold blue]Performing final proof verification...[/bold blue]")
-                is_valid, error_msg = check_complete_proof(
-                    complete_proof,
+                complete_proof = self._state_manager.reconstruct_complete_proof(
                     server_url=self._config.kimina_lean_server_url,
                     server_max_retries=self._config.kimina_lean_server_max_retries,
                     server_timeout=self._config.kimina_lean_server_timeout,
                 )
 
-                # If final verification fails, try Kimina-guided reconstruction variants.
-                if not is_valid:
-                    self._console.print(
-                        "[bold yellow]⚠ Final verification failed. Trying Kimina-guided reconstruction variants...[/bold yellow]"
-                    )
-                    guided_proof, guided_ok, guided_err = self._state_manager.reconstruct_complete_proof_kimina_guided(
-                        server_url=self._config.kimina_lean_server_url,
-                        server_max_retries=self._config.kimina_lean_server_max_retries,
-                        server_timeout=self._config.kimina_lean_server_timeout,
-                        max_candidates=self._config.proof_reconstruction_max_candidates,
-                    )
-                    if guided_ok:
-                        complete_proof = guided_proof
-                        is_valid = True
-                        error_msg = ""
-                        self._console.print(
-                            "[bold green]✓ Kimina-guided reconstruction succeeded: Proof is valid[/bold green]"
-                        )
-                    else:
-                        # Keep the original failing proof for display, but show the last guided error.
-                        if guided_err:
-                            error_msg = guided_err
-
-                # Store validation result in state (used by CLI for .proof vs .failed-proof)
-                self._state_manager._state.proof_validation_result = is_valid
+                # Store validation result in state (should always be True if we reach here)
+                # reconstruct_complete_proof() performs syntax and semantic validation internally
+                self._state_manager._state.proof_validation_result = True
                 # Store the final proof so writers don't recompute a failing variant.
                 self._state_manager._state.final_complete_proof = complete_proof
+                is_valid = True
+                error_msg = ""
+            except ProofReconstructionError as e:
+                # Reconstruction failed validation - this should not happen under assumptions
+                # but we handle it gracefully for error reporting
+                self._console.print("[bold red]✗ Proof reconstruction failed validation[/bold red]")
+                self._console.print(f"[red]Reconstruction error:[/red]\n{e}")
+                # Store validation result as False
+                self._state_manager._state.proof_validation_result = False
+                is_valid = False
+                error_msg = str(e)
+                # Try to get a partial proof for display if available
+                try:
+                    from goedels_poetry.agents.util.common import DEFAULT_IMPORTS, combine_preamble_and_body
+
+                    preamble = self._state_manager._state._root_preamble or DEFAULT_IMPORTS
+                    complete_proof = combine_preamble_and_body(preamble, "-- Proof reconstruction failed validation")
+                except Exception:
+                    complete_proof = "-- Proof reconstruction failed validation"
 
                 if is_valid:
                     self._console.print("[bold green]✓ Final verification passed: Proof is valid[/bold green]")
                 else:
-                    self._console.print("[bold yellow]⚠ Final verification failed: Proof may be invalid[/bold yellow]")
+                    self._console.print("[bold red]✗ Final verification failed: Proof is invalid[/bold red]")
                     if error_msg:
-                        self._console.print(f"[yellow]Verification errors:[/yellow]\n{error_msg}")
+                        self._console.print(f"[red]Verification errors:[/red]\n{error_msg}")
 
                 self._console.print("\nComplete Lean4 Proof:")
                 self._console.print("-" * 80)
@@ -446,10 +440,16 @@ class GoedelsPoetryFramework:
                 self._console.print(f"[bold yellow]Warning:[/bold yellow] Final verification encountered an error: {e}")
                 # Try to still print the proof if it was successfully reconstructed
                 try:
-                    complete_proof = self._state_manager.reconstruct_complete_proof()
+                    from goedels_poetry.state import ProofReconstructionError
+
+                    complete_proof = self._state_manager.reconstruct_complete_proof(
+                        server_url=self._config.kimina_lean_server_url,
+                        server_max_retries=self._config.kimina_lean_server_max_retries,
+                        server_timeout=self._config.kimina_lean_server_timeout,
+                    )
                     self._console.print("\nComplete Lean4 Proof:")
                     self._console.print("-" * 80)
                     self._console.print(complete_proof, markup=False)
                     self._console.print("-" * 80)
-                except Exception:
-                    self._console.print("Could not reconstruct proof for display.")
+                except (ProofReconstructionError, Exception) as e2:
+                    self._console.print(f"Could not reconstruct proof for display: {e2}")

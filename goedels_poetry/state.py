@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import dataclasses
 import logging
 import os
 import pickle
@@ -9,7 +8,12 @@ from datetime import datetime
 from hashlib import sha256
 from pathlib import Path
 from shutil import rmtree
-from typing import cast
+from typing import TYPE_CHECKING, cast
+
+if TYPE_CHECKING:
+    from kimina_client import KiminaClient
+
+    from goedels_poetry.parsers.ast import AST
 
 from goedels_poetry.agents.state import (
     DecomposedFormalTheoremState,
@@ -24,7 +28,6 @@ from goedels_poetry.agents.util.common import (
     ensure_mandatory_preamble,
     split_preamble_and_body,
 )
-from goedels_poetry.agents.util.debug import is_debug_enabled
 from goedels_poetry.config.llm import (
     DECOMPOSER_AGENT_MAX_SELF_CORRECTION_ATTEMPTS,
     FORMALIZER_AGENT_MAX_RETRIES,
@@ -54,6 +57,12 @@ _OUTPUT_DIR = os.environ.get("GOEDELS_POETRY_DIR", os.path.expanduser("~/.goedel
 PROOF_BODY_INDENT_SPACES = 2
 
 MISSING_FORMAL_PREAMBLE_MSG = "Formal theorems must include a Lean preamble/header (imports, options, etc.)."
+
+
+class ProofReconstructionError(Exception):
+    """Raised when proof reconstruction fails validation."""
+
+    pass
 
 
 class GoedelsPoetryState:
@@ -1499,415 +1508,1170 @@ class GoedelsPoetryStateManager:
             # No too-deep children, queue all children normally
             self._state.proof_prove_queue += all_children
 
-    def reconstruct_complete_proof(self) -> str:
+    def _reconstruct_node_proof_ast_based(  # noqa: C901
+        self,
+        node: TreeNode,
+        *,
+        kimina_client: KiminaClient,
+        server_timeout: int = 60,
+    ) -> str:
         """
-        Reconstructs the complete Lean4 proof from the proof tree.
+        Recursively reconstruct proof for a node using AST-based methods.
+
+        For leaf nodes: returns proof text directly.
+        For decomposed nodes: uses AST to find holes and replace them with child proofs.
+
+        Parameters
+        ----------
+        node : TreeNode
+            The node to reconstruct (FormalTheoremProofState or DecomposedFormalTheoremState)
+        kimina_client
+            Required client for syntax validation and semantic validation
+        server_timeout : int
+            Timeout for Kimina requests
+
+        Returns
+        -------
+        str
+            Complete proof text (without preamble)
+        """
+        from typing import cast
+
+        from goedels_poetry.agents.state import (
+            DecomposedFormalTheoremState,
+            FormalTheoremProofState,
+        )
+        from goedels_poetry.agents.util.common import DEFAULT_IMPORTS, combine_preamble_and_body
+        from goedels_poetry.agents.util.kimina_server import (
+            parse_kimina_ast_code_response,
+            parse_kimina_check_response,
+        )
+        from goedels_poetry.parsers.ast import AST
+        # ProofReconstructionError is defined at module level in goedels_poetry/state.py (same file as this method)
+
+        # Leaf node: return proof text directly
+        # Note: formal_proof contains only tactics (proof body after := by), not full theorem declaration
+        if isinstance(node, dict) and "formal_proof" in node and "children" not in node:
+            proof_state = cast(FormalTheoremProofState, node)
+            if proof_state["formal_proof"] is None:
+                raise ProofReconstructionError(  # noqa: TRY003
+                    "Leaf node has formal_proof is None. "
+                    "This violates the assumption that all FormalTheoremProofState instances are proven."
+                )
+
+            proof_text = str(proof_state["formal_proof"])
+
+            # For root nodes (parent is None), wrap tactics with theorem signature if needed
+            # Root nodes need full theorem declaration for reconstruct_complete_proof() output
+            # Non-root nodes return tactics as-is (will be extracted for holes)
+            if proof_state["parent"] is None:
+                # Root node: ensure output includes theorem header
+                # Note: Uses instance methods _strip_decl_assignment(), _skip_leading_trivia(),
+                # _indent_proof_body(), and constant PROOF_BODY_INDENT_SPACES from GoedelsPoetryStateManager
+                theorem_decl_full = str(proof_state["formal_theorem"]).strip()
+                theorem_sig = self._strip_decl_assignment(theorem_decl_full).strip()
+
+                # Validate theorem signature is not empty
+                if not theorem_sig:
+                    raise ProofReconstructionError(f"Invalid theorem declaration for root node: {theorem_decl_full}")  # noqa: TRY003
+
+                # Skip leading empty lines and single-line comments to avoid redundant wrapping
+                leading_skipped = self._skip_leading_trivia(proof_text)
+
+                # Use normalized string comparison to handle multiline theorem signatures
+                # This handles cases where theorem signature and proof_text have different formatting
+                # (e.g., single-line vs multiline signatures)
+                normalized_sig = " ".join(theorem_sig.split())
+                normalized_leading = " ".join(leading_skipped.split())
+                if normalized_leading.startswith(normalized_sig):
+                    # Already has theorem signature, return as-is
+                    return proof_text
+
+                # Otherwise treat stored proof as tactics and wrap with theorem signature
+                indent = " " * PROOF_BODY_INDENT_SPACES
+                indented_body = self._indent_proof_body(proof_text, indent)
+                return f"{theorem_sig} := by\n{indented_body}"
+
+            # Non-root nodes: return tactics as-is (will be extracted by _extract_proof_body_ast_guided() for holes)
+            return proof_text
+
+        # Internal node (DecomposedFormalTheoremState): reconstruct by replacing holes
+        if isinstance(node, dict) and "children" in node:
+            decomposed_state = cast(DecomposedFormalTheoremState, node)
+
+            if decomposed_state["proof_sketch"] is None:
+                raise ProofReconstructionError(  # noqa: TRY003
+                    "Decomposed node has proof_sketch is None. "
+                    "This violates the assumption that decomposed nodes have syntactic sketches."
+                )
+
+            if decomposed_state["ast"] is None:
+                raise ProofReconstructionError(  # noqa: TRY003
+                    "Decomposed node has ast is None. This violates the assumption that decomposed nodes have ASTs."
+                )
+
+            # Get preamble once at the start (used for validation and reconstruction)
+            # Note: This preamble is used consistently throughout reconstruction to ensure coordinate system consistency
+            # with the AST (which was created using this same preamble)
+            preamble = decomposed_state.get("preamble", DEFAULT_IMPORTS)
+
+            # Normalize sketch: strip to match what combine_preamble_and_body produces
+            # This ensures coordinate system consistency with AST (positions are relative to stripped body)
+            sketch = str(decomposed_state["proof_sketch"]).strip()
+            sketch = sketch if sketch.endswith("\n") else sketch + "\n"
+
+            # Get AST (should already be created from normalized sketch by sketch_parser_agent)
+            ast = cast(AST, decomposed_state["ast"])
+
+            # Verify AST was created from normalized sketch
+            # This ensures coordinate system consistency - hole positions must align
+            ast_source_text = ast.get_source_text()
+            ast_body_start = ast.get_body_start()
+            # Validate ast_body_start is within bounds (>= 0 and <= len(ast_source_text))
+            if ast_source_text and 0 <= ast_body_start <= len(ast_source_text):
+                expected_body = ast_source_text[ast_body_start:]
+                if sketch != expected_body:
+                    raise ProofReconstructionError(  # noqa: TRY003
+                        f"Sketch body does not match AST source_text body. This indicates AST was created from different sketch. "
+                        f"Expected length {len(expected_body)}, got {len(sketch)}."
+                    )
+
+            # Replace holes using AST-based method
+            # Pass the preamble that matches the AST (from decomposed_state)
+            # This ensures coordinate system consistency - body_start calculations match
+            reconstructed = self._replace_holes_using_ast(
+                sketch,
+                ast,
+                decomposed_state["children"],
+                kimina_client=kimina_client,
+                server_timeout=server_timeout,
+                preamble=preamble,  # Use the preamble that was used to create the AST
+            )
+
+            # Final syntax validation: parse reconstructed proof
+            # (incremental validation during hole replacement ensures this should pass)
+            reconstructed_with_preamble = combine_preamble_and_body(preamble, reconstructed)
+
+            # Note: combine_preamble_and_body() should already normalize (strip and add trailing newline),
+            # but we add this normalization defensively in case the implementation changes.
+            normalized_reconstructed = (
+                reconstructed_with_preamble
+                if reconstructed_with_preamble.endswith("\n")
+                else reconstructed_with_preamble + "\n"
+            )
+
+            # Import parsing functions (used for validation)
+            from goedels_poetry.agents.util.kimina_server import (
+                parse_kimina_ast_code_response,
+                parse_kimina_check_response,
+            )
+
+            ast_response = kimina_client.ast_code(normalized_reconstructed, timeout=server_timeout)
+            parsed_ast = parse_kimina_ast_code_response(ast_response)
+            if parsed_ast.get("error") is not None:
+                raise ProofReconstructionError(  # noqa: TRY003
+                    f"Final syntax validation failed after node reconstruction: {parsed_ast['error']}\n"
+                    f"Reconstructed proof:\n{reconstructed}"
+                )
+
+            # Final semantic validation: type-check reconstructed proof
+            # (semantic validation during hole replacement ensures this should pass)
+            check_response = kimina_client.check(normalized_reconstructed, timeout=server_timeout)
+            parsed_check = parse_kimina_check_response(check_response)
+            if not parsed_check.get("complete", False):
+                errors = parsed_check.get("errors", [])
+                sorries = parsed_check.get("sorries", [])
+                error_parts = []
+                if errors:
+                    error_parts.append("Errors:\n" + "\n".join(err.get("data", str(err)) for err in errors))
+                if sorries:
+                    error_parts.append(f"Sorries remaining: {len(sorries)}")
+                error_msg = "\n\n".join(error_parts) if error_parts else "Unknown semantic validation failure"
+                raise ProofReconstructionError(  # noqa: TRY003
+                    f"Final semantic validation failed after node reconstruction: {error_msg}\n"
+                    f"Reconstructed proof:\n{reconstructed}"
+                )
+
+            return reconstructed
+
+        # Unknown node type
+        raise ProofReconstructionError("Unable to reconstruct proof for unknown node type.")  # noqa: TRY003
+
+    def _replace_holes_using_ast(  # noqa: C901
+        self,
+        sketch: str,
+        ast: AST,
+        children: list[TreeNode],
+        *,
+        kimina_client: KiminaClient,
+        server_timeout: int = 60,
+        preamble: str = DEFAULT_IMPORTS,
+    ) -> str:
+        """
+        Replace sorry holes in sketch using AST-determined positions with iterative indentation refinement.
+
+        Required imports:
+        - from kimina_client import KiminaClient
+        - from goedels_poetry.agents.util.kimina_server import (
+            parse_kimina_ast_code_response,
+            parse_kimina_check_response,
+        )
+        - from goedels_poetry.agents.util.common import (
+            combine_preamble_and_body,
+            DEFAULT_IMPORTS,
+            remove_default_imports_from_ast,
+        )
+        - from goedels_poetry.parsers.ast import AST
+        - PROOF_BODY_INDENT_SPACES, _dedent_proof_body, _indent_proof_body from goedels_poetry.state
+        - ProofReconstructionError is defined at module level in goedels_poetry/state.py (same file as this method)
+        (These can be imported as instance methods/attributes since this is a method of GoedelsPoetryStateManager)
+
+        Uses AST.get_sorry_holes_by_name() for Unicode-safe positions and AST structure
+        for indentation context. Tries multiple indentation strategies until syntax validation succeeds.
+
+        Guarantees: Under assumptions (syntactic sketches, proven children), at least one
+        indentation strategy will produce syntactically valid code.
+
+        Parameters
+        ----------
+        sketch : str
+            The sketch text (body only, no preamble)
+        ast : AST
+            The AST for the sketch (must have been created with the same preamble)
+        children : list[TreeNode]
+            List of child nodes with hole_name, hole_start, hole_end metadata
+        kimina_client
+            Required client for syntax validation and semantic validation after replacement
+        server_timeout : int
+            Timeout for syntax validation and semantic validation requests
+        preamble : str
+            The preamble to use when combining with body for validation.
+            Must match the preamble used when creating the AST to ensure coordinate system consistency.
+
+        Returns
+        -------
+        str
+            Sketch with holes replaced by child proofs (guaranteed syntactically and semantically valid)
+        """
+
+        from goedels_poetry.agents.util.common import (
+            combine_preamble_and_body,
+            remove_default_imports_from_ast,
+        )
+        from goedels_poetry.agents.util.kimina_server import (
+            parse_kimina_ast_code_response,
+            parse_kimina_check_response,
+        )
+        from goedels_poetry.parsers.ast import AST
+        # ProofReconstructionError is defined at module level in goedels_poetry/state.py (same file as this method)
+
+        # Sort children by hole_start position to ensure they match textual order of holes
+        # This ensures occurrence index matching works correctly (first child → first hole, etc.)
+        # Filter children with hole_name first, then sort by hole_start
+        children_with_holes = []
+        for child in children:
+            child_hole_name = child.get("hole_name") if isinstance(child, dict) else None
+            if not child_hole_name:
+                # Under assumptions, all children should have hole_name (including synthetic names)
+                raise ProofReconstructionError(  # noqa: TRY003
+                    "Child node is missing hole_name. All children must have hole_name (including synthetic names). "
+                    "This violates the assumption that each sorry has a corresponding proven child."
+                )
+
+            child_hole_start = child.get("hole_start") if isinstance(child, dict) else None
+            if child_hole_start is None:
+                # Under assumptions, children should have hole_start metadata
+                raise ProofReconstructionError(  # noqa: TRY003
+                    f"Child node with hole_name {child_hole_name} is missing hole_start metadata. "
+                    f"This violates the assumption that children have complete hole metadata."
+                )
+            if not isinstance(child_hole_start, int):
+                # Under assumptions, hole_start should be an int (character offset)
+                raise ProofReconstructionError(  # noqa: TRY003
+                    f"Child node with hole_name {child_hole_name} has invalid hole_start type: {type(child_hole_start)}. "
+                    f"Expected int (character offset), got {type(child_hole_start)}."
+                )
+
+            children_with_holes.append((child_hole_start, child))
+
+        # Sort by hole_start to match textual order (holes appear left-to-right in sketch)
+        children_with_holes.sort(key=lambda t: t[0])
+        sorted_children = [child for _, child in children_with_holes]
+
+        # Validate that we have valid children after filtering
+        if not sorted_children:
+            raise ProofReconstructionError(  # noqa: TRY003
+                f"After filtering, no valid children remain. All children must have hole_name and hole_start. "
+                f"Original children count: {len(children)}"
+            )
+
+        # Track occurrence indices for each hole name (which occurrence we're on)
+        children_by_name: dict[str, list[TreeNode]] = {}
+        for child in sorted_children:
+            child_hole_name = child.get("hole_name") if isinstance(child, dict) else None
+            if child_hole_name:
+                children_by_name.setdefault(child_hole_name, []).append(child)
+
+        occurrence_indices: dict[str, int] = dict.fromkeys(children_by_name.keys(), 0)
+
+        # Validate that sketch (stripped) matches AST source_text body
+        # This ensures coordinate system consistency - hole positions must align
+        ast_source_text = ast.get_source_text()
+        ast_body_start = ast.get_body_start()
+        # Normalize sketch first (needed regardless of validation path)
+        normalized_sketch = sketch.strip()
+        normalized_sketch = normalized_sketch if normalized_sketch.endswith("\n") else normalized_sketch + "\n"
+
+        # Validate ast_body_start is within bounds (>= 0 and <= len(ast_source_text))
+        if ast_source_text and 0 <= ast_body_start <= len(ast_source_text):
+            expected_body = ast_source_text[ast_body_start:]
+            if normalized_sketch != expected_body:
+                raise ProofReconstructionError(  # noqa: TRY003
+                    f"Sketch body does not match AST source_text body. This indicates AST was created from different sketch. "
+                    f"Expected length {len(expected_body)}, got {len(normalized_sketch)}."
+                )
+
+        # Validate that sketch has holes if children exist (upfront validation)
+        initial_holes = ast.get_sorry_holes_by_name()
+        total_initial_holes = sum(len(spans) for spans in initial_holes.values())
+        if total_initial_holes == 0 and len(children) > 0:
+            raise ProofReconstructionError(  # noqa: TRY003
+                f"Sketch has no holes but {len(children)} children provided. "
+                f"This violates the assumption that each sorry has a corresponding proven child."
+            )
+        if total_initial_holes > 0 and len(children) == 0:
+            raise ProofReconstructionError(  # noqa: TRY003
+                f"Sketch has {total_initial_holes} hole(s) but no children provided. "
+                f"This violates the assumption that each sorry has a corresponding proven child."
+            )
+
+        # Use the normalized_sketch as result
+        # This ensures coordinate system consistency (AST positions are relative to stripped body)
+        result = normalized_sketch
+
+        # Process children one at a time in sorted order, re-querying holes from AST after each replacement
+        for child in sorted_children:
+            child_hole_name = child.get("hole_name") if isinstance(child, dict) else None
+            # child_hole_name is guaranteed to exist from the filtering above
+
+            # Get fresh hole positions from current AST (positions update after each replacement)
+            holes = ast.get_sorry_holes_by_name()
+
+            # Sort holes within each name by start position to ensure textual order
+            # This is critical because AST traversal order may not match textual order
+            # Note: We modify holes in-place for this iteration only; holes are re-queried
+            # at the start of each loop iteration, so modifications don't persist
+            for name in holes:
+                holes[name] = sorted(holes[name], key=lambda span: span[0])
+
+            hole_spans = holes.get(child_hole_name or "", [])
+
+            if not hole_spans:
+                raise ProofReconstructionError(  # noqa: TRY003
+                    f"Hole {child_hole_name} not found in AST. This may indicate all holes of this name "
+                    f"have been replaced, or the AST is in an inconsistent state."
+                )
+
+            # Match child to hole by name + occurrence index (not position)
+            # First child with this name (in sorted order) matches first hole with this name, etc.
+            # Defensive check: child_hole_name should always be in occurrence_indices after filtering
+            if child_hole_name not in occurrence_indices:
+                raise ProofReconstructionError(  # noqa: TRY003
+                    f"Child with hole_name {child_hole_name} not found in occurrence_indices. "
+                    f"This should not happen after filtering - all children should have valid hole_name."
+                )
+            occurrence_idx = occurrence_indices[child_hole_name]
+            if occurrence_idx >= len(hole_spans):
+                raise ProofReconstructionError(  # noqa: TRY003
+                    f"Occurrence index {occurrence_idx} for hole {child_hole_name} exceeds available "
+                    f"holes ({len(hole_spans)}). This indicates a mismatch between children and holes."
+                )
+
+            hole_start, hole_end = hole_spans[occurrence_idx]
+
+            # Validate hole position types (defensive check)
+            if not isinstance(hole_start, int) or not isinstance(hole_end, int):
+                raise ProofReconstructionError(  # noqa: TRY003
+                    f"Invalid hole position types for {child_hole_name}: "
+                    f"start={type(hole_start)}, end={type(hole_end)}. Expected int, int."
+                )
+
+            # Validate hole positions are within bounds of result
+            if hole_start < 0 or hole_end > len(result) or hole_start >= hole_end:
+                # Debug info for coordinate system mismatch
+                ast_source_text = ast.get_source_text()
+                ast_body_start = ast.get_body_start()
+                child_hole_start = child.get("hole_start") if isinstance(child, dict) else None
+                raise ProofReconstructionError(  # noqa: TRY003
+                    f"Invalid hole position for {child_hole_name}: start={hole_start}, end={hole_end}, "
+                    f"result_length={len(result)}. This indicates coordinate system mismatch. "
+                    f"AST body_start={ast_body_start}, AST source_text length={len(ast_source_text) if ast_source_text else None}, "
+                    f"child hole_start={child_hole_start}."
+                )
+
+            # Extract child proof body
+            child_proof_body = self._extract_proof_body_ast_guided(
+                child, kimina_client=kimina_client, server_timeout=server_timeout
+            )
+
+            # Validate proof body is not empty
+            if not child_proof_body or not child_proof_body.strip():
+                raise ProofReconstructionError(  # noqa: TRY003
+                    f"Child proof body for hole {child_hole_name} is empty or whitespace-only. "
+                    f"This should not happen under assumptions (proven child proofs)."
+                )
+
+            # Phase 1: Extract indentation context from AST
+            # Use result (already normalized at start) since positions are relative to current state
+            # Positions from AST are based on normalized text, so we must use normalized text here
+            base_indent, is_inline = self._extract_indentation_from_ast(ast, hole_start, result)
+
+            # Validate return values from _extract_indentation_from_ast() (defensive check)
+            # This provides an additional safety layer in case the method returns invalid values
+            if not isinstance(base_indent, int) or base_indent < 0:
+                # Fall back to text-based calculation for base_indent
+                # Validate hole_start is within bounds before using it
+                if not isinstance(hole_start, int) or hole_start < 0 or hole_start > len(result):
+                    raise ProofReconstructionError(  # noqa: TRY003
+                        f"Invalid hole_start ({hole_start}) for fallback base_indent calculation. "
+                        f"result length: {len(result)}"
+                    )
+                line_start = result.rfind("\n", 0, hole_start) + 1
+                line_prefix = result[line_start:hole_start]
+                base_indent = len(line_prefix) - len(line_prefix.lstrip())
+                # Only recalculate is_inline if it's also invalid
+                if not isinstance(is_inline, bool):
+                    is_inline = bool(line_prefix.strip())
+                # Ensure base_indent is non-negative after fallback
+                base_indent = max(0, base_indent)
+            elif not isinstance(is_inline, bool):
+                # base_indent is valid but is_inline is invalid - default to non-inline
+                is_inline = False
+
+            # Phase 2: Try indentation strategies until syntax validation succeeds
+            replacement_text = None
+            strategies = self._generate_indentation_strategies(child_proof_body, base_indent, is_inline)
+
+            for _strategy_idx, indent_strategy in enumerate(strategies):
+                # FIX: For multiline holes, strip trailing whitespace from prefix to avoid double indentation
+                # The prefix already contains the indentation spaces, and indent_strategy adds them again.
+                # By stripping trailing whitespace matching base_indent, we prevent double indentation.
+                # This is backward-compatible because:
+                # - Inline holes (is_inline=True): prefix doesn't end with matching whitespace, so no change
+                # - Multiline holes (is_inline=False): prefix ends with whitespace, we strip it before replacement
+                prefix = result[:hole_start]
+                if not is_inline and base_indent > 0:
+                    # For multiline holes, check if prefix ends with whitespace that matches base_indent
+                    # Strip only the trailing whitespace characters (spaces), preserving newlines
+                    prefix_rstripped = prefix.rstrip()
+                    trailing_whitespace_count = len(prefix) - len(prefix_rstripped)
+                    if trailing_whitespace_count >= base_indent and len(prefix) >= base_indent:
+                        # Prefix has at least base_indent trailing spaces
+                        # Strip exactly base_indent spaces to prevent double indentation
+                        # Find the position to cut: go back base_indent characters from end, but preserve newlines
+                        # Check if the last base_indent chars are all spaces
+                        last_chars = prefix[-base_indent:]
+                        if last_chars.strip() == "" and last_chars.count("\n") == 0:
+                            # Last base_indent chars are spaces (no newlines)
+                            # Strip them to prevent double indentation
+                            prefix = prefix[:-base_indent]
+
+                test_result = prefix + indent_strategy + result[hole_end:]
+
+                # Syntax validation
+                # Normalize test_result: ensure trailing newline before passing to combine_preamble_and_body
+                # combine_preamble_and_body will strip leading/trailing whitespace and re-add trailing newline if needed
+                # This matches combine_preamble_and_body's behavior (strips input, then adds newline if needed)
+                # Note: normalized_test is test_result with trailing newline (if needed)
+                # normalized_body (below) is the stripped version used for body_start calculation
+                normalized_test = test_result if test_result.endswith("\n") else test_result + "\n"
+                test_with_preamble = combine_preamble_and_body(preamble, normalized_test)
+
+                ast_response = kimina_client.ast_code(test_with_preamble, timeout=server_timeout)
+                parsed_ast = parse_kimina_ast_code_response(ast_response)
+
+                if parsed_ast.get("error") is None and parsed_ast.get("ast") is not None:
+                    # Syntax validation passed - use this strategy
+                    replacement_text = indent_strategy
+
+                    # Update AST for subsequent replacements (AST is guaranteed to exist at this point)
+
+                    ast_without_imports = remove_default_imports_from_ast(parsed_ast["ast"], preamble=preamble)
+
+                    # Calculate body_start correctly: combine_preamble_and_body strips preamble and adds "\n\n"
+                    # Handle edge cases where preamble or body might be empty
+                    # Use the preamble parameter (matches the AST's preamble) to ensure coordinate system consistency
+                    normalized_preamble = preamble.strip()
+                    # normalized_body is the stripped version of normalized_test (what was passed to combine_preamble_and_body)
+                    normalized_body = normalized_test.strip()
+
+                    if not normalized_preamble:
+                        body_start = 0
+                    elif not normalized_body:
+                        # Should not happen (empty body), but handle it
+                        body_start = len(test_with_preamble)
+                    else:
+                        # Both non-empty: preamble + "\n\n" + body
+                        body_start = len(normalized_preamble) + 2  # +2 for "\n\n"
+
+                    # Validate body_start is within bounds (defensive check)
+                    if body_start < 0 or body_start > len(test_with_preamble):
+                        raise ProofReconstructionError(  # noqa: TRY003
+                            f"Invalid body_start ({body_start}) calculated. "
+                            f"test_with_preamble length: {len(test_with_preamble)}, "
+                            f"normalized_preamble length: {len(normalized_preamble)}, "
+                            f"normalized_body length: {len(normalized_body)}"
+                        )
+
+                    # Extract the stripped body from test_with_preamble to ensure coordinate system consistency
+                    # combine_preamble_and_body does: normalized_body = body.strip()
+                    # So we need to store the stripped version in result
+                    # Handle empty body case explicitly
+                    source_text = test_with_preamble
+                    if not normalized_body:
+                        # Empty body case: combine_preamble_and_body returns just preamble
+                        # So body portion is empty (no body)
+                        stripped_body = ""
+                    else:
+                        # Normal case: extract body from test_with_preamble
+                        if source_text and body_start <= len(source_text):
+                            stripped_body = source_text[body_start:]
+                        else:
+                            # Fallback: extract from normalized_test (shouldn't happen)
+                            # Match combine_preamble_and_body behavior: strip body, then add newline if needed
+                            stripped_body = normalized_test.strip()
+                            if not stripped_body.endswith("\n"):
+                                stripped_body += "\n"
+
+                    # Ensure stripped_body has trailing newline only if it's non-empty
+                    # combine_preamble_and_body adds trailing newline to result, but empty body stays empty
+                    if stripped_body:
+                        result = stripped_body if stripped_body.endswith("\n") else stripped_body + "\n"
+                    else:
+                        # Empty body case: result should be empty string (no body)
+                        result = ""
+
+                    ast = AST(
+                        ast_without_imports,
+                        sorries=parsed_ast.get("sorries"),
+                        source_text=test_with_preamble,
+                        body_start=body_start,
+                    )
+
+                    # Verify that calculated body_start matches AST's body_start (if available)
+                    # This ensures coordinate system consistency between our calculation and the AST
+                    ast_body_start = ast.get_body_start()
+                    if ast_body_start is not None and ast_body_start != body_start:
+                        raise ProofReconstructionError(  # noqa: TRY003
+                            f"Calculated body_start ({body_start}) does not match AST's body_start ({ast_body_start}). "
+                            f"This indicates a coordinate system mismatch in body_start calculation."
+                        )
+
+                    # Verify coordinate system consistency: result should match body portion of source_text
+                    # This is the primary verification - result is what's actually used for subsequent replacements
+                    ast_source_text = ast.get_source_text()
+                    source_text_body = ast_source_text[body_start:] if ast_source_text else ""
+                    if result != source_text_body:
+                        raise ProofReconstructionError(  # noqa: TRY003
+                            f"Result body does not match AST source_text body after replacement. "
+                            f"This indicates a coordinate system mismatch. Expected length {len(source_text_body)}, "
+                            f"got {len(result)}."
+                        )
+
+                    # Verify updated AST correctly reflects the replaced hole
+                    # Re-query holes to confirm the replaced hole is gone and positions are updated
+                    updated_holes = ast.get_sorry_holes_by_name()
+
+                    # Sort updated holes to ensure textual order
+                    for name in updated_holes:
+                        updated_holes[name] = sorted(updated_holes[name], key=lambda span: span[0])
+
+                    updated_spans = updated_holes.get(child_hole_name, [])
+                    expected_remaining = len(hole_spans) - 1  # One hole should be gone
+
+                    # Verify hole count for this name decreased by 1
+                    if len(updated_spans) != expected_remaining:
+                        raise ProofReconstructionError(  # noqa: TRY003
+                            f"After replacing hole {child_hole_name}, expected {expected_remaining} remaining holes, "
+                            f"but found {len(updated_spans)}. This indicates an AST inconsistency - the replaced hole "
+                            f"is not correctly reflected in the updated AST."
+                        )
+
+                    # Verify total hole count decreased by 1
+                    total_holes_before = sum(len(spans) for spans in holes.values())
+                    total_holes_after = sum(len(spans) for spans in updated_holes.values())
+                    if total_holes_after != total_holes_before - 1:
+                        raise ProofReconstructionError(  # noqa: TRY003
+                            f"After replacing hole {child_hole_name}, total hole count changed incorrectly. "
+                            f"Expected {total_holes_before - 1} total holes, found {total_holes_after}. "
+                            f"This indicates an AST inconsistency."
+                        )
+
+                    # Increment occurrence index only after successful replacement
+                    occurrence_indices[child_hole_name] += 1
+
+                    break
+
+            if replacement_text is None:
+                # All indentation strategies failed syntax validation
+                # This should not happen under assumptions
+                raise ProofReconstructionError(  # noqa: TRY003
+                    f"All indentation strategies failed syntax validation for hole {child_hole_name} "
+                    f"at position {hole_start}-{hole_end}. This indicates a bug or violated assumption."
+                )
+
+        # Verify all holes have been replaced (children list should match all holes)
+        # If children is empty but sketch had holes, this would have been caught earlier
+        remaining_holes = ast.get_sorry_holes_by_name()
+        total_remaining = sum(len(spans) for spans in remaining_holes.values())
+        if total_remaining > 0:
+            raise ProofReconstructionError(  # noqa: TRY003
+                f"After processing all children, {total_remaining} hole(s) remain unreplaced. "
+                f"This violates the assumption that each sorry has a corresponding proven child. "
+                f"Remaining holes: {list(remaining_holes.keys())}"
+            )
+
+        # Verify final result is not empty (should not happen under assumptions)
+        if not result or not result.strip():
+            raise ProofReconstructionError(  # noqa: TRY003
+                "Final reconstructed proof body is empty or whitespace-only. This should not happen under assumptions."
+            )
+
+        # REQUIRED: Semantic validation AFTER all holes are replaced
+        # (not after each replacement, because other holes may still remain)
+        # result is already normalized (has trailing newline if non-empty) from last replacement
+        # (empty result would have been caught by check at lines above)
+        # Use the preamble parameter (matches the AST's preamble) to ensure coordinate system consistency
+        result_with_preamble = combine_preamble_and_body(preamble, result)
+
+        check_response = kimina_client.check(result_with_preamble, timeout=server_timeout)
+        parsed_check = parse_kimina_check_response(check_response)
+        if not parsed_check.get("complete", False):
+            errors = parsed_check.get("errors", [])
+            sorries = parsed_check.get("sorries", [])
+            error_parts = []
+            if errors:
+                error_parts.append("Errors:\n" + "\n".join(err.get("data", str(err)) for err in errors))
+            if sorries:
+                error_parts.append(f"Sorries remaining: {len(sorries)}")
+            error_msg = "\n\n".join(error_parts) if error_parts else "Unknown semantic validation failure"
+            # Include reconstructed proof in error for debugging
+            error_msg += f"\n\nReconstructed proof body (first 500 chars):\n{result[:500]}"
+            error_msg += f"\n\nFull proof with preamble (first 800 chars):\n{result_with_preamble[:800]}"
+            raise ProofReconstructionError(f"Semantic validation failed after all hole replacements: {error_msg}")  # noqa: TRY003
+
+        return result
+
+    def _extract_indentation_from_ast(self, ast: AST, hole_start: int, sketch: str) -> tuple[int, bool]:
+        """
+        Extract indentation context from AST structure around hole position.
+
+        Uses AST structure analysis to determine correct indentation from parent nodes
+        and token info fields. Falls back to text-based calculation if AST analysis fails.
+
+        Returns (base_indent, is_inline) where:
+        - base_indent: Character offset of base indentation level
+        - is_inline: True if hole is inline (e.g., "by sorry"), False if standalone
+        """
+        # Try AST-based extraction first
+        source_text = ast.get_source_text()
+        body_start = ast.get_body_start()
+
+        if source_text is not None:
+            # Convert body-relative hole_start to full-text position
+            # (Placeholder for future AST-based extraction - not used yet)
+            _full_text_hole_start = body_start + hole_start
+
+            # Find the AST node containing the sorry token at this position
+            # Navigate up to find parent container (by block, have statement, etc.)
+            # (Placeholder for future AST-based extraction - not used yet)
+            _ast_dict = ast.get_ast()
+
+            # Extract indentation from parent node structure
+            # Look for parent nodes with 'info' fields containing leading/trailing whitespace
+            # The 'by' token's trailing whitespace often contains newline + indentation
+            # This indicates the expected indentation for the proof body
+
+            # For now, use text-based fallback, but structure allows for AST enhancement
+            # Implementation should:
+            # 1. Find sorry token node at hole_start position
+            # 2. Navigate to parent 'by' or 'have' node
+            # 3. Extract trailing whitespace from 'by' token's info field
+            # 4. Parse newline + indentation pattern from trailing whitespace
+
+        # Fallback: text-based calculation
+        line_start = sketch.rfind("\n", 0, hole_start) + 1
+        line_prefix = sketch[line_start:hole_start]
+        base_indent = len(line_prefix) - len(line_prefix.lstrip())
+        is_inline = bool(line_prefix.strip())
+
+        # Ensure base_indent is non-negative (defensive check)
+        # This ensures the return value is always valid, even if text-based calculation somehow fails
+        base_indent = max(0, base_indent)
+
+        # Ensure is_inline is a bool (defensive check)
+        if not isinstance(is_inline, bool):
+            is_inline = False
+
+        return base_indent, is_inline
+
+    def _generate_indentation_strategies(self, child_proof_body: str, base_indent: int, is_inline: bool) -> list[str]:
+        """
+        Generate list of indentation strategies to try, in order of preference.
+
+        Under assumptions, at least one strategy must produce syntactically valid code.
+
+        Uses the following from goedels_poetry.state:
+        - PROOF_BODY_INDENT_SPACES: constant (currently 2, defined in goedels_poetry/state.py)
+        - self._dedent_proof_body(): method (defined in GoedelsPoetryStateManager class in goedels_poetry/state.py)
+        - self._indent_proof_body(): method (defined in GoedelsPoetryStateManager class in goedels_poetry/state.py)
+
+        Note: These can remain as instance methods/attributes since this is a method of GoedelsPoetryStateManager.
+        Alternatively, they could be moved to a utility module and imported if desired.
+        """
+        # Ensure base_indent is non-negative (defensive check)
+        # This protects against negative values even if validation above failed
+        base_indent = max(0, base_indent)
+
+        strategies: list[str] = []
+
+        # Strategy 1: AST-calculated base indentation (most likely to work)
+        if is_inline:
+            indent = " " * (base_indent + PROOF_BODY_INDENT_SPACES)
+            strategies.append("\n" + self._indent_proof_body(child_proof_body, indent))
+        else:
+            indent = " " * base_indent
+            strategies.append(self._indent_proof_body(child_proof_body, indent))
+
+        # Strategy 2: Preserve relative indentation, align base
+        dedented = self._dedent_proof_body(child_proof_body)
+        if is_inline:
+            indent = " " * (base_indent + PROOF_BODY_INDENT_SPACES)
+            strategies.append("\n" + self._indent_proof_body(dedented, indent))
+        else:
+            indent = " " * base_indent
+            strategies.append(self._indent_proof_body(dedented, indent))
+
+        # Strategy 3: Try different base levels (±2, ±4)
+        for offset in [-4, -2, 2, 4]:
+            test_indent = max(0, base_indent + offset)
+            if is_inline:
+                indent = " " * (test_indent + PROOF_BODY_INDENT_SPACES)
+                strategies.append("\n" + self._indent_proof_body(dedented, indent))
+            else:
+                indent = " " * test_indent
+                strategies.append(self._indent_proof_body(dedented, indent))
+
+        # Strategy 4: For inline holes, try keeping inline (no newline)
+        if is_inline:
+            strategies.append(" " + child_proof_body.strip())
+
+        # Strategy 5: Uniform indentation from base
+        if is_inline:
+            indent = " " * (base_indent + PROOF_BODY_INDENT_SPACES)
+            # Preserve empty lines (don't convert to empty string)
+            uniform_body = "\n".join(indent + line if line.strip() else line for line in dedented.split("\n"))
+            strategies.append("\n" + uniform_body)
+
+        return strategies
+
+    def _extract_proof_body_ast_guided(  # noqa: C901
+        self,
+        child: TreeNode,
+        *,
+        kimina_client: KiminaClient,
+        server_timeout: int = 60,
+    ) -> str:
+        """
+        Extract proof body from child node.
+
+        Uses AST where available for accurate extraction, falls back to
+        simple text extraction.
+
+        Required imports for this method:
+        - import re
+        - from typing import cast
+        - from kimina_client import KiminaClient
+        - from goedels_poetry.agents.util.common import DEFAULT_IMPORTS, combine_preamble_and_body, remove_default_imports_from_ast
+        - from goedels_poetry.agents.util.kimina_server import parse_kimina_ast_code_response
+        - from goedels_poetry.agents.state import (
+            FormalTheoremProofState,
+            DecomposedFormalTheoremState,
+            TreeNode,
+        )
+        - from goedels_poetry.parsers.ast import AST
+        - ProofReconstructionError is defined at module level in goedels_poetry/state.py (same file as this method)
+
+        Parameters
+        ----------
+        child : TreeNode
+            The child node (FormalTheoremProofState or DecomposedFormalTheoremState)
+
+        Returns
+        -------
+        str
+            The proof body (tactics) as a string
+        """
+        from typing import cast
+
+        from goedels_poetry.agents.state import (
+            DecomposedFormalTheoremState,
+            FormalTheoremProofState,
+        )
+        from goedels_poetry.agents.util.common import (
+            DEFAULT_IMPORTS,
+            combine_preamble_and_body,
+            remove_default_imports_from_ast,
+        )
+        from goedels_poetry.agents.util.kimina_server import parse_kimina_ast_code_response
+        from goedels_poetry.parsers.ast import AST
+
+        if isinstance(child, dict) and "formal_proof" in child and "children" not in child:
+            # Leaf node (FormalTheoremProofState)
+            proof_state = cast(FormalTheoremProofState, child)
+            if proof_state["formal_proof"] is None:
+                # Under assumptions, proven nodes should never have formal_proof is None
+                raise ProofReconstructionError(  # noqa: TRY003
+                    f"Leaf node with hole_name {proof_state.get('hole_name')} has formal_proof is None. "
+                    f"This violates the assumption that all FormalTheoremProofState instances are proven "
+                    f"({proof_state.get('proved')} should be True)."
+                )
+
+            proof_text = str(proof_state["formal_proof"])
+            proof_ast = proof_state.get("ast")
+
+            # AST-based extraction: if AST is available, use it to find proof body
+            # Note: If _extract_proof_body_from_ast() returns None (e.g., AST structure doesn't match expected pattern),
+            # we fall back to regex-based extraction. This is acceptable - the regex fallback handles most cases.
+            if proof_ast is not None and isinstance(proof_ast, AST):
+                proof_body = self._extract_proof_body_from_ast(proof_ast, proof_text)
+                if proof_body is not None:
+                    return proof_body
+
+            # Fallback: simple text extraction if AST not available or AST extraction returned None
+            # If proof_text starts with theorem/lemma, extract after ":=" by
+            # Otherwise return as-is (already tactics)
+            if re.search(r"^\s*(theorem|lemma)\s+", proof_text, re.MULTILINE):
+                match = re.search(r":=\s*by", proof_text)
+                if match:
+                    return proof_text[match.end() :].strip()
+            return proof_text.strip()
+
+        elif isinstance(child, dict) and "children" in child:
+            # Internal node (DecomposedFormalTheoremState) - recursively reconstruct
+            # Note: decomposed_state is a DecomposedFormalTheoremState which is a valid TreeNode
+            decomposed_state = cast(DecomposedFormalTheoremState, child)
+            complete_proof = self._reconstruct_node_proof_ast_based(
+                decomposed_state,  # type: ignore[arg-type]
+                kimina_client=kimina_client,
+                server_timeout=server_timeout,
+            )
+
+            # Extract tactics after ":=" by from complete proof
+            # Note: decomposed_state.get("ast") is the AST of the sketch (with sorry holes), not the reconstructed proof.
+            # We need to re-parse complete_proof to get its AST for accurate extraction.
+            #
+            # Important: complete_proof from _reconstruct_node_proof_ast_based() for decomposed nodes is always just the
+            # proof body (reconstructed sketch with holes replaced), NOT a full theorem declaration. This is because
+            # _reconstruct_node_proof_ast_based() only wraps with theorem signature for root LEAF nodes (not root decomposed nodes).
+            # So we correctly combine it with preamble for re-parsing.
+            #
+            # Get preamble from decomposed_state for combining with complete_proof for parsing
+            preamble = decomposed_state.get("preamble", DEFAULT_IMPORTS)
+
+            # Normalize complete_proof and combine with preamble for parsing
+            normalized_proof = complete_proof if complete_proof.endswith("\n") else complete_proof + "\n"
+            proof_with_preamble = combine_preamble_and_body(preamble, normalized_proof)
+
+            # Re-parse complete_proof to get its AST for extraction
+            ast_response = kimina_client.ast_code(proof_with_preamble, timeout=server_timeout)
+            parsed_ast = parse_kimina_ast_code_response(ast_response)
+
+            proof_body = None  # Initialize to track if AST extraction succeeded
+
+            if parsed_ast.get("error") is None and parsed_ast.get("ast") is not None:
+                # Parse succeeded - create AST and use it for extraction
+                ast_without_imports = remove_default_imports_from_ast(parsed_ast["ast"], preamble=preamble)
+
+                # Calculate body_start for the parsed AST
+                normalized_preamble = preamble.strip()
+                normalized_body = normalized_proof.strip()
+                if not normalized_preamble:
+                    body_start = 0
+                elif not normalized_body:
+                    body_start = len(proof_with_preamble)
+                else:
+                    body_start = len(normalized_preamble) + 2  # +2 for "\n\n"
+
+                # Validate body_start is within bounds (defensive check)
+                if body_start < 0 or body_start > len(proof_with_preamble):
+                    raise ProofReconstructionError(  # noqa: TRY003
+                        f"Invalid body_start ({body_start}) calculated for proof extraction. "
+                        f"proof_with_preamble length: {len(proof_with_preamble)}, "
+                        f"normalized_preamble length: {len(normalized_preamble)}, "
+                        f"normalized_body length: {len(normalized_body)}"
+                    )
+
+                reconstructed_ast = AST(
+                    ast_without_imports,
+                    sorries=parsed_ast.get("sorries"),
+                    source_text=proof_with_preamble,
+                    body_start=body_start,
+                )
+
+                # Use AST-based extraction with the reconstructed proof AST
+                # Pass proof_with_preamble to match the AST's source_text for consistency
+                # (Note: _extract_proof_body_from_ast() doesn't currently use the proof_text parameter,
+                # but passing proof_with_preamble matches the AST structure and is future-proof)
+                proof_body = self._extract_proof_body_from_ast(reconstructed_ast, proof_with_preamble)
+                if proof_body is not None:
+                    # Validate that extracted proof body is not empty
+                    # (AST extraction may return empty string instead of None)
+                    if not proof_body or not proof_body.strip():
+                        # AST extraction returned empty, fall through to regex fallback
+                        proof_body = None
+                    else:
+                        # Successfully extracted using AST
+                        return proof_body
+
+            # Fallback: text-based extraction if AST parsing failed or extraction returned None
+            match = re.search(r":=\s*by", complete_proof)
+            proof_body = complete_proof[match.end() :].strip() if match else complete_proof.strip()
+
+            # Validate proof body is not empty (should not happen under assumptions)
+            if not proof_body or not proof_body.strip():
+                # Enhanced error message: provide context about why extraction might have failed
+                # Determine extraction method used (check if AST parsing succeeded)
+                # Use try-except for defensive programming: parsed_ast might not be defined or might not be a dict
+                try:
+                    extraction_method = (
+                        "AST-based extraction (re-parsed reconstructed proof)"
+                        if (parsed_ast.get("error") is None and parsed_ast.get("ast") is not None)
+                        else "text-based extraction (regex)"
+                    )
+                except (AttributeError, NameError):
+                    # parsed_ast is not defined or not a dict - default to text-based
+                    extraction_method = "text-based extraction (regex)"
+                raise ProofReconstructionError(  # noqa: TRY003
+                    f"Recursively reconstructed proof body is empty or whitespace-only after {extraction_method}. "
+                    f"This should not happen under assumptions (proven child proofs). "
+                    f"The complete_proof from reconstruction was: {repr(complete_proof[:200]) if complete_proof else 'None'}..."
+                )
+            return proof_body
+
+        # Should not reach here - all child types should be handled above
+        raise ProofReconstructionError("Unable to extract proof body from child node. Unknown child type or structure.")  # noqa: TRY003
+
+    def _extract_proof_body_from_ast(  # noqa: C901
+        self, ast: AST, proof_text: str
+    ) -> str | None:
+        """
+        Extract proof body (tactics after ":=" by) from AST structure.
+
+        Uses AST to find the byTactic or tacticSeq node that represents the proof body,
+        then extracts its source text.
+
+        Required imports for this method:
+        - from typing import Any
+        - from goedels_poetry.parsers.util import _ast_to_code
+
+        Parameters
+        ----------
+        ast : AST
+            The AST containing the theorem/lemma with proof
+        proof_text : str
+            The full proof text (fallback if AST extraction fails)
+
+        Returns
+        -------
+        str | None
+            The proof body text, or None if extraction fails
+        """
+        from typing import Any
+
+        from goedels_poetry.parsers.util import _ast_to_code
+
+        ast_dict = ast.get_ast()
+        if not isinstance(ast_dict, dict):
+            return None
+
+        # Find theorem/lemma node
+        def find_theorem(node: Any) -> dict | None:
+            """Recursively find theorem/lemma node."""
+            if isinstance(node, dict):
+                kind = node.get("kind", "")
+                if kind in {"Lean.Parser.Command.theorem", "Lean.Parser.Command.lemma", "Lean.Parser.Command.example"}:
+                    return node
+                # Recurse into args
+                for arg in node.get("args", []):
+                    result = find_theorem(arg)
+                    if result:
+                        return result
+            elif isinstance(node, list):
+                for item in node:
+                    result = find_theorem(item)
+                    if result:
+                        return result
+            return None
+
+        theorem_node = find_theorem(ast_dict)
+        if not theorem_node:
+            return None
+
+        # Find proof body: look for := followed by byTactic or tacticSeq
+        args = theorem_node.get("args", [])
+        seen_assign = False
+        proof_node = None
+
+        for arg in args:
+            # Check if this is the ":=" token
+            if isinstance(arg, dict) and arg.get("val") == ":=":
+                seen_assign = True
+                continue
+
+            # Only look for proof body after ":="
+            if seen_assign and isinstance(arg, dict):
+                kind = arg.get("kind", "")
+                if kind in {"Lean.Parser.Term.byTactic", "Lean.Parser.Tactic.tacticSeq"}:
+                    proof_node = arg
+                    break
+
+        # If not found in flat args, search recursively in nested structures after :=
+        if not proof_node and seen_assign:
+
+            def find_proof_in_node(node: Any) -> dict | None:
+                """Recursively search for byTactic or tacticSeq node in nested structures."""
+                if isinstance(node, dict):
+                    kind = node.get("kind", "")
+                    if kind in {"Lean.Parser.Term.byTactic", "Lean.Parser.Tactic.tacticSeq"}:
+                        return node
+                    for v in node.values():
+                        result = find_proof_in_node(v)
+                        if result:
+                            return result
+                elif isinstance(node, list):
+                    for item in node:
+                        result = find_proof_in_node(item)
+                        if result:
+                            return result
+                return None
+
+            # Search in the part after :=
+            assign_idx = next((i for i, a in enumerate(args) if isinstance(a, dict) and a.get("val") == ":="), None)
+            if assign_idx is not None:
+                for arg in args[assign_idx + 1 :]:
+                    proof_node = find_proof_in_node(arg)
+                    if proof_node:
+                        break
+
+        if not proof_node:
+            return None
+
+        # Extract proof body text from AST node
+        try:
+            proof_body_ast = _ast_to_code(proof_node)
+            proof_body = str(proof_body_ast).strip()
+            # Remove leading "by" keyword if present (byTactic includes it)
+            if proof_body.startswith("by"):
+                proof_body = proof_body[2:].lstrip()
+        except Exception:
+            # AST extraction failed, return None to trigger fallback
+            return None
+        else:
+            return proof_body
+
+    def reconstruct_complete_proof(
+        self,
+        *,
+        server_url: str,
+        server_max_retries: int = 3,
+        server_timeout: int = 60,
+    ) -> str:
+        """
+        Reconstructs the complete Lean4 proof from the proof tree using AST-based methods.
+
+        Uses AST.get_sorry_holes_by_name() for accurate Unicode-safe hole positions
+        and requires syntax validation and semantic validation with KiminaClient.
+
+        Parameters
+        ----------
+        server_url : str
+            Required Kimina server URL for syntax validation and semantic validation
+        server_max_retries : int
+            Max retries for Kimina requests
+        server_timeout : int
+            Timeout for Kimina requests
 
         Returns
         -------
         str
             The complete Lean4 proof text with the stored preamble prefix
         """
-        preamble = self._state._root_preamble or DEFAULT_IMPORTS
+        from kimina_client import KiminaClient
 
-        # If a final proof override was selected (e.g., via Kimina-guided reconstruction),
-        # prefer it so downstream writers don't recompute a failing variant.
-        final_complete_proof = cast(str | None, getattr(self._state, "final_complete_proof", None))
-        if final_complete_proof is not None:
-            return final_complete_proof
+        from goedels_poetry.agents.util.common import DEFAULT_IMPORTS, combine_preamble_and_body
+        from goedels_poetry.agents.util.kimina_server import (
+            parse_kimina_ast_code_response,
+            parse_kimina_check_response,
+        )
+        # ProofReconstructionError is defined at module level in goedels_poetry/state.py (same file as this method)
+
+        preamble = self._state._root_preamble or DEFAULT_IMPORTS
 
         if self._state.formal_theorem_proof is None:
             return combine_preamble_and_body(preamble, "-- No proof available")
 
-        proof_without_preamble = self._reconstruct_node_proof(self._state.formal_theorem_proof)
-        return combine_preamble_and_body(preamble, proof_without_preamble)
-
-    @dataclasses.dataclass(frozen=True)
-    class ReconstructionVariant:
-        """
-        A parameterization of reconstruction normalization steps.
-
-        These toggles are intentionally coarse-grained: Kimina-guided selection tries a bounded
-        set of variants and selects the first that Kimina marks complete.
-        """
-
-        variant_id: str
-        dedent_common: bool = True
-        snap_indent_levels: bool = True
-        rewrite_trailing_apply: bool = True
-        fix_dangling_closing_tactics_after_comments: bool = True
-        snap_self_reference_closers: bool = True
-        dedent_last_closer_out_of_inner_have_by: bool = True
-
-    def _variant_key(self, v: ReconstructionVariant) -> tuple:
-        return (
-            v.dedent_common,
-            v.snap_indent_levels,
-            v.rewrite_trailing_apply,
-            v.fix_dangling_closing_tactics_after_comments,
-            v.snap_self_reference_closers,
-            v.dedent_last_closer_out_of_inner_have_by,
+        # Create KiminaClient (required for syntax validation and semantic validation)
+        kimina_client = KiminaClient(
+            api_url=server_url,
+            http_timeout=server_timeout,
+            n_retries=server_max_retries,
         )
 
-    def _get_reconstruction_variants(self, max_candidates: int) -> list[ReconstructionVariant]:
-        """
-        Deterministically generate a bounded list of reconstruction variants to try.
-
-        The exact set is intentionally internal (not configurable) to avoid exposing
-        implementation details in config.
-        """
-        max_candidates = max(1, int(max_candidates))
-
-        baseline = self.ReconstructionVariant("baseline")
-        seed_variants: list[GoedelsPoetryStateManager.ReconstructionVariant] = [
-            baseline,
-            # Directly addresses the partial.log failure mode.
-            dataclasses.replace(
-                baseline, variant_id="no_comment_fixer", fix_dangling_closing_tactics_after_comments=False
-            ),
-            dataclasses.replace(baseline, variant_id="no_indent_snapping", snap_indent_levels=False),
-            dataclasses.replace(
-                baseline,
-                variant_id="no_offset_extras",
-                fix_dangling_closing_tactics_after_comments=False,
-                snap_self_reference_closers=False,
-                dedent_last_closer_out_of_inner_have_by=False,
-            ),
-            dataclasses.replace(
-                baseline,
-                variant_id="dedent_only",
-                snap_indent_levels=False,
-                rewrite_trailing_apply=False,
-                fix_dangling_closing_tactics_after_comments=False,
-                snap_self_reference_closers=False,
-                dedent_last_closer_out_of_inner_have_by=False,
-            ),
-            dataclasses.replace(
-                baseline,
-                variant_id="minimal",
-                dedent_common=False,
-                snap_indent_levels=False,
-                rewrite_trailing_apply=False,
-                fix_dangling_closing_tactics_after_comments=False,
-                snap_self_reference_closers=False,
-                dedent_last_closer_out_of_inner_have_by=False,
-            ),
-        ]
-
-        variants: list[GoedelsPoetryStateManager.ReconstructionVariant] = []
-        seen: set[tuple] = set()
-
-        def add(v: GoedelsPoetryStateManager.ReconstructionVariant) -> None:
-            key = self._variant_key(v)
-            if key in seen:
-                return
-            seen.add(key)
-            variants.append(v)
-
-        for v in seed_variants:
-            add(v)
-            if len(variants) >= max_candidates:
-                return variants[:max_candidates]
-
-        # If the user allows more candidates than the seed set, expand deterministically by
-        # toggling individual flags off (starting from baseline).
-        toggles = [
-            ("no_dedent_common", {"dedent_common": False}),
-            ("no_rewrite_trailing_apply", {"rewrite_trailing_apply": False}),
-            ("no_snap_self_reference_closers", {"snap_self_reference_closers": False}),
-            ("no_dedent_last_closer", {"dedent_last_closer_out_of_inner_have_by": False}),
-        ]
-        for name, changes in toggles:
-            add(dataclasses.replace(baseline, variant_id=name, **changes))
-            if len(variants) >= max_candidates:
-                break
-
-        return variants[:max_candidates]
-
-    def reconstruct_complete_proof_kimina_guided(
-        self, *, server_url: str, server_max_retries: int, server_timeout: int, max_candidates: int
-    ) -> tuple[str, bool, str]:
-        """
-        Attempt to find a reconstruction variant that Kimina marks complete.
-
-        This is a bounded search over whole-file reconstructions and is intended to run only
-        after a run reports "Proof completed successfully." but final verification fails.
-        """
-        preamble = self._state._root_preamble or DEFAULT_IMPORTS
-        if self._state.formal_theorem_proof is None:
-            proof = combine_preamble_and_body(preamble, "-- No proof available")
-            return proof, False, "No proof available"
-
-        # Lazy import to avoid importing `kimina_client` (and its transitive dependencies)
-        # during test collection on Python < 3.12 where some environments may have incompatible
-        # versions. This function is only invoked in "success-but-final-verification-failed" cases.
-        from goedels_poetry.agents.proof_checker_agent import check_complete_proof
-
-        variants = self._get_reconstruction_variants(max_candidates=max_candidates)
-        last_err = ""
-        for idx, variant in enumerate(variants, start=1):
-            proof_without_preamble = self._reconstruct_node_proof(self._state.formal_theorem_proof, variant=variant)
-            candidate = combine_preamble_and_body(preamble, proof_without_preamble)
-            ok, err = check_complete_proof(
-                candidate, server_url=server_url, server_max_retries=server_max_retries, server_timeout=server_timeout
-            )
-            last_err = err
-
-            if is_debug_enabled():
-                logger.debug(
-                    "Kimina-guided reconstruction attempt %d/%d (%s): %s",
-                    idx,
-                    len(variants),
-                    variant.variant_id,
-                    "passed" if ok else "failed",
-                )
-                if not ok and err:
-                    logger.debug("Kimina-guided reconstruction errors (%s):\n%s", variant.variant_id, err)
-
-            if ok:
-                self._state.reconstruction_attempts = idx
-                self._state.reconstruction_strategy_used = variant.variant_id
-                self._state.final_complete_proof = candidate
-                return candidate, True, ""
-
-        # Record attempts even on failure.
-        self._state.reconstruction_attempts = len(variants)
-        self._state.reconstruction_strategy_used = None
-        return (
-            combine_preamble_and_body(preamble, self._reconstruct_node_proof(self._state.formal_theorem_proof)),
-            False,
-            last_err,
+        # Reconstruct using AST-based method (performs incremental syntax validation)
+        proof_without_preamble = self._reconstruct_node_proof_ast_based(
+            self._state.formal_theorem_proof,
+            kimina_client=kimina_client,
+            server_timeout=server_timeout,
         )
 
-    def _reconstruct_leaf_node_proof(self, formal_proof_state: FormalTheoremProofState) -> str:
-        """
-        Reconstruct proof text for a leaf `FormalTheoremProofState`.
-        """
-        if formal_proof_state["formal_proof"] is not None:
-            proof_text = str(formal_proof_state["formal_proof"])
-            # If this is the root leaf (no parent), ensure the output includes the theorem header.
-            # Avoid regex: if it already starts with the theorem signature, return as-is.
-            if formal_proof_state["parent"] is None:
-                theorem_decl_full = str(formal_proof_state["formal_theorem"]).strip()
-                theorem_sig = self._strip_decl_assignment(theorem_decl_full)
-                # Skip leading empty lines and single-line comments to avoid redundant wrapping
-                leading_skipped = self._skip_leading_trivia(proof_text)
-                if leading_skipped.startswith(theorem_sig):
-                    return proof_text
-                # Otherwise treat stored proof as tactics and wrap once.
-                indent = " " * PROOF_BODY_INDENT_SPACES
-                indented_body = self._indent_proof_body(proof_text, indent)
-                return f"{theorem_sig} := by\n{indented_body}"
-            # Non-root leaves are always tactic bodies used for inlining; return as-is.
-            return proof_text
-        # No proof yet, return the theorem with sorry
-        return f"{formal_proof_state['formal_theorem']} := by sorry\n"
+        complete_proof = combine_preamble_and_body(preamble, proof_without_preamble)
 
-    def _apply_offset_replacements(  # noqa: C901
-        self, sketch: str, children: list[TreeNode], *, variant: ReconstructionVariant | None = None
-    ) -> str:
-        """
-        Apply offset-based replacements for children that have hole metadata.
-        """
-        replacements: list[tuple[int, int, str]] = []
-        missing: list[TreeNode] = []
-
-        for child in children:
-            child_proof_body = self._extract_proof_body(child, variant=variant)
-
-            if isinstance(child, dict) and "hole_start" in child and "hole_end" in child:
-                hole_start = cast(int | None, child.get("hole_start"))
-                hole_end = cast(int | None, child.get("hole_end"))
-                if (
-                    isinstance(hole_start, int)
-                    and isinstance(hole_end, int)
-                    and 0 <= hole_start < hole_end <= len(sketch)
-                ):
-                    # Determine indentation prefix on the line containing the hole.
-                    line_start = sketch.rfind("\n", 0, hole_start) + 1
-                    line_prefix = sketch[line_start:hole_start]
-                    # Leading whitespace at the start of this line (used for inline `by sorry` holes).
-                    line = sketch[
-                        line_start : sketch.find("\n", line_start) if "\n" in sketch[line_start:] else len(sketch)
-                    ]
-                    leading_ws = line[: len(line) - len(line.lstrip(" \t"))]
-
-                    normalized_body = self._normalize_child_proof_body(
-                        child_proof_body, offset_insertion=True, variant=variant
-                    )
-                    body_lines = normalized_body.split("\n")
-                    if not body_lines:
-                        body_lines = ["sorry"]
-
-                    # Two forms of `sorry` holes exist in sketches:
-                    # 1) Standalone line: `    sorry` (hole indentation is pure whitespace)
-                    # 2) Inline: `have h : T := by sorry` (hole indentation includes non-whitespace)
-                    #
-                    # For (1), we can replace the token in-place: the line already contains the correct
-                    # indentation prefix before the token. We only need to indent subsequent lines.
-                    #
-                    # For (2), replacing `sorry` with a multi-line proof must insert a newline and indent
-                    # the *entire* proof body under the surrounding `by`.
-                    inline_hole = bool(line_prefix.strip())
-                    rebuilt_lines: list[str] = []
-                    if inline_hole:
-                        proof_indent = leading_ws + (" " * PROOF_BODY_INDENT_SPACES)
-                        rebuilt_lines.append("")  # turn `by sorry` into `by\n<proof>`
-                        for ln in body_lines:
-                            rebuilt_lines.append(f"{proof_indent}{ln}" if ln.strip() else ln)
-                    else:
-                        indent_prefix = line_prefix
-                        for i, ln in enumerate(body_lines):
-                            if i == 0:
-                                rebuilt_lines.append(ln)
-                            else:
-                                rebuilt_lines.append(f"{indent_prefix}{ln}" if ln.strip() else ln)
-
-                    replacement_text = "\n".join(rebuilt_lines)
-                    replacements.append((hole_start, hole_end, replacement_text))
-                    continue
-
-            missing.append(child)
-
-        if replacements:
-            replacements.sort(key=lambda t: t[0], reverse=True)
-            for start, end, rep in replacements:
-                sketch = sketch[:start] + rep + sketch[end:]
-
-        if missing:
-            logger.warning(
-                "Reconstruction skipped %d child(ren) missing valid hole offsets; "
-                "their `sorry` placeholders will remain in the parent sketch.",
-                len(missing),
+        # REQUIRED: Final syntax validation with ast_code() (should always pass due to incremental syntax validation)
+        # Note: combine_preamble_and_body() should already normalize (strip and add trailing newline),
+        # but we add this normalization defensively in case the implementation changes.
+        normalized_proof = complete_proof if complete_proof.endswith("\n") else complete_proof + "\n"
+        ast_response = kimina_client.ast_code(normalized_proof, timeout=server_timeout)
+        parsed_ast = parse_kimina_ast_code_response(ast_response)
+        if parsed_ast.get("error") is not None:
+            raise ProofReconstructionError(  # noqa: TRY003
+                f"Final syntax validation failed (this should not happen under assumptions): {parsed_ast['error']}\n"
+                f"Reconstructed proof:\n{complete_proof}"
             )
-        return sketch
 
-    def _reconstruct_decomposed_node_proof(
-        self, decomposed_state: DecomposedFormalTheoremState, *, variant: ReconstructionVariant | None = None
-    ) -> str:
-        """
-        Reconstruct proof text for an internal `DecomposedFormalTheoremState` by filling holes.
-        """
-        if decomposed_state["proof_sketch"] is None:
-            return f"{decomposed_state['formal_theorem']} := by sorry\n"
+        # REQUIRED: Final semantic validation with check() (should always pass due to incremental validation)
+        check_response = kimina_client.check(normalized_proof, timeout=server_timeout)
+        parsed_check = parse_kimina_check_response(check_response)
 
-        sketch = str(decomposed_state["proof_sketch"])
+        # Store semantic validation result (should always be True)
+        self._state.proof_validation_result = parsed_check.get("complete", False)
 
-        # Fill holes using absolute offsets recorded during decomposition (hole_start/hole_end).
-        # The legacy name/regex-based reconstruction path has been removed.
-        return self._apply_offset_replacements(sketch, decomposed_state["children"], variant=variant)
+        if not parsed_check.get("complete", False):
+            # This should not happen under assumptions - raise error with diagnostic info
+            errors = parsed_check.get("errors", [])
+            sorries = parsed_check.get("sorries", [])
+            error_parts = []
+            if errors:
+                error_parts.append("Errors:\n" + "\n".join(err.get("data", str(err)) for err in errors))
+            if sorries:
+                error_parts.append(f"Sorries remaining: {len(sorries)}")
+            error_msg = "\n\n".join(error_parts) if error_parts else "Unknown semantic validation failure"
+            raise ProofReconstructionError(  # noqa: TRY003
+                f"Final semantic validation failed (this should not happen under assumptions): {error_msg}\n"
+                f"Reconstructed proof:\n{complete_proof}"
+            )
 
-    def _reconstruct_node_proof(self, node: TreeNode, *, variant: ReconstructionVariant | None = None) -> str:
-        """
-        Recursively reconstructs the proof for a given node in the proof tree.
-
-        Parameters
-        ----------
-        node : TreeNode
-            The node to reconstruct proof for
-
-        Returns
-        -------
-        str
-            The proof text for this node and all its children (without preamble)
-        """
-        # Leaf node
-        if isinstance(node, dict) and "formal_proof" in node and "children" not in node:
-            return self._reconstruct_leaf_node_proof(cast(FormalTheoremProofState, node))
-
-        # Internal node
-        if isinstance(node, dict) and "children" in node:
-            return self._reconstruct_decomposed_node_proof(cast(DecomposedFormalTheoremState, node), variant=variant)
-
-        # Fallback for unexpected node types
-        return "-- Unable to reconstruct proof for this node\n"
-
-    def _extract_proof_body(self, child: TreeNode, *, variant: ReconstructionVariant | None = None) -> str:
-        """
-        Extracts the proof body (tactics after 'by') from a child node.
-
-        Parameters
-        ----------
-        child : TreeNode
-            The child node to extract proof body from
-
-        Returns
-        -------
-        str
-            The proof body (tactic sequence)
-        """
-        if isinstance(child, dict) and "formal_proof" in child and "children" not in child:
-            # This is a FormalTheoremProofState (leaf)
-            formal_proof_state = cast(FormalTheoremProofState, child)
-            if formal_proof_state["formal_proof"] is not None:
-                proof = str(formal_proof_state["formal_proof"])
-                # Extract just the tactics after "by"
-                return self._extract_tactics_after_by(proof)
-            return "sorry"
-        elif isinstance(child, dict) and "children" in child:
-            # This is a DecomposedFormalTheoremState (internal)
-            # Recursively reconstruct this child first
-            child_complete = self._reconstruct_node_proof(child, variant=variant)
-            return self._extract_tactics_after_by(child_complete)
-        return "sorry"
-
-    def _extract_tactics_after_by(self, proof: str) -> str:
-        """
-        Extracts the tactic sequence after 'by' from a proof.
-
-        Parameters
-        ----------
-        proof : str
-            The complete proof text
-
-        Returns
-        -------
-        str
-            The tactic sequence (indented appropriately)
-        """
-        # Check if this looks like a full lemma/theorem statement.
-        #
-        # IMPORTANT: Do NOT treat a leading `have` as a top-level declaration here.
-        # In many prover outputs (and inlining scenarios), the "proof" we receive is already a
-        # tactic script that starts with `have ... := by ...` and ends with `exact ...`.
-        # Stripping tactics after the first `:= by` would remove the binder and leave dangling
-        # references like `exact h_main` (this was observed in partial.log).
-        starts_with_decl = re.search(r"^\s*(lemma|theorem)\s+", proof, re.MULTILINE)
-
-        if starts_with_decl:
-            # This is a full lemma/theorem statement, find the first := by and extract from there
-            match = re.search(r":=\s*by", proof)
-            if match is None:
-                # Has declaration but no := by, return sorry
-                logger.warning(
-                    "_extract_tactics_after_by received a lemma/theorem statement without ':= by'. "
-                    "Returning 'sorry' as fallback."
-                )
-                return "sorry"
-            # Extract everything after the first := by
-            tactics = proof[match.end() :].strip()
-
-            # Check if tactics contain another lemma/theorem (nested)
-            if re.search(r"^\s*(lemma|theorem)\s+", tactics, re.MULTILINE):
-                # Nested lemma, extract from it
-                inner_match = re.search(r":=\s*by", tactics)
-                if inner_match:
-                    tactics = tactics[inner_match.end() :].strip()
-                else:
-                    logger.error("Could not extract tactics from nested lemma/theorem. Returning 'sorry'.")
-                    return "sorry"
-
-            return tactics
-
-        # Not a full declaration, check if it has := by pattern (might be tactics with nested := by)
-        match = re.search(r":=\s*by", proof)
-        if match is None:
-            # No := by pattern, return the whole proof (pure tactics)
-            return proof.strip()
-
-        # Has := by but doesn't start with declaration - this is tactics that contain := by
-        # Return as-is (it's already just tactics)
-        return proof.strip()
+        return complete_proof
 
     def _dedent_proof_body(self, proof_body: str) -> str:
         """
@@ -1943,277 +2707,41 @@ class GoedelsPoetryStateManager:
                 dedented.append(ln)
         return "\n".join(dedented)
 
-    def _snap_proof_indentation_levels(self, text: str) -> str:
+    def _reconstruct_leaf_node_proof(self, formal_proof_state: FormalTheoremProofState) -> str:
         """
-        Normalize indentation transitions using a simple indent stack.
-
-        When indentation decreases, only allow dedenting to a previously-seen indentation
-        level; otherwise, snap to the nearest enclosing (previous) indentation level.
-        This avoids producing intermediate indentation levels like 2 when the script
-        only used 0 and 4, which can break Lean's layout-sensitive parsing.
+        Reconstruct proof text for a leaf `FormalTheoremProofState`.
         """
-        lines = text.split("\n")
-        normalized_lines: list[str] = []
-        indent_stack: list[int] = [0]
+        if formal_proof_state["formal_proof"] is not None:
+            proof_text = str(formal_proof_state["formal_proof"])
+            # If this is the root leaf (no parent), ensure the output includes the theorem header.
+            # Avoid regex: if it already starts with the theorem signature, return as-is.
+            if formal_proof_state["parent"] is None:
+                theorem_decl_full = str(formal_proof_state["formal_theorem"]).strip()
+                theorem_sig = self._strip_decl_assignment(theorem_decl_full).strip()
 
-        for raw in lines:
-            if not raw.strip():
-                normalized_lines.append(raw)
-                continue
+                # Validate theorem signature is not empty
+                if not theorem_sig:
+                    raise ProofReconstructionError(f"Invalid theorem declaration for root node: {theorem_decl_full}")  # noqa: TRY003
 
-            indent = len(raw) - len(raw.lstrip(" "))
-            content = raw.lstrip(" ")
+                # Skip leading empty lines and single-line comments to avoid redundant wrapping
+                leading_skipped = self._skip_leading_trivia(proof_text)
 
-            current = indent_stack[-1]
-            if indent > current:
-                indent_stack.append(indent)
-                normalized_lines.append(raw)
-                continue
-
-            if indent == current:
-                normalized_lines.append(raw)
-                continue
-
-            while len(indent_stack) > 1 and indent < indent_stack[-1]:
-                indent_stack.pop()
-
-            snapped = indent_stack[-1]
-            if indent != snapped:
-                normalized_lines.append((" " * snapped) + content)
-            else:
-                normalized_lines.append(raw)
-
-        return "\n".join(normalized_lines)
-
-    def _fix_dangling_closing_tactics_after_comments(self, text: str) -> str:
-        """
-        Fix a common LLM formatting issue in tactic scripts:
-
-          -- some comment
-            exact h
-
-        where the closing tactic is over-indented relative to the surrounding block. This can
-        break Lean's layout-sensitive parsing after reconstruction.
-
-        This method is intentionally conservative and is only applied for offset-based insertion
-        paths where we know the exact hole indentation.
-        """
-        # Minimal "safe" set of closing tactics to snap when they appear after a comment and are
-        # over-indented. These are common one-line goal-closing tactics in prover outputs.
-        #
-        # Keep this intentionally small to avoid accidentally changing semantics of genuinely
-        # nested tactic blocks.
-        closing_tactic_re = re.compile(
-            r"^(exact|apply|simpa|simp|assumption|trivial|rfl|decide|aesop|omega|linarith|nlinarith|ring_nf|norm_num)\b"
-        )
-        lines = text.split("\n")
-        changed = False
-        prev_nonempty: str | None = None
-        for i, ln in enumerate(lines):
-            if not ln.strip():
-                continue
-            stripped = ln.lstrip(" ")
-            indent = len(ln) - len(stripped)
-            if (
-                prev_nonempty is not None
-                and prev_nonempty.strip().startswith("--")
-                and closing_tactic_re.match(stripped)
-                and indent > 0
-            ):
-                # Snap to column 0 within the child proof body; the caller will indent it to the hole.
-                lines[i] = stripped
-                changed = True
-            prev_nonempty = ln
-
-        if changed:
-            logger.debug("Reconstruction normalized an over-indented closing tactic following a comment.")
-        return "\n".join(lines)
-
-    def _snap_self_reference_closers_to_have_indent(self, text: str) -> str:
-        """
-        Another common LLM formatting error during inlining:
-
-          have h_main : P := by
-            ...
-            exact h_main
-
-        If `exact h_main` is indented under the `have` line, Lean treats it as part of the inner
-        `by` block (where `h_main` is not yet in scope), leading to unsolved goals / layout errors.
-
-        We conservatively snap any self-referencing closing tactics (`exact/apply/simpa using`) back
-        to the indentation level of the corresponding `have` declaration.
-        """
-        have_re = re.compile(r"^(\s*)have\s+([^\s:(]+)\s*:")
-        close_re_tpl = r"^\s*(?:exact|apply)\s+{name}\b|^\s*simpa\s+using\s+{name}\b"
-
-        lines = text.split("\n")
-        have_indents: dict[str, int] = {}
-        for ln in lines:
-            m = have_re.match(ln)
-            if m:
-                have_indents[m.group(2)] = len(m.group(1))
-
-        if not have_indents:
-            return text
-
-        changed = False
-        for i, ln in enumerate(lines):
-            if not ln.strip():
-                continue
-            stripped = ln.lstrip(" ")
-            indent = len(ln) - len(stripped)
-            for name, have_indent in have_indents.items():
-                if indent <= have_indent:
-                    continue
-                close_re = re.compile(close_re_tpl.format(name=re.escape(name)))
-                if close_re.match(stripped):
-                    lines[i] = (" " * have_indent) + stripped
-                    changed = True
-                    break
-
-        if changed:
-            logger.debug("Reconstruction snapped a self-referencing closer back to its `have` indentation.")
-        return "\n".join(lines)
-
-    def _dedent_last_closer_out_of_inner_have_by(self, text: str) -> str:
-        """
-        Handle a common layout pitfall in nested `have ... := by` blocks.
-
-        LLMs often emit a child proof of the form:
-
-          have h_main : P := by
-            simpa using h₁
-            rfl
-
-        where the final line (`rfl` here) is intended to close the *outer* goal, but is indented as
-        if it were still inside the inner `by` block. This can produce "no goals to be solved" or
-        leave the outer goal unsolved after inlining.
-
-        We conservatively dedent the *last non-empty line* if:
-        - it is indented under a `have ... := by` line, and
-        - it matches a small goal-closing tactic set, and
-        - it immediately follows another goal-closing tactic line at the same inner indentation.
-
-        This is only applied for offset-based insertion paths.
-        """
-        lines = text.split("\n")
-        last_nonempty = -1
-        for i in range(len(lines) - 1, -1, -1):
-            if lines[i].strip():
-                last_nonempty = i
-                break
-        if last_nonempty == -1:
-            return text
-
-        have_by_re = re.compile(r"^(\s*)have\s+[^\s:(]+\s*:.*?:=(?:\s|--[^\n]*|/-.*?-/)*by\b")
-        closer_re = re.compile(r"^(exact|apply|simpa|simp|assumption|trivial|rfl|decide)\b")
-
-        current_have_indent: int | None = None
-        inner_indent: int | None = None
-        prev_nonempty_idx: int | None = None
-        prev_nonempty_indent: int | None = None
-
-        for i, ln in enumerate(lines):
-            if not ln.strip():
-                continue
-            stripped = ln.lstrip(" ")
-            indent = len(ln) - len(stripped)
-
-            m_have = have_by_re.match(ln)
-            if m_have:
-                current_have_indent = len(m_have.group(1))
-                inner_indent = current_have_indent + PROOF_BODY_INDENT_SPACES
-
-            # If we've dedented back out, drop the current have context.
-            if current_have_indent is not None and indent <= current_have_indent and not m_have:
-                current_have_indent = None
-                inner_indent = None
-
-            if (
-                i == last_nonempty
-                and current_have_indent is not None
-                and inner_indent is not None
-                and indent == inner_indent
-                and closer_re.match(stripped)
-                and prev_nonempty_idx is not None
-                and prev_nonempty_indent == inner_indent
-                and closer_re.match(lines[prev_nonempty_idx].lstrip(" "))
-            ):
-                lines[i] = (" " * current_have_indent) + stripped
-                logger.debug("Reconstruction dedented final closing tactic out of inner `have ... := by` block.")
-                return "\n".join(lines)
-
-            prev_nonempty_idx = i
-            prev_nonempty_indent = indent
-
-        return text
-
-    def _rewrite_trailing_apply_of_have_to_exact(self, text: str) -> str:
-        """
-        If the last non-empty line is `apply <name>` and the script previously defines
-        `have <name> : ...`, rewrite it to `exact <name>`.
-        """
-        lines = text.split("\n")
-        last_idx = -1
-        for i in range(len(lines) - 1, -1, -1):
-            if lines[i].strip():
-                last_idx = i
-                break
-        if last_idx == -1:
-            return text
-
-        m = re.match(r"^(\s*)apply\s+([^\s]+)\s*$", lines[last_idx])
-        if not m:
-            return text
-
-        base_indent, name = m.group(1), m.group(2)
-        if not re.search(rf"\bhave\s+{re.escape(name)}\s*:", text):
-            return text
-
-        lines[last_idx] = f"{base_indent}exact {name}"
-        return "\n".join(lines)
-
-    def _normalize_child_proof_body(
-        self,
-        proof_body: str,
-        *,
-        offset_insertion: bool = False,
-        variant: ReconstructionVariant | None = None,
-    ) -> str:
-        """
-        Normalize a child proof body to be safe for textual inlining.
-
-        This handles two common failure modes seen in partial logs:
-        1) Mis-indentation where a line dedents to an indentation level that never occurred before
-           (e.g., top-level 0, nested 4, then a line at 2). Lean is layout-sensitive, and this can
-           produce "expected command" errors.
-        2) Prover scripts that build `have h_main : goal := by ...` and then end with
-           `apply h_main` (which often fails to close the goal). Inlining is more reliable when the
-           script ends with `exact h_main`.
-        """
-        # Default behavior (variant=None) matches historical behavior: apply all normalizations.
-        v = variant or self.ReconstructionVariant("default")
-
-        text = proof_body
-        if v.dedent_common:
-            # First remove any common indentation (helps when the entire proof is shifted right).
-            text = self._dedent_proof_body(text)
-        if v.snap_indent_levels:
-            # Then snap indentation transitions to valid previously-seen indentation levels.
-            text = self._snap_proof_indentation_levels(text)
-        if v.rewrite_trailing_apply:
-            # Finally, rewrite trailing `apply <haveName>` into `exact <haveName>` when applicable.
-            text = self._rewrite_trailing_apply_of_have_to_exact(text)
-
-        # Additional normalization is only used for offset-based insertion (AST-guided) paths.
-        if offset_insertion:
-            if v.fix_dangling_closing_tactics_after_comments:
-                text = self._fix_dangling_closing_tactics_after_comments(text)
-            if v.snap_self_reference_closers:
-                text = self._snap_self_reference_closers_to_have_indent(text)
-            if v.dedent_last_closer_out_of_inner_have_by:
-                text = self._dedent_last_closer_out_of_inner_have_by(text)
-        return text
+                # Use normalized string comparison to handle multiline theorem signatures
+                # This handles cases where theorem signature and proof_text have different formatting
+                # (e.g., single-line vs multiline signatures)
+                normalized_sig = " ".join(theorem_sig.split())
+                normalized_leading = " ".join(leading_skipped.split())
+                if normalized_leading.startswith(normalized_sig):
+                    # Already has theorem signature, return as-is
+                    return proof_text
+                # Otherwise treat stored proof as tactics and wrap once.
+                indent = " " * PROOF_BODY_INDENT_SPACES
+                indented_body = self._indent_proof_body(proof_text, indent)
+                return f"{theorem_sig} := by\n{indented_body}"
+            # Non-root leaves are always tactic bodies used for inlining; return as-is.
+            return proof_text
+        # No proof yet, return the theorem with sorry
+        return f"{formal_proof_state['formal_theorem']} := by sorry\n"
 
     def _skip_leading_trivia(self, text: str) -> str:
         """
@@ -2247,26 +2775,95 @@ class GoedelsPoetryStateManager:
         idx = formal_decl.find(":=")
         return formal_decl[:idx].rstrip() if idx != -1 else formal_decl
 
+    def _calculate_line_indent(self, line: str) -> int:
+        """
+        Helper to calculate indentation of a line.
+
+        Returns the number of leading whitespace characters.
+        """
+        return len(line) - len(line.lstrip())
+
     def _indent_proof_body(self, proof_body: str, indent: str) -> str:
         """
         Indents each line of the proof body.
+
+        For mixed indentation (some lines have 0 indent, others don't),
+        preserves relative indentation using minimum non-zero indent as reference.
 
         Parameters
         ----------
         proof_body : str
             The proof body to indent
         indent : str
-            The indentation string to add
+            The base indentation string (typically spaces).
+            Expected to be non-empty in practice. If empty, relative structure
+            is preserved but no base indent is applied.
 
         Returns
         -------
         str
-            The indented proof body
+            The indented proof body with relative structure preserved for mixed cases
+
+        Note
+        ----
+        The indent parameter is always spaces in practice (Lean 4 convention).
+        All call sites create indent as " " * n where n >= 0. If n = 0, indent
+        will be empty string, which is handled correctly but rare in practice.
         """
+        # Optional: Defensive check for tab characters
+        if "\t" in indent:
+            # Log warning - Lean 4 uses spaces, tabs may cause misalignment
+            # Note: Could use logger.warning() if logging is available
+            pass
+
         lines = proof_body.split("\n")
+
+        # Step 1: Detect mixed indentation
+        indents = []
+        for ln in lines:
+            if not ln.strip():
+                continue
+            indent_count = self._calculate_line_indent(ln)
+            indents.append(indent_count)
+
+        # Check for mixed indentation: min is 0 but others exist
+        is_mixed_indentation = False
+        min_non_zero = 0
+        if indents and min(indents) == 0 and any(i > 0 for i in indents):
+            is_mixed_indentation = True
+            non_zero_indents = [i for i in indents if i > 0]
+            min_non_zero = min(non_zero_indents) if non_zero_indents else 0
+
+            # Step 2: Handle mixed indentation case
+        if is_mixed_indentation:
+            indent_len = len(indent)
+            result_lines = []
+
+            for line in lines:
+                if not line.strip():
+                    # Empty or whitespace-only line: preserve as-is
+                    result_lines.append(line)
+                else:
+                    line_indent = self._calculate_line_indent(line)
+                    # Use max(0, ...) to ensure lines with indent <= min_non_zero
+                    # get base indent (clamped to avoid negative offsets)
+                    relative_offset = max(0, line_indent - min_non_zero)
+
+                    # New indent = base indent + relative offset
+                    new_indent_len = indent_len + relative_offset
+                    new_indent = " " * new_indent_len
+
+                    # Strip original indent and add new indent
+                    stripped_line = line.lstrip()
+                    result_lines.append(new_indent + stripped_line)
+
+            result = "\n".join(result_lines)
+            return result
+
+        # Step 3: Normal case (backward compatible behavior)
         indented_lines = []
         for line in lines:
-            if line.strip():  # Only indent non-empty lines
+            if line.strip():
                 indented_lines.append(indent + line)
             else:
                 indented_lines.append(line)
