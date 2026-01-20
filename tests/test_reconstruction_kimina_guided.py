@@ -12,11 +12,15 @@ from typing import cast
 
 import pytest
 
+# Import DEFAULT_IMPORTS unconditionally since it doesn't depend on kimina_client
+# and is used as a default argument in function definitions
+from goedels_poetry.agents.util.common import DEFAULT_IMPORTS
+
 # Try to import the required modules - skip all tests if imports fail
 try:
     from goedels_poetry.agents.proof_checker_agent import check_complete_proof
     from goedels_poetry.agents.state import DecomposedFormalTheoremState, FormalTheoremProofState
-    from goedels_poetry.agents.util.common import DEFAULT_IMPORTS, combine_preamble_and_body
+    from goedels_poetry.agents.util.common import combine_preamble_and_body
     from goedels_poetry.state import GoedelsPoetryState, GoedelsPoetryStateManager
     from goedels_poetry.util.tree import TreeNode
 
