@@ -52,7 +52,15 @@ def _handle_processing_error(theorem_file: Path, error: Exception) -> None:
     console.print(f"[bold yellow]Error details saved to {output_file.name}[/bold yellow]")
 
 
-def _write_proof_result(theorem_file: Path, state_manager: "GoedelsPoetryStateManager", console: Console) -> None:
+def _write_proof_result(
+    theorem_file: Path,
+    state_manager: "GoedelsPoetryStateManager",
+    console: Console,
+    *,
+    server_url: str | None = None,
+    server_max_retries: int | None = None,
+    server_timeout: int | None = None,
+) -> None:
     """
     Write proof result to appropriate file based on completion status and validation result.
 
@@ -60,7 +68,19 @@ def _write_proof_result(theorem_file: Path, state_manager: "GoedelsPoetryStateMa
         theorem_file: The theorem file being processed
         state_manager: The state manager containing proof results
         console: Console for output messages
+        server_url: Kimina server URL (required for reconstruction)
+        server_max_retries: Max retries for Kimina requests
+        server_timeout: Timeout for Kimina requests
     """
+    from goedels_poetry.config.kimina_server import KIMINA_LEAN_SERVER
+    from goedels_poetry.state import ProofReconstructionError
+
+    # Use provided values or defaults from config
+    final_server_url = server_url or KIMINA_LEAN_SERVER["url"]
+    final_server_max_retries = (
+        server_max_retries if server_max_retries is not None else KIMINA_LEAN_SERVER["max_retries"]
+    )
+    final_server_timeout = server_timeout if server_timeout is not None else KIMINA_LEAN_SERVER["timeout"]
 
     # Determine output filename based on completion status and validation result
     if state_manager.reason == "Proof completed successfully.":
@@ -74,8 +94,12 @@ def _write_proof_result(theorem_file: Path, state_manager: "GoedelsPoetryStateMa
 
         try:
             # Note: Final verification already performed in framework.finish()
-            # No need to verify again here
-            complete_proof = state_manager.reconstruct_complete_proof()
+            # No need to verify again here, but reconstruction still needs server config
+            complete_proof = state_manager.reconstruct_complete_proof(
+                server_url=final_server_url,
+                server_max_retries=final_server_max_retries,
+                server_timeout=final_server_timeout,
+            )
             output_file.write_text(complete_proof, encoding="utf-8")
             if validation_result is True:
                 console.print(f"[bold green]✓ Successfully proved and saved to {output_file.name}[/bold green]")
@@ -83,6 +107,10 @@ def _write_proof_result(theorem_file: Path, state_manager: "GoedelsPoetryStateMa
                 console.print(
                     f"[bold yellow]⚠ Proof completed but validation failed, saved to {output_file.name}[/bold yellow]"
                 )
+        except ProofReconstructionError as e:
+            error_message = f"Proof completed but error reconstructing proof: {e}\n{traceback.format_exc()}"
+            output_file.write_text(error_message, encoding="utf-8")
+            console.print(f"[bold yellow]⚠ Proof had errors, details saved to {output_file.name}[/bold yellow]")
         except Exception as e:
             error_message = f"Proof completed but error reconstructing proof: {e}\n{traceback.format_exc()}"
             output_file.write_text(error_message, encoding="utf-8")
@@ -166,6 +194,8 @@ def process_theorems_from_directory(
     console.print(f"[bold blue]Found {len(theorem_files)} theorem file(s) to process[/bold blue]")
 
     # Process each theorem file
+    # Note: Each theorem is processed in its own try-except block to ensure that if one theorem
+    # fails with an exception, processing continues with the remaining theorems in the directory.
     for theorem_file in theorem_files:
         console.print(f"\n{'=' * 80}")
         console.print(f"[bold cyan]Processing: {theorem_file.name}[/bold cyan]")
@@ -193,9 +223,18 @@ def process_theorems_from_directory(
             framework.run()
 
             # Write proof result to appropriate file
-            _write_proof_result(theorem_file, state_manager, console)
+            _write_proof_result(
+                theorem_file,
+                state_manager,
+                console,
+                server_url=config.kimina_lean_server_url,
+                server_max_retries=config.kimina_lean_server_max_retries,
+                server_timeout=config.kimina_lean_server_timeout,
+            )
 
         except Exception as e:
+            # Catch any exception (including ProofReconstructionError) and continue processing
+            # remaining theorems. The error is logged and saved to a .failed-proof file.
             _handle_processing_error(theorem_file, e)
             continue
 
