@@ -4,6 +4,8 @@ from typing import Any, cast
 
 from kimina_client.models import AstModuleResponse, CheckResponse, CommandResponse, Message
 
+from goedels_poetry.parsers.util.hypothesis_extraction import extract_hypotheses_from_unsolved_goals_data
+
 
 def parse_kimina_check_response(check_response: CheckResponse) -> dict:
     """
@@ -88,7 +90,7 @@ def parse_kimina_ast_code_response(ast_code_response: AstModuleResponse) -> dict
     return parsed_response
 
 
-def extract_hypotheses_from_check_response(parsed_check_response: dict) -> list[str]:  # noqa: C901
+def extract_hypotheses_from_check_response(parsed_check_response: dict) -> list[str]:
     """
     Extract hypothesis strings from "unsolved goals" error messages in a parsed check response.
 
@@ -132,17 +134,7 @@ def extract_hypotheses_from_check_response(parsed_check_response: dict) -> list[
             continue
 
         found_unsolved_goals = True
-        lines = data.splitlines()
-
-        # Process lines after "unsolved goals" (first line)
-        for line in lines[1:]:
-            stripped = line.strip()
-            # Stop at the goal line (starts with ⊢ or \u22a2)
-            if stripped.startswith("⊢") or stripped.startswith("\u22a2"):
-                break
-            # Skip blank lines for robustness (kimina server shouldn't produce them, but be safe)
-            if stripped:
-                hypotheses.append(stripped)
+        hypotheses.extend(extract_hypotheses_from_unsolved_goals_data(data))
 
     if not found_unsolved_goals:
         raise ValueError('No error message contains "unsolved goals" in its data field')  # noqa: TRY003
