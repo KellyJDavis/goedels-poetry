@@ -16,6 +16,7 @@ if TYPE_CHECKING:
 
 app = typer.Typer()
 console = Console()
+GOEDELS_POETRY_DEBUG = bool(os.environ.get("GOEDELS_POETRY_DEBUG"))
 
 
 def _has_preamble(code: str) -> bool:
@@ -126,6 +127,8 @@ def _write_proof_result(
 def process_single_theorem(
     formal_theorem: str | None = None,
     informal_theorem: str | None = None,
+    *,
+    start_with_decomposition: bool = False,
 ) -> None:
     """
     Process a single theorem (either formal or informal) and output proof to stdout.
@@ -135,18 +138,28 @@ def process_single_theorem(
 
     config = GoedelsPoetryConfig()
 
-    if formal_theorem:
+    if formal_theorem is not None:
         # Normalize escape sequences (e.g., convert literal \n to actual newline)
         formal_theorem = normalize_escape_sequences(formal_theorem)
-        if not _has_preamble(formal_theorem):
+        if (not start_with_decomposition) and (not _has_preamble(formal_theorem)):
             console.print("[bold red]Error:[/bold red] Formal theorems must include a Lean header (imports/options).")
             raise typer.Exit(code=1)
-        initial_state = GoedelsPoetryState(formal_theorem=formal_theorem)
-        console.print("[bold blue]Processing formal theorem...[/bold blue]")
+        initial_state = GoedelsPoetryState(
+            formal_theorem=formal_theorem,
+            start_with_decomposition=start_with_decomposition,
+        )
+        if start_with_decomposition:
+            console.print(
+                "[bold blue]DEBUG: Decomposing formal theorem immediately (skipping initial syntax checks)...[/bold blue]"
+            )
+        else:
+            console.print("[bold blue]Processing formal theorem...[/bold blue]")
     else:
+        if informal_theorem is None:
+            console.print("[bold red]Error:[/bold red] You must provide either a formal or informal theorem.")
+            raise typer.Exit(code=1)
         # Normalize escape sequences (e.g., convert literal \n to actual newline)
-        # informal_theorem is guaranteed to be non-None by calling code (main function logic)
-        informal_theorem = normalize_escape_sequences(informal_theorem)  # type: ignore[arg-type]
+        informal_theorem = normalize_escape_sequences(informal_theorem)
         initial_state = GoedelsPoetryState(informal_theorem=informal_theorem)
         console.print("[bold blue]Processing informal theorem...[/bold blue]")
 
@@ -164,6 +177,8 @@ def process_theorems_from_directory(
     directory: Path,
     file_extension: str,
     is_formal: bool,
+    *,
+    start_with_decomposition: bool = False,
 ) -> None:
     """
     Process all theorem files from a directory and write proofs to .proof files.
@@ -206,13 +221,16 @@ def process_theorems_from_directory(
             if theorem_content is None:
                 continue
 
-            if is_formal and not _has_preamble(theorem_content):
+            if is_formal and (not start_with_decomposition) and (not _has_preamble(theorem_content)):
                 _handle_missing_header(theorem_file)
                 continue
 
             config = GoedelsPoetryConfig()
             initial_state = (
-                GoedelsPoetryState(formal_theorem=theorem_content)
+                GoedelsPoetryState(
+                    formal_theorem=theorem_content,
+                    start_with_decomposition=start_with_decomposition,
+                )
                 if is_formal
                 else GoedelsPoetryState(informal_theorem=theorem_content)
             )
@@ -241,8 +259,131 @@ def process_theorems_from_directory(
     console.print("\n[bold blue]Finished processing all theorem files[/bold blue]")
 
 
-@app.command()
-def main(
+def _main_router(  # noqa: C901
+    *,
+    formal_theorem: str | None,
+    informal_theorem: str | None,
+    formal_theorems: Path | None,
+    informal_theorems: Path | None,
+    decompose_formal_theorem: str | None = None,
+    decompose_formal_theorems: Path | None = None,
+) -> None:
+    """
+    Shared CLI entrypoint logic for both debug and non-debug command signatures.
+    """
+    option_bools = [
+        formal_theorem is not None,
+        informal_theorem is not None,
+        formal_theorems is not None,
+        informal_theorems is not None,
+    ]
+    if GOEDELS_POETRY_DEBUG:
+        option_bools += [
+            decompose_formal_theorem is not None,
+            decompose_formal_theorems is not None,
+        ]
+
+    options_provided = sum(option_bools)
+
+    if options_provided == 0:
+        console.print("[bold red]Error:[/bold red] You must provide exactly one of the following options:")
+        console.print("  --formal-theorem (-ft): A single formal theorem")
+        console.print("  --informal-theorem (-ift): A single informal theorem")
+        console.print("  --formal-theorems (-fts): Directory of formal theorems")
+        console.print("  --informal-theorems (-ifts): Directory of informal theorems")
+        if GOEDELS_POETRY_DEBUG:
+            console.print(
+                "  --decompose-formal-theorem (-dfs): DEBUG: Immediately decompose a single formal theorem (skips initial header/preamble requirement and root syntax check)"
+            )
+            console.print(
+                "  --decompose-formal-theorems (-dfts): DEBUG: Immediately decompose all .lean files in a directory (skips initial header/preamble requirement and root syntax check)"
+            )
+        raise typer.Exit(code=1)
+
+    if options_provided > 1:
+        console.print("[bold red]Error:[/bold red] Only one option can be provided at a time")
+        raise typer.Exit(code=1)
+
+    # Process based on which option was provided
+    if formal_theorem is not None:
+        process_single_theorem(formal_theorem=formal_theorem)
+    elif informal_theorem is not None:
+        process_single_theorem(informal_theorem=informal_theorem)
+    elif formal_theorems is not None:
+        process_theorems_from_directory(formal_theorems, ".lean", is_formal=True)
+    elif informal_theorems is not None:
+        process_theorems_from_directory(informal_theorems, ".txt", is_formal=False)
+    elif decompose_formal_theorem is not None:
+        process_single_theorem(formal_theorem=decompose_formal_theorem, start_with_decomposition=True)
+    elif decompose_formal_theorems is not None:
+        process_theorems_from_directory(
+            decompose_formal_theorems,
+            ".lean",
+            is_formal=True,
+            start_with_decomposition=True,
+        )
+
+
+def _main_debug(
+    formal_theorem: str | None = typer.Option(
+        None,
+        "--formal-theorem",
+        "-ft",
+        help="A single formal theorem to prove (e.g., 'theorem example : 1 + 1 = 2 := by sorry')",
+    ),
+    informal_theorem: str | None = typer.Option(
+        None,
+        "--informal-theorem",
+        "-ift",
+        help="A single informal theorem to prove (e.g., 'Prove that 3 cannot be written as the sum of two cubes.')",
+    ),
+    formal_theorems: Path | None = typer.Option(
+        None,
+        "--formal-theorems",
+        "-fts",
+        help="Directory containing .lean files with formal theorems to prove",
+    ),
+    informal_theorems: Path | None = typer.Option(
+        None,
+        "--informal-theorems",
+        "-ifts",
+        help="Directory containing .txt files with informal theorems to prove",
+    ),
+    decompose_formal_theorem: str | None = typer.Option(
+        None,
+        "--decompose-formal-theorem",
+        "-dfs",
+        help=(
+            "DEBUG: A single formal theorem to prove (e.g., 'theorem example : 1 + 1 = 2 := by sorry') "
+            "that is immediately decomposed (skips initial header/preamble requirement and root syntax check)"
+        ),
+    ),
+    decompose_formal_theorems: Path | None = typer.Option(
+        None,
+        "--decompose-formal-theorems",
+        "-dfts",
+        help=(
+            "DEBUG: Directory containing .lean files with formal theorems to prove; "
+            "each is immediately decomposed (skips initial header/preamble requirement and root syntax check)"
+        ),
+    ),
+) -> None:
+    """
+    Gödel's Poetry: An automated theorem proving system.
+
+    Provide exactly one option to process theorems.
+    """
+    _main_router(
+        formal_theorem=formal_theorem,
+        informal_theorem=informal_theorem,
+        formal_theorems=formal_theorems,
+        informal_theorems=informal_theorems,
+        decompose_formal_theorem=decompose_formal_theorem,
+        decompose_formal_theorems=decompose_formal_theorems,
+    )
+
+
+def _main_nodebug(
     formal_theorem: str | None = typer.Option(
         None,
         "--formal-theorem",
@@ -271,38 +412,20 @@ def main(
     """
     Gödel's Poetry: An automated theorem proving system.
 
-    Provide exactly one of the four options to process theorems.
+    Provide exactly one option to process theorems.
     """
-    # Count how many options were provided
-    options_provided = sum([
-        formal_theorem is not None,
-        informal_theorem is not None,
-        formal_theorems is not None,
-        informal_theorems is not None,
-    ])
+    _main_router(
+        formal_theorem=formal_theorem,
+        informal_theorem=informal_theorem,
+        formal_theorems=formal_theorems,
+        informal_theorems=informal_theorems,
+    )
 
-    # Ensure exactly one option is provided
-    if options_provided == 0:
-        console.print("[bold red]Error:[/bold red] You must provide exactly one of the following options:")
-        console.print("  --formal-theorem (-ft): A single formal theorem")
-        console.print("  --informal-theorem (-ift): A single informal theorem")
-        console.print("  --formal-theorems (-fts): Directory of formal theorems")
-        console.print("  --informal-theorems (-ifts): Directory of informal theorems")
-        raise typer.Exit(code=1)
 
-    if options_provided > 1:
-        console.print("[bold red]Error:[/bold red] Only one option can be provided at a time")
-        raise typer.Exit(code=1)
-
-    # Process based on which option was provided
-    if formal_theorem:
-        process_single_theorem(formal_theorem=formal_theorem)
-    elif informal_theorem:
-        process_single_theorem(informal_theorem=informal_theorem)
-    elif formal_theorems:
-        process_theorems_from_directory(formal_theorems, ".lean", is_formal=True)
-    elif informal_theorems:
-        process_theorems_from_directory(informal_theorems, ".txt", is_formal=False)
+if GOEDELS_POETRY_DEBUG:
+    app.command()(_main_debug)
+else:
+    app.command()(_main_nodebug)
 
 
 if __name__ == "__main__":
