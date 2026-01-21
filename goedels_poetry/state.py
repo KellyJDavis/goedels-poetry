@@ -66,12 +66,21 @@ class ProofReconstructionError(Exception):
 
 
 class GoedelsPoetryState:
-    def __init__(self, formal_theorem: str | None = None, informal_theorem: str | None = None):
+    def __init__(
+        self,
+        formal_theorem: str | None = None,
+        informal_theorem: str | None = None,
+        *,
+        start_with_decomposition: bool = False,
+    ):
         # Check that the proper number of arguments has been provided
         if (formal_theorem is None) and (informal_theorem is None):
             raise ValueError("Either 'formal_theorem' xor 'informal_theorem' must be provided")  # noqa: TRY003
         if (formal_theorem is not None) and (informal_theorem is not None):
             raise ValueError("Only one of 'formal_theorem' or 'informal_theorem' can be provided")  # noqa: TRY003
+
+        # Debug mode: start formal theorem processing directly in decomposition (skips initial root syntax checking)
+        self.start_with_decomposition: bool = start_with_decomposition
 
         # Introduce a bool to indicate if the proof is finished unable to be finished
         self.is_finished: bool = False
@@ -101,9 +110,14 @@ class GoedelsPoetryState:
         if formal_theorem is not None:
             preamble, body = split_preamble_and_body(formal_theorem)
             if not preamble.strip():
-                raise ValueError(MISSING_FORMAL_PREAMBLE_MSG)
+                if not start_with_decomposition:
+                    raise ValueError(MISSING_FORMAL_PREAMBLE_MSG)
+                # Debug-only path: allow missing preamble by synthesizing a default.
+                preamble = ensure_mandatory_preamble(DEFAULT_IMPORTS)
+                body = formal_theorem.strip()
+            else:
+                preamble = ensure_mandatory_preamble(preamble)
 
-            preamble = ensure_mandatory_preamble(preamble)
             self._root_preamble = preamble
             initial_formal_state = FormalTheoremProofState(
                 parent=None,
@@ -400,6 +414,28 @@ class GoedelsPoetryStateManager:
         # This state should not be accessed directly. All the methods
         # that update the state have logic to save checkpoints.
         self._state = state
+
+        # Debug-only behavior: allow starting from decomposition without initial syntax checking.
+        if getattr(self._state, "start_with_decomposition", False):
+            self.enqueue_for_decomposition_first()
+
+    def enqueue_for_decomposition_first(self) -> None:
+        """
+        DEBUG: Convert the root FormalTheoremProofState into a DecomposedFormalTheoremState and
+        seed the decomposition pipeline immediately.
+
+        This intentionally skips initial root theorem syntax checking and proving.
+        """
+        if self._state.formal_theorem_proof is None:
+            return
+
+        root = cast(FormalTheoremProofState, self._state.formal_theorem_proof)
+
+        # Ensure no syntax-validation work is pending for the root.
+        self._state.proof_syntax_queue.clear()
+
+        # Convert the root theorem to a decomposition node and enqueue it.
+        self._queue_proofs_for_decomposition([root])
 
     @property
     def is_finished(self) -> bool:
