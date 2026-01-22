@@ -2,6 +2,14 @@ from __future__ import annotations
 
 from typing import Any, cast
 
+# Note: This import may fail on Python 3.11 due to a compatibility issue between
+# kimina-ast-client and Pydantic 2.11.9. kimina-ast-client uses typing.TypedDict
+# but Pydantic 2.11.9 requires typing_extensions.TypedDict on Python < 3.12.
+# This is a known issue with kimina-ast-client that needs to be fixed upstream.
+# If you encounter this error, you can:
+# 1. Use Python 3.10, 3.12, or 3.13 instead
+# 2. Wait for kimina-ast-client to release a fix
+# 3. Report the issue to kimina-ast-client maintainers
 from kimina_client.models import AstModuleResponse, CheckResponse, CommandResponse, Message
 
 from goedels_poetry.parsers.util.hypothesis_extraction import extract_hypotheses_from_unsolved_goals_data
