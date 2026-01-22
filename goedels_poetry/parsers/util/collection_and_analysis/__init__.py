@@ -17,6 +17,13 @@ from .theorem_binders import (
     __find_earlier_bindings,
     __parse_pi_binders_from_type,
 )
+from .variable_extraction import (
+    extract_lemma_parameters_from_ast,
+    extract_outer_scope_variables_ast_based,
+    extract_variables_from_check_response,
+    extract_variables_with_origin,
+    find_variable_declaration_in_ast,
+)
 
 __all__ = [
     "__collect_defined_names",
@@ -29,4 +36,10 @@ __all__ = [
     "__find_enclosing_theorem",
     "__is_referenced_in",
     "__parse_pi_binders_from_type",
+    # Phase 2: Variable extraction functions
+    "extract_lemma_parameters_from_ast",
+    "extract_outer_scope_variables_ast_based",
+    "extract_variables_from_check_response",
+    "extract_variables_with_origin",
+    "find_variable_declaration_in_ast",
 ]
