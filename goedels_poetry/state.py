@@ -1799,6 +1799,13 @@ class GoedelsPoetryStateManager:
             parse_kimina_check_response,
         )
         from goedels_poetry.parsers.ast import AST
+        from goedels_poetry.parsers.util.collection_and_analysis.variable_extraction import (
+            extract_outer_scope_variables_ast_based,
+            extract_variables_with_origin,
+        )
+        from goedels_poetry.parsers.util.collection_and_analysis.variable_renaming import (
+            rename_conflicting_variables_ast_based,
+        )
         # ProofReconstructionError is defined at module level in goedels_poetry/state.py (same file as this method)
 
         # Sort children by hole_start position to ensure they match textual order of holes
@@ -1885,6 +1892,15 @@ class GoedelsPoetryStateManager:
         # This ensures coordinate system consistency (AST positions are relative to stripped body)
         result = normalized_sketch
 
+        # Phase 3: Extract outer scope variables BEFORE processing children
+        # This provides the baseline for conflict detection
+        outer_scope_vars = extract_outer_scope_variables_ast_based(
+            result,
+            ast,
+            kimina_client,
+            server_timeout,
+        )
+
         # Process children one at a time in sorted order, re-querying holes from AST after each replacement
         for child in sorted_children:
             child_hole_name = child.get("hole_name") if isinstance(child, dict) else None
@@ -1956,6 +1972,15 @@ class GoedelsPoetryStateManager:
                     f"Child proof body for hole {child_hole_name} is empty or whitespace-only. "
                     f"This should not happen under assumptions (proven child proofs)."
                 )
+
+            # Phase 3: Rename conflicting variables before inlining
+            child_proof_body = rename_conflicting_variables_ast_based(
+                child_proof_body,
+                outer_scope_vars,
+                kimina_client,
+                server_timeout,
+                child_hole_name or "",
+            )
 
             # Phase 1: Extract indentation context from AST
             # Use result (already normalized at start) since positions are relative to current state
@@ -2132,6 +2157,60 @@ class GoedelsPoetryStateManager:
                             f"but found {len(updated_spans)}. This indicates an AST inconsistency - the replaced hole "
                             f"is not correctly reflected in the updated AST."
                         )
+
+                    # Phase 3: Update outer_scope_vars with new variables from this replacement
+                    # (for subsequent replacements)
+                    # Use check() to get ALL new variables, not just have/let
+                    child_proof_with_preamble = combine_preamble_and_body(preamble, child_proof_body)
+                    child_check_response = kimina_client.check(child_proof_with_preamble, timeout=server_timeout)
+                    child_parsed_check = parse_kimina_check_response(child_check_response)
+
+                    # Extract ALL variables from check() response with origin information
+                    # Need to create AST for the child proof to determine origins
+                    child_ast_response = kimina_client.ast_code(child_proof_with_preamble, timeout=server_timeout)
+                    child_parsed_ast = parse_kimina_ast_code_response(child_ast_response)
+                    child_ast_for_vars = None
+                    if child_parsed_ast.get("ast"):
+                        child_ast_without_imports = remove_default_imports_from_ast(
+                            child_parsed_ast["ast"], preamble=preamble
+                        )
+                        child_ast_for_vars = AST(
+                            child_ast_without_imports,
+                            sorries=child_parsed_ast.get("sorries"),
+                            source_text=child_proof_with_preamble,
+                            body_start=len(preamble.strip()) + 2 if preamble.strip() else 0,
+                        )
+
+                    new_vars = (
+                        extract_variables_with_origin(child_parsed_check, child_ast_for_vars)
+                        if child_ast_for_vars
+                        else []
+                    )
+                    for var_info in new_vars:
+                        # Only add proof body variables to outer scope (not lemma parameters)
+                        # Lemma parameters are part of the signature and don't need to be tracked
+                        if var_info.get("is_lemma_parameter", False):
+                            continue
+                        var_name = var_info["name"]
+                        declaration_node = var_info.get("declaration_node")
+                        declaration_pos = None
+                        if declaration_node:
+                            info = declaration_node.get("info", {})
+                            if isinstance(info, dict):
+                                pos = info.get("pos")
+                                if isinstance(pos, list) and len(pos) >= 2:
+                                    declaration_pos = (pos[0], pos[1])
+
+                        outer_scope_vars[var_name] = {
+                            "name": var_name,
+                            "type": var_info.get("type"),
+                            "hypothesis": var_info["hypothesis"],
+                            "declaration_node": declaration_node,
+                            "declaration_pos": declaration_pos,
+                            "is_lemma_parameter": False,  # These are proof body variables
+                            "is_proof_body_variable": True,
+                            "source": "check_response",
+                        }
 
                     # Verify total hole count decreased by 1
                     total_holes_before = sum(len(spans) for spans in holes.values())

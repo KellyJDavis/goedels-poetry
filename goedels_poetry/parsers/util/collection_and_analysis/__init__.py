@@ -23,7 +23,9 @@ from .variable_extraction import (
     extract_variables_from_check_response,
     extract_variables_with_origin,
     find_variable_declaration_in_ast,
+    is_intentional_shadowing,
 )
+from .variable_renaming import rename_conflicting_variables_ast_based
 
 __all__ = [
     "__collect_defined_names",
@@ -42,4 +44,7 @@ __all__ = [
     "extract_variables_from_check_response",
     "extract_variables_with_origin",
     "find_variable_declaration_in_ast",
+    # Phase 3: Conflict detection and renaming
+    "is_intentional_shadowing",
+    "rename_conflicting_variables_ast_based",
 ]
