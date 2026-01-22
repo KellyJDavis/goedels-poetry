@@ -1961,6 +1961,21 @@ class GoedelsPoetryStateManager:
                     f"child hole_start={child_hole_start}."
                 )
 
+            # Phase 4: Analyze proof structure (function types and applications)
+            # Note: The analysis["should_preserve_application"] flag indicates when
+            # function application structure should be preserved instead of inlining.
+            # The actual preservation logic is a TODO - for now, we proceed with
+            # normal inlining (with variable renaming from Phase 3).
+            # Future enhancement: When should_preserve_application is True, preserve
+            # the function application structure in the final proof.
+            _ = self._analyze_proof_structure_ast_based(
+                child,
+                ast,
+                child_hole_name or "",
+                kimina_client,
+                server_timeout,
+            )
+
             # Extract child proof body
             child_proof_body = self._extract_proof_body_ast_guided(
                 child, kimina_client=kimina_client, server_timeout=server_timeout
@@ -2576,6 +2591,174 @@ class GoedelsPoetryStateManager:
 
         # Should not reach here - all child types should be handled above
         raise ProofReconstructionError("Unable to extract proof body from child node. Unknown child type or structure.")  # noqa: TRY003
+
+    def _analyze_proof_structure_ast_based(  # noqa: C901
+        self,
+        child: TreeNode,
+        parent_ast: AST,
+        hole_name: str,
+        kimina_client: KiminaClient,
+        server_timeout: int,
+    ) -> dict:
+        """
+        Analyze proof structure using AST and check() calls.
+
+        Returns analysis dict with:
+        - is_function_type: bool
+        - is_pi_type: bool
+        - is_function_application: bool
+        - should_preserve_application: bool
+        - variable_conflicts: list[dict]
+        - proof_body: str
+
+        Parameters
+        ----------
+        child: TreeNode
+            The child node (subgoal)
+        parent_ast: AST
+            The parent sketch AST
+        hole_name: str
+            The hole name (subgoal name)
+        kimina_client: KiminaClient
+            Client for AST and check() calls
+        server_timeout: int
+            Timeout for calls
+
+        Returns
+        -------
+        dict
+            Analysis results
+        """
+        from typing import cast
+
+        from goedels_poetry.agents.state import (
+            DecomposedFormalTheoremState,
+            FormalTheoremProofState,
+        )
+        from goedels_poetry.agents.util.common import (
+            DEFAULT_IMPORTS,
+            combine_preamble_and_body,
+        )
+        from goedels_poetry.agents.util.kimina_server import parse_kimina_check_response
+        from goedels_poetry.parsers.ast import AST
+        from goedels_poetry.parsers.util.collection_and_analysis.application_detection import (
+            find_subgoal_usage_in_ast,
+            is_app_node,
+        )
+        from goedels_poetry.parsers.util.collection_and_analysis.variable_extraction import (
+            extract_outer_scope_variables_ast_based,
+            extract_variables_with_origin,
+        )
+
+        # Import type extraction function - use getattr to avoid name mangling
+        from goedels_poetry.parsers.util.types_and_binders import type_extraction
+        from goedels_poetry.parsers.util.types_and_binders.type_analysis import (
+            is_function_type,
+            is_pi_or_forall_type,
+        )
+
+        _extract_type_ast_func = getattr(type_extraction, "__extract_type_ast")
+
+        # 1. Analyze child type
+        child_ast = None
+        child_type_ast = None
+
+        if isinstance(child, dict):
+            if "ast" in child:
+                child_ast = child.get("ast")
+            elif "formal_proof" in child and "children" not in child:
+                # Leaf node - get AST from formal_proof
+                proof_state = cast(FormalTheoremProofState, child)
+                child_ast = proof_state.get("ast")
+            elif "children" in child:
+                # Decomposed node - get AST from decomposed state
+                decomposed_state = cast(DecomposedFormalTheoremState, child)
+                child_ast = decomposed_state.get("ast")
+
+        if child_ast and isinstance(child_ast, AST):
+            # Extract type from child's formal_theorem
+            child_ast_node = child_ast.get_ast()
+            child_type_ast = _extract_type_ast_func(child_ast_node)
+
+        is_function_type_result = is_function_type(child_type_ast)
+        is_pi_type = is_pi_or_forall_type(child_type_ast)
+
+        # 2. Analyze parent usage
+        usage_nodes = find_subgoal_usage_in_ast(parent_ast, hole_name)
+        # Check if any usage node is an app node, or if its parent is an app node
+        is_function_application = False
+        for usage_node in usage_nodes:
+            if is_app_node(usage_node):
+                is_function_application = True
+                break
+            # Also check if the node is part of an app structure
+            # (e.g., the identifier is an argument to an app node)
+            # This is a heuristic - in practice, we'd need to check parent context
+            # For now, if we found usages and the type is function, assume it might be an application
+            # The actual detection will be refined based on AST structure analysis
+
+        # 3. Extract proof body (includes tactics from Phase 1)
+        proof_body = self._extract_proof_body_ast_guided(
+            child,
+            kimina_client=kimina_client,
+            server_timeout=server_timeout,
+        )
+
+        # 4. Analyze variable conflicts (similar to Phase 3)
+        proof_with_preamble = combine_preamble_and_body(DEFAULT_IMPORTS, proof_body)
+        check_response = kimina_client.check(proof_with_preamble, timeout=server_timeout)
+        parsed_check = parse_kimina_check_response(check_response)
+
+        # Extract ALL variables from check() response with origin information
+        # This distinguishes lemma parameters from proof body variables
+        proof_variables = []
+        if child_ast and isinstance(child_ast, AST):
+            # Use check() response to get ALL variables with origin information
+            proof_variables = extract_variables_with_origin(parsed_check, child_ast)
+
+        parent_source_text = parent_ast.get_source_text()
+        outer_scope_vars = extract_outer_scope_variables_ast_based(
+            parent_source_text or "",
+            parent_ast,
+            kimina_client,
+            server_timeout,
+        )
+
+        conflicts = []
+        outer_scope_names = set(outer_scope_vars.keys())
+        for var_info in proof_variables:
+            var_name = var_info["name"]
+
+            # CRITICAL: Skip lemma parameters - these are part of the signature
+            # and should NOT be renamed, even if they conflict with outer scope
+            if var_info.get("is_lemma_parameter", False):
+                continue
+
+            # Only consider proof body variables for conflict detection
+            if var_name in outer_scope_names and var_info.get("is_proof_body_variable", False):
+                from goedels_poetry.parsers.util.collection_and_analysis.variable_extraction import (
+                    is_intentional_shadowing,
+                )
+
+                var_decl = {
+                    "name": var_name,
+                    "node": var_info.get("declaration_node"),
+                    "hypothesis": var_info["hypothesis"],
+                    "is_lemma_parameter": False,
+                    "is_proof_body_variable": True,
+                }
+
+                if not is_intentional_shadowing(var_decl, parsed_check, outer_scope_vars):
+                    conflicts.append(var_decl)
+
+        return {
+            "is_function_type": is_function_type_result,
+            "is_pi_type": is_pi_type,
+            "is_function_application": is_function_application,
+            "should_preserve_application": is_pi_type and is_function_application,
+            "variable_conflicts": conflicts,
+            "proof_body": proof_body,
+        }
 
     def _extract_proof_body_from_ast(  # noqa: C901
         self, ast: AST, proof_text: str

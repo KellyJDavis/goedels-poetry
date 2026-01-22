@@ -2,6 +2,7 @@
 Declaration collection and analysis modules.
 """
 
+from .application_detection import find_subgoal_usage_in_ast, is_app_node
 from .decl_collection import (
     __collect_defined_names,
     __collect_named_decls,
@@ -28,8 +29,8 @@ from .variable_extraction import (
 from .variable_renaming import rename_conflicting_variables_ast_based
 
 __all__ = [
-    "__collect_defined_names",
     # Internal functions (exported for use within util package)
+    "__collect_defined_names",
     "__collect_named_decls",
     "__contains_target_name",
     "__extract_theorem_binders",
@@ -43,8 +44,9 @@ __all__ = [
     "extract_outer_scope_variables_ast_based",
     "extract_variables_from_check_response",
     "extract_variables_with_origin",
+    "find_subgoal_usage_in_ast",  # Phase 4
     "find_variable_declaration_in_ast",
-    # Phase 3: Conflict detection and renaming
+    "is_app_node",  # Phase 4
     "is_intentional_shadowing",
     "rename_conflicting_variables_ast_based",
 ]
