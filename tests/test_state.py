@@ -1010,7 +1010,7 @@ def test_reconstruct_complete_proof_with_single_have(kimina_server_url: str) -> 
             formal_theorem="lemma helper : True",
             preamble=DEFAULT_IMPORTS,
             syntactic=True,
-            formal_proof="lemma helper : True := by\n  trivial",
+            formal_proof="trivial",
             proved=True,
             errors=None,
             ast=None,
@@ -1119,7 +1119,7 @@ def test_reconstruct_complete_proof_with_multiple_haves(kimina_server_url: str) 
             formal_theorem="lemma helper1 : True",
             preamble=DEFAULT_IMPORTS,
             syntactic=True,
-            formal_proof="lemma helper1 : True := by\n  trivial",
+            formal_proof="trivial",
             proved=True,
             errors=None,
             ast=None,
@@ -1141,7 +1141,7 @@ def test_reconstruct_complete_proof_with_multiple_haves(kimina_server_url: str) 
             formal_theorem="lemma helper2 (helper1 : True) : True",
             preamble=DEFAULT_IMPORTS,
             syntactic=True,
-            formal_proof="lemma helper2 (helper1 : True) : True := by\n  trivial",
+            formal_proof="trivial",
             proved=True,
             errors=None,
             ast=None,
@@ -1228,7 +1228,7 @@ def test_reconstruct_complete_proof_handles_unicode_have_names(kimina_server_url
             formal_theorem="lemma h₁ : True := by sorry",
             preamble=DEFAULT_IMPORTS,
             syntactic=True,
-            formal_proof="lemma h₁ : True := by\n  trivial",
+            formal_proof="trivial",
             proved=True,
             errors=None,
             ast=None,
@@ -1244,7 +1244,7 @@ def test_reconstruct_complete_proof_handles_unicode_have_names(kimina_server_url
             formal_theorem="lemma h₂ : True := by sorry",
             preamble=DEFAULT_IMPORTS,
             syntactic=True,
-            formal_proof="lemma h₂ : True := by\n  exact h₁",
+            formal_proof="exact h₁",
             proved=True,
             errors=None,
             ast=None,
@@ -1438,7 +1438,7 @@ def test_reconstruct_complete_proof_with_anonymous_have(kimina_server_url: str) 
             formal_theorem=f"lemma gp_anon_have__{decl}__1 : True := by sorry",
             preamble=DEFAULT_IMPORTS,
             syntactic=True,
-            formal_proof=f"lemma gp_anon_have__{decl}__1 : True := by\n  trivial",
+            formal_proof="trivial",
             proved=True,
             errors=None,
             ast=None,
@@ -1517,7 +1517,7 @@ def test_reconstruct_complete_proof_proper_indentation(kimina_server_url: str) -
             formal_theorem="lemma helper : True",
             preamble=DEFAULT_IMPORTS,
             syntactic=True,
-            formal_proof="lemma helper : True := by\n  trivial",
+            formal_proof="trivial",
             proved=True,
             errors=None,
             ast=None,
@@ -2205,9 +2205,7 @@ def test_reconstruct_complete_proof_multiline_type_signatures(kimina_server_url:
             formal_theorem="lemma helper2 : SimpleType",
             preamble=DEFAULT_IMPORTS,
             syntactic=True,
-            formal_proof="""lemma helper2 : SimpleType
-  := by
-  constructor""",
+            formal_proof="constructor",
             proved=True,
             errors=None,
             ast=None,
@@ -2999,7 +2997,7 @@ def test_reconstruct_complete_proof_with_obtain_statement(kimina_server_url: str
             formal_theorem="lemma h (x : Nat) (hx : True) : True",
             preamble=DEFAULT_IMPORTS,
             syntactic=True,
-            formal_proof="lemma h (x : Nat) (hx : True) : True := by\n  trivial",
+            formal_proof="trivial",
             proved=True,
             errors=None,
             ast=None,
@@ -3232,7 +3230,7 @@ def test_reconstruct_complete_proof_mixed_bindings_deep_nested(kimina_server_url
                     formal_theorem=f"theorem obtain_main_body_{uuid.uuid4().hex} : ∃ y : ℕ, y ≥ 0",
                     preamble=DEFAULT_IMPORTS,
                     syntactic=True,
-                    formal_proof=f"theorem obtain_main_body_{uuid.uuid4().hex} : ∃ y : ℕ, y ≥ 0 := by\n  use 0",
+                    formal_proof="use 0",
                     proved=True,
                     errors=None,
                     ast=None,
@@ -4187,6 +4185,151 @@ def test_replace_sorry_for_have_exact_partial_log_case(kimina_server_url: str) -
         # Should NOT contain any sorry
         result_no_imports = result[len(DEFAULT_IMPORTS) :]
         assert "sorry" not in result_no_imports, f"Found 'sorry' in reconstructed proof:\n{result_no_imports}"
+
+    finally:
+        with suppress(Exception):
+            GoedelsPoetryState.clear_theorem_directory(theorem)
+
+
+def test_reconstruct_complete_proof_ast_extraction_bug_fix(kimina_server_url: str) -> None:
+    """
+    Test the specific bug from partial.log where AST extraction returned incomplete proof body.
+
+    This test reproduces the bug where `_extract_proof_body_from_ast` would find a nested byTactic
+    and return only "norm_cast" instead of the complete proof body. The fix uses `formal_proof`
+    directly, which contains the complete proof body.
+
+    This test would have FAILED before the fix (incomplete proof body would cause unsolved goals).
+    This test PASSES after the fix (using formal_proof directly returns complete proof body).
+    """
+    import uuid
+    from typing import cast
+
+    from goedels_poetry.agents.state import DecomposedFormalTheoremState, FormalTheoremProofState
+    from goedels_poetry.agents.util.common import DEFAULT_IMPORTS
+    from goedels_poetry.state import GoedelsPoetryStateManager
+    from goedels_poetry.util.tree import TreeNode
+
+    # Use a theorem similar to the one in partial.log that triggered the bug
+    theorem_sig = f"lemma hEqZ_{uuid.uuid4().hex} (x y : ℤ) (hEq : 4 * x ^ 3 - 7 * y ^ 3 = 2003) : (4 * (x : ZMod 7) ^ 3 - 7 * (y : ZMod 7) ^ 3 : ZMod 7) = (2003 : ZMod 7)"
+    theorem = with_default_preamble(theorem_sig)
+
+    with suppress(Exception):
+        GoedelsPoetryState.clear_theorem_directory(theorem)
+
+    try:
+        state = GoedelsPoetryState(formal_theorem=theorem)
+
+        # Create a sketch with a have statement h3 that has a proof with multiple tactics
+        # This mirrors the structure from partial.log where h3's proof would be incompletely extracted
+        sketch = f"""{theorem_sig} := by
+  have h1 : ((4 : ℤ) * x ^ 3 - 7 * y ^ 3 : ℤ) = (2003 : ℤ) := by linarith
+  have h2 : (4 * (x : ZMod 7) ^ 3 - 7 * (y : ZMod 7) ^ 3 : ZMod 7) = ((4 : ℤ) * x ^ 3 - 7 * y ^ 3 : ZMod 7) := by
+    norm_cast
+    <;> simp [pow_three, mul_assoc]
+    <;> ring_nf at *
+    <;> rfl
+  have h3 : ((4 : ℤ) * x ^ 3 - 7 * y ^ 3 : ZMod 7) = (2003 : ZMod 7) := by sorry
+  calc
+    (4 * (x : ZMod 7) ^ 3 - 7 * (y : ZMod 7) ^ 3 : ZMod 7) = ((4 : ℤ) * x ^ 3 - 7 * y ^ 3 : ZMod 7) := by rw [h2]
+    _ = (2003 : ZMod 7) := by rw [h3]"""
+
+        # Normalize sketch
+        normalized_sketch = get_normalized_sketch(sketch)
+        sketch_ast = _create_ast_for_sketch(normalized_sketch, DEFAULT_IMPORTS, kimina_server_url)
+
+        decomposed = DecomposedFormalTheoremState(
+            parent=None,
+            children=[],
+            depth=0,
+            formal_theorem=theorem,
+            preamble=DEFAULT_IMPORTS,
+            proof_sketch=normalized_sketch,
+            syntactic=True,
+            errors=None,
+            ast=sketch_ast,
+            self_correction_attempts=1,
+            decomposition_history=[],
+        )
+
+        # Create child proof for h3 with the complete proof body
+        # This is the proof from partial.log that would have been incompletely extracted by AST
+        # The complete proof body is:
+        #   norm_cast at h1 ⊢
+        #   <;> simp_all [h1]
+        #   <;> rfl
+        # But the buggy AST extraction would have only returned "norm_cast"
+        complete_h3_proof = """norm_cast at h1 ⊢
+  <;> simp_all [h1]
+  <;> rfl"""
+
+        # Create AST for the h3 proof to simulate the bug scenario
+        # The AST would have a structure where _extract_proof_body_from_ast finds a nested byTactic
+        h3_theorem_full = f"lemma h3 (x y : ℤ) (hEq : 4 * x ^ 3 - 7 * y ^ 3 = 2003) (h1 : ((4 : ℤ) * x ^ 3 - 7 * y ^ 3 : ℤ) = (2003 : ℤ)) : ((4 : ℤ) * x ^ 3 - 7 * y ^ 3 : ZMod 7) = (2003 : ZMod 7) := by {complete_h3_proof}"
+        h3_ast = _create_ast_for_sketch(h3_theorem_full, DEFAULT_IMPORTS, kimina_server_url)
+
+        child_h3 = FormalTheoremProofState(
+            parent=cast(TreeNode, decomposed),
+            depth=1,
+            formal_theorem="lemma h3 (x y : ℤ) (hEq : 4 * x ^ 3 - 7 * y ^ 3 = 2003) (h1 : ((4 : ℤ) * x ^ 3 - 7 * y ^ 3 : ℤ) = (2003 : ℤ)) : ((4 : ℤ) * x ^ 3 - 7 * y ^ 3 : ZMod 7) = (2003 : ZMod 7)",
+            preamble=DEFAULT_IMPORTS,
+            syntactic=True,
+            # formal_proof contains the COMPLETE proof body
+            # Before the fix, AST extraction would have returned only "norm_cast" (incomplete)
+            # After the fix, we use formal_proof directly, which contains the complete proof
+            formal_proof=complete_h3_proof,
+            proved=True,
+            errors=None,
+            # Provide AST to simulate the bug scenario where AST extraction would fail
+            # The old code would try to extract from this AST and get incomplete body
+            # The new code ignores this AST and uses formal_proof directly
+            ast=h3_ast,
+            self_correction_attempts=1,
+            proof_history=[],
+            pass_attempts=0,
+        )
+        _annotate_hole_offsets(child_h3, normalized_sketch, hole_name="h3", anchor="have h3")
+
+        decomposed["children"].append(cast(TreeNode, child_h3))
+        state.formal_theorem_proof = cast(TreeNode, decomposed)
+        manager = GoedelsPoetryStateManager(state)
+
+        # Reconstruction should succeed because we now use formal_proof directly
+        # Before the fix, this would have failed because AST extraction returned incomplete body
+        result = manager.reconstruct_complete_proof(server_url=kimina_server_url)
+
+        # Should contain DEFAULT_IMPORTS
+        assert result.startswith(DEFAULT_IMPORTS)
+
+        # Should contain the h3 have statement
+        assert "have h3 :" in result
+
+        # Should contain the COMPLETE proof body for h3 (not just "norm_cast")
+        # This verifies that the fix works - we're using formal_proof which has the complete proof
+        assert "norm_cast at h1 ⊢" in result
+        assert "simp_all [h1]" in result
+        assert "rfl" in result
+
+        # Should NOT contain any sorry
+        result_no_imports = result[len(DEFAULT_IMPORTS) :]
+        assert "sorry" not in result_no_imports, f"Found 'sorry' in reconstructed proof:\n{result_no_imports}"
+
+        # Verify the proof is semantically valid (no unsolved goals)
+        # This is the key test - before the fix, this would have "unsolved goals" because
+        # only "norm_cast" was extracted instead of the complete proof body
+        from kimina_client import KiminaClient
+
+        from goedels_poetry.agents.util.kimina_server import parse_kimina_check_response
+
+        client = KiminaClient(api_url=kimina_server_url, n_retries=3, http_timeout=60)
+        check_response = client.check(result)
+        parsed_check = parse_kimina_check_response(check_response)
+        assert parsed_check["pass"] is True, (
+            f"Proof validation failed (would have passed with complete proof body): {parsed_check}"
+        )
+        assert parsed_check["complete"] is True, (
+            f"Proof incomplete (would have been complete with full proof body): {parsed_check}"
+        )
 
     finally:
         with suppress(Exception):

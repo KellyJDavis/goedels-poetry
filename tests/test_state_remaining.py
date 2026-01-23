@@ -364,7 +364,7 @@ def test_reconstruct_complete_proof_with_let_statement(kimina_server_url: str) -
             formal_theorem="lemma h (n : ℕ) : n > 0",  # noqa: RUF001
             preamble=DEFAULT_IMPORTS,
             syntactic=True,
-            formal_proof="lemma h (n : ℕ) : n > 0 := by\n  omega",  # noqa: RUF001
+            formal_proof="omega",
             proved=True,
             errors=None,
             ast=None,
