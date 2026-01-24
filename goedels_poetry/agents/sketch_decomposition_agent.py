@@ -447,4 +447,5 @@ def _create_formal_theorem_proof_state(
         hole_name=hole_name,
         hole_start=hole_start,
         hole_end=hole_end,
+        llm_lean_output=None,
     )

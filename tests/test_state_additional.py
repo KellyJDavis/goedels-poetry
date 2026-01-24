@@ -159,10 +159,11 @@ def test_reconstruct_complete_proof_deep_nested_decomposition_4_levels(kimina_se
             ast=root_ast,
             self_correction_attempts=1,
             decomposition_history=[],
+            llm_lean_output=None,
         )
 
         # Level 1
-        level1_sketch = """lemma a : True := by
+        level1_sketch = """theorem a : True := by
   have b : True := by sorry
   exact b"""
         level1_ast = _create_ast_for_sketch(level1_sketch, DEFAULT_IMPORTS, kimina_server_url)
@@ -170,7 +171,7 @@ def test_reconstruct_complete_proof_deep_nested_decomposition_4_levels(kimina_se
             parent=cast(TreeNode, root),
             children=[],
             depth=1,
-            formal_theorem="lemma a : True",
+            formal_theorem="theorem a : True",
             preamble=DEFAULT_IMPORTS,
             proof_sketch=level1_sketch,
             syntactic=True,
@@ -178,11 +179,12 @@ def test_reconstruct_complete_proof_deep_nested_decomposition_4_levels(kimina_se
             ast=level1_ast,
             self_correction_attempts=1,
             decomposition_history=[],
+            llm_lean_output=None,
         )
         _annotate_hole_offsets(level1, root_sketch, hole_name="a", anchor="have a")
 
         # Level 2
-        level2_sketch = """lemma b : True := by
+        level2_sketch = """theorem b : True := by
   have c : True := by sorry
   exact c"""
         level2_ast = _create_ast_for_sketch(level2_sketch, DEFAULT_IMPORTS, kimina_server_url)
@@ -190,7 +192,7 @@ def test_reconstruct_complete_proof_deep_nested_decomposition_4_levels(kimina_se
             parent=cast(TreeNode, level1),
             children=[],
             depth=2,
-            formal_theorem="lemma b : True",
+            formal_theorem="theorem b : True",
             preamble=DEFAULT_IMPORTS,
             proof_sketch=level2_sketch,
             syntactic=True,
@@ -198,11 +200,12 @@ def test_reconstruct_complete_proof_deep_nested_decomposition_4_levels(kimina_se
             ast=level2_ast,
             self_correction_attempts=1,
             decomposition_history=[],
+            llm_lean_output=None,
         )
         _annotate_hole_offsets(level2, level1_sketch, hole_name="b", anchor="have b")
 
         # Level 3
-        level3_sketch = """lemma c : True := by
+        level3_sketch = """theorem c : True := by
   have d : True := by sorry
   exact d"""
         level3_ast = _create_ast_for_sketch(level3_sketch, DEFAULT_IMPORTS, kimina_server_url)
@@ -210,7 +213,7 @@ def test_reconstruct_complete_proof_deep_nested_decomposition_4_levels(kimina_se
             parent=cast(TreeNode, level2),
             children=[],
             depth=3,
-            formal_theorem="lemma c : True",
+            formal_theorem="theorem c : True",
             preamble=DEFAULT_IMPORTS,
             proof_sketch=level3_sketch,
             syntactic=True,
@@ -218,6 +221,7 @@ def test_reconstruct_complete_proof_deep_nested_decomposition_4_levels(kimina_se
             ast=level3_ast,
             self_correction_attempts=1,
             decomposition_history=[],
+            llm_lean_output=None,
         )
         _annotate_hole_offsets(level3, level2_sketch, hole_name="c", anchor="have c")
 
@@ -225,7 +229,7 @@ def test_reconstruct_complete_proof_deep_nested_decomposition_4_levels(kimina_se
         leaf = FormalTheoremProofState(
             parent=cast(TreeNode, level3),
             depth=4,
-            formal_theorem="lemma d : True",
+            formal_theorem="theorem d : True",
             preamble=DEFAULT_IMPORTS,
             syntactic=True,
             formal_proof="trivial",
@@ -234,6 +238,7 @@ def test_reconstruct_complete_proof_deep_nested_decomposition_4_levels(kimina_se
             ast=None,
             self_correction_attempts=1,
             proof_history=[],
+            llm_lean_output=None,
             pass_attempts=0,
         )
         _annotate_hole_offsets(leaf, str(level3["proof_sketch"]), hole_name="d", anchor="have d")

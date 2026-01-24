@@ -88,6 +88,10 @@ class FormalTheoremProofState(TypedDict):
         This is exclusive (Python slicing semantics): the `sorry` span is `proof_sketch[hole_start:hole_end]`.
 
         For root proofs (no parent sketch) and for legacy/unknown cases, this is `None`.
+    llm_lean_output: Required[str | None]
+        The raw Lean 4 code block extracted from the markdown response of the LLM.
+        This contains the complete declaration (theorem/lemma/example), whereas
+        `formal_proof` contains only the extracted proof body (tactics).
     """
 
     parent: Required[TreeNode | None]
@@ -105,6 +109,7 @@ class FormalTheoremProofState(TypedDict):
     hole_name: Required[str | None]
     hole_start: Required[int | None]
     hole_end: Required[int | None]
+    llm_lean_output: Required[str | None]
 
 
 class FormalTheoremProofStates(TypedDict):
@@ -211,6 +216,10 @@ class DecomposedFormalTheoremState(TypedDict):
         This is exclusive (Python slicing semantics): the `sorry` span is `proof_sketch[hole_start:hole_end]`.
 
         For root decompositions (no parent sketch) and for legacy/unknown cases, this is `None`.
+    llm_lean_output: Required[str | None]
+        The raw Lean 4 code block extracted from the markdown response of the LLM.
+        This contains the complete declaration (theorem/lemma/example), whereas
+        `proof_sketch` contains only the extracted sketch body.
     """
 
     # InternalTreeNode specific properties
@@ -232,6 +241,7 @@ class DecomposedFormalTheoremState(TypedDict):
     hole_name: Required[str | None]
     hole_start: Required[int | None]
     hole_end: Required[int | None]
+    llm_lean_output: Required[str | None]
 
 
 class DecomposedFormalTheoremStates(TypedDict):

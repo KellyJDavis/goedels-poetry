@@ -253,10 +253,11 @@ def test_reconstruct_complete_proof_nested_with_non_ascii_names(kimina_server_ur
             ast=root_ast,
             self_correction_attempts=1,
             decomposition_history=[],
+            llm_lean_output=None,
         )
 
         # Child decomposed with Greek letter
-        child_sketch = """lemma α₁ : True := by
+        child_sketch = """theorem α₁ : True := by
   have β₂ : True := by sorry
   exact β₂"""
         child_ast = _create_ast_for_sketch(child_sketch, DEFAULT_IMPORTS, kimina_server_url)
@@ -264,7 +265,7 @@ def test_reconstruct_complete_proof_nested_with_non_ascii_names(kimina_server_ur
             parent=cast(TreeNode, root),
             children=[],
             depth=1,
-            formal_theorem="lemma α₁ : True",
+            formal_theorem="theorem α₁ : True",
             preamble=DEFAULT_IMPORTS,
             proof_sketch=child_sketch,
             syntactic=True,
@@ -272,6 +273,7 @@ def test_reconstruct_complete_proof_nested_with_non_ascii_names(kimina_server_ur
             ast=child_ast,
             self_correction_attempts=1,
             decomposition_history=[],
+            llm_lean_output=None,
         )
         _annotate_hole_offsets(child_decomposed, str(root["proof_sketch"]), hole_name="α₁", anchor="have α₁")
 
@@ -279,7 +281,7 @@ def test_reconstruct_complete_proof_nested_with_non_ascii_names(kimina_server_ur
         grandchild = FormalTheoremProofState(
             parent=cast(TreeNode, child_decomposed),
             depth=2,
-            formal_theorem="lemma β₂ : True",
+            formal_theorem="theorem β₂ : True",
             preamble=DEFAULT_IMPORTS,
             syntactic=True,
             formal_proof="trivial",
@@ -288,6 +290,7 @@ def test_reconstruct_complete_proof_nested_with_non_ascii_names(kimina_server_ur
             ast=None,
             self_correction_attempts=1,
             proof_history=[],
+            llm_lean_output=None,
             pass_attempts=0,
             hole_name=None,
             hole_start=None,
@@ -355,13 +358,14 @@ def test_reconstruct_complete_proof_with_let_statement(kimina_server_url: str) -
             ast=sketch_ast,
             self_correction_attempts=1,
             decomposition_history=[],
+            llm_lean_output=None,
         )
 
         # Child proof that depends on the let binding
         child = FormalTheoremProofState(
             parent=cast(TreeNode, decomposed),
             depth=1,
-            formal_theorem="lemma h (n : ℕ) : n > 0",  # noqa: RUF001
+            formal_theorem="theorem h (n : ℕ) : n > 0",  # noqa: RUF001
             preamble=DEFAULT_IMPORTS,
             syntactic=True,
             formal_proof="omega",
@@ -370,6 +374,7 @@ def test_reconstruct_complete_proof_with_let_statement(kimina_server_url: str) -
             ast=None,
             self_correction_attempts=1,
             proof_history=[],
+            llm_lean_output=None,
             pass_attempts=0,
         )
         _annotate_hole_offsets(child, sketch, hole_name="h", anchor="have h")
@@ -440,13 +445,14 @@ def test_reconstruct_complete_proof_with_obtain_statement(kimina_server_url: str
             ast=sketch_ast,
             self_correction_attempts=1,
             decomposition_history=[],
+            llm_lean_output=None,
         )
 
         # Child proof that depends on obtained variables
         child = FormalTheoremProofState(
             parent=cast(TreeNode, decomposed),
             depth=1,
-            formal_theorem="lemma h (x : ℕ) (hx : True) : True",  # noqa: RUF001
+            formal_theorem="theorem h (x : ℕ) (hx : True) : True",  # noqa: RUF001
             preamble=DEFAULT_IMPORTS,
             syntactic=True,
             formal_proof="exact hx",
@@ -455,6 +461,7 @@ def test_reconstruct_complete_proof_with_obtain_statement(kimina_server_url: str
             ast=None,
             self_correction_attempts=1,
             proof_history=[],
+            llm_lean_output=None,
             pass_attempts=0,
         )
         _annotate_hole_offsets(child, normalized_sketch, hole_name="h", anchor="have h")
@@ -477,6 +484,7 @@ def test_reconstruct_complete_proof_with_obtain_statement(kimina_server_url: str
                     ast=None,
                     self_correction_attempts=1,
                     proof_history=[],
+                    llm_lean_output=None,
                     pass_attempts=0,
                 )
                 # Annotate for the obtain's sorry
@@ -543,17 +551,18 @@ def test_reconstruct_complete_proof_with_let_and_have_nested(kimina_server_url: 
             ast=root_ast,
             self_correction_attempts=1,
             decomposition_history=[],
+            llm_lean_output=None,
         )
 
         # Child decomposed - simplified to True to avoid proof complexity
-        child_sketch = """lemma helper : True := by
+        child_sketch = """theorem helper : True := by
   sorry"""
         child_ast = _create_ast_for_sketch(child_sketch, DEFAULT_IMPORTS, kimina_server_url)
         child_decomposed = DecomposedFormalTheoremState(
             parent=cast(TreeNode, root),
             children=[],
             depth=1,
-            formal_theorem="lemma helper : True",
+            formal_theorem="theorem helper : True",
             preamble=DEFAULT_IMPORTS,
             proof_sketch=child_sketch,
             syntactic=True,
@@ -561,6 +570,7 @@ def test_reconstruct_complete_proof_with_let_and_have_nested(kimina_server_url: 
             ast=child_ast,
             self_correction_attempts=1,
             decomposition_history=[],
+            llm_lean_output=None,
         )
         _annotate_hole_offsets(child_decomposed, str(root["proof_sketch"]), hole_name="helper", anchor="have helper")
 
@@ -568,7 +578,7 @@ def test_reconstruct_complete_proof_with_let_and_have_nested(kimina_server_url: 
         grandchild = FormalTheoremProofState(
             parent=cast(TreeNode, child_decomposed),
             depth=2,
-            formal_theorem="lemma helper : True",
+            formal_theorem="theorem helper : True",
             preamble=DEFAULT_IMPORTS,
             syntactic=True,
             formal_proof="trivial",
@@ -577,6 +587,7 @@ def test_reconstruct_complete_proof_with_let_and_have_nested(kimina_server_url: 
             ast=None,
             self_correction_attempts=1,
             proof_history=[],
+            llm_lean_output=None,
             pass_attempts=0,
         )
         _annotate_hole_offsets(grandchild, str(child_decomposed["proof_sketch"]), hole_name="<main body>", anchor=None)
@@ -638,10 +649,11 @@ def test_reconstruct_complete_proof_mixed_bindings_deep_nested(kimina_server_url
             ast=root_ast,
             self_correction_attempts=1,
             decomposition_history=[],
+            llm_lean_output=None,
         )
 
         # Level 1: With obtain
-        level1_sketch = """lemma h1 (x : ℕ) : True := by
+        level1_sketch = """theorem h1 (x : ℕ) : True := by
   obtain ⟨y, hy⟩ : ∃ y, True := by sorry
   have h2 : True := by sorry
   exact h2"""  # noqa: RUF001
@@ -654,7 +666,7 @@ def test_reconstruct_complete_proof_mixed_bindings_deep_nested(kimina_server_url
             parent=cast(TreeNode, root),
             children=[],
             depth=1,
-            formal_theorem="lemma h1 (x : ℕ) : True",  # noqa: RUF001
+            formal_theorem="theorem h1 (x : ℕ) : True",  # noqa: RUF001
             preamble=DEFAULT_IMPORTS,
             proof_sketch=level1_sketch,
             syntactic=True,
@@ -662,6 +674,7 @@ def test_reconstruct_complete_proof_mixed_bindings_deep_nested(kimina_server_url
             ast=level1_ast,
             self_correction_attempts=1,
             decomposition_history=[],
+            llm_lean_output=None,
         )
         _annotate_hole_offsets(level1, root_sketch, hole_name="h1", anchor="have h1")
 
@@ -682,6 +695,7 @@ def test_reconstruct_complete_proof_mixed_bindings_deep_nested(kimina_server_url
                     ast=None,
                     self_correction_attempts=1,
                     proof_history=[],
+                    llm_lean_output=None,
                     pass_attempts=0,
                 )
                 _annotate_hole_offsets(
@@ -690,7 +704,7 @@ def test_reconstruct_complete_proof_mixed_bindings_deep_nested(kimina_server_url
                 main_body_children.append(main_body_child)
 
         # Level 2: With let and have
-        level2_sketch = """lemma h2 (x : ℕ) (y : ℕ) (hy : True) : True := by
+        level2_sketch = """theorem h2 (x : ℕ) (y : ℕ) (hy : True) : True := by
   let z : ℕ := x + y
   have h3 : True := by sorry
   exact h3"""  # noqa: RUF001
@@ -699,7 +713,7 @@ def test_reconstruct_complete_proof_mixed_bindings_deep_nested(kimina_server_url
             parent=cast(TreeNode, level1),
             children=[],
             depth=2,
-            formal_theorem="lemma h2 (x : ℕ) (y : ℕ) (hy : True) : True",  # noqa: RUF001
+            formal_theorem="theorem h2 (x : ℕ) (y : ℕ) (hy : True) : True",  # noqa: RUF001
             preamble=DEFAULT_IMPORTS,
             proof_sketch=level2_sketch,
             syntactic=True,
@@ -707,6 +721,7 @@ def test_reconstruct_complete_proof_mixed_bindings_deep_nested(kimina_server_url
             ast=level2_ast,
             self_correction_attempts=1,
             decomposition_history=[],
+            llm_lean_output=None,
         )
         _annotate_hole_offsets(level2, level1_sketch, hole_name="h2", anchor="have h2")
 
@@ -714,7 +729,7 @@ def test_reconstruct_complete_proof_mixed_bindings_deep_nested(kimina_server_url
         leaf = FormalTheoremProofState(
             parent=cast(TreeNode, level2),
             depth=3,
-            formal_theorem="lemma h3 (x : ℕ) (y : ℕ) (hy : True) (z : ℕ) : True",  # noqa: RUF001
+            formal_theorem="theorem h3 (x : ℕ) (y : ℕ) (hy : True) (z : ℕ) : True",  # noqa: RUF001
             preamble=DEFAULT_IMPORTS,
             syntactic=True,
             formal_proof="trivial",
@@ -723,6 +738,7 @@ def test_reconstruct_complete_proof_mixed_bindings_deep_nested(kimina_server_url
             ast=None,
             self_correction_attempts=1,
             proof_history=[],
+            llm_lean_output=None,
             pass_attempts=0,
         )
         _annotate_hole_offsets(leaf, str(level2["proof_sketch"]), hole_name="h3", anchor="have h3")
@@ -804,12 +820,13 @@ def test_reconstruct_complete_proof_non_ascii_with_let_obtain(kimina_server_url:
             ast=sketch_ast,
             self_correction_attempts=1,
             decomposition_history=[],
+            llm_lean_output=None,
         )
 
         child = FormalTheoremProofState(
             parent=cast(TreeNode, decomposed),
             depth=1,
-            formal_theorem="lemma γ (α : ℕ) (β : ℕ) (hβ : True) : True",  # noqa: RUF001
+            formal_theorem="theorem γ (α : ℕ) (β : ℕ) (hβ : True) : True",  # noqa: RUF001
             preamble=DEFAULT_IMPORTS,
             syntactic=True,
             formal_proof="exact hβ",
@@ -818,6 +835,7 @@ def test_reconstruct_complete_proof_non_ascii_with_let_obtain(kimina_server_url:
             ast=None,
             self_correction_attempts=1,
             proof_history=[],
+            llm_lean_output=None,
             pass_attempts=0,
         )
         _annotate_hole_offsets(child, normalized_sketch, hole_name="γ", anchor="have γ")  # noqa: RUF001
@@ -840,6 +858,7 @@ def test_reconstruct_complete_proof_non_ascii_with_let_obtain(kimina_server_url:
                     ast=None,
                     self_correction_attempts=1,
                     proof_history=[],
+                    llm_lean_output=None,
                     pass_attempts=0,
                 )
                 # Annotate for the obtain's sorry
@@ -905,10 +924,11 @@ def test_reconstruct_complete_proof_multiple_children_at_each_level(kimina_serve
             ast=root_ast,
             self_correction_attempts=1,
             decomposition_history=[],
+            llm_lean_output=None,
         )
 
         # First child decomposed with multiple children
-        child1_sketch = """lemma h1 : True := by
+        child1_sketch = """theorem h1 : True := by
   have h1a : True := by sorry
   have h1b : True := by sorry
   exact h1a"""
@@ -917,7 +937,7 @@ def test_reconstruct_complete_proof_multiple_children_at_each_level(kimina_serve
             parent=cast(TreeNode, root),
             children=[],
             depth=1,
-            formal_theorem="lemma h1 : True",
+            formal_theorem="theorem h1 : True",
             preamble=DEFAULT_IMPORTS,
             proof_sketch=child1_sketch,
             syntactic=True,
@@ -925,11 +945,12 @@ def test_reconstruct_complete_proof_multiple_children_at_each_level(kimina_serve
             ast=child1_ast,
             self_correction_attempts=1,
             decomposition_history=[],
+            llm_lean_output=None,
         )
         _annotate_hole_offsets(child1_decomposed, root_sketch, hole_name="h1", anchor="have h1")
 
         # Second child decomposed
-        child2_sketch = """lemma h2 : True := by
+        child2_sketch = """theorem h2 : True := by
   have h2a : True := by sorry
   exact h2a"""
         child2_ast = _create_ast_for_sketch(child2_sketch, DEFAULT_IMPORTS, kimina_server_url)
@@ -937,7 +958,7 @@ def test_reconstruct_complete_proof_multiple_children_at_each_level(kimina_serve
             parent=cast(TreeNode, root),
             children=[],
             depth=1,
-            formal_theorem="lemma h2 : True",
+            formal_theorem="theorem h2 : True",
             preamble=DEFAULT_IMPORTS,
             proof_sketch=child2_sketch,
             syntactic=True,
@@ -945,6 +966,7 @@ def test_reconstruct_complete_proof_multiple_children_at_each_level(kimina_serve
             ast=child2_ast,
             self_correction_attempts=1,
             decomposition_history=[],
+            llm_lean_output=None,
         )
         _annotate_hole_offsets(child2_decomposed, str(root["proof_sketch"]), hole_name="h2", anchor="have h2")
 
@@ -952,7 +974,7 @@ def test_reconstruct_complete_proof_multiple_children_at_each_level(kimina_serve
         grandchild1a = FormalTheoremProofState(
             parent=cast(TreeNode, child1_decomposed),
             depth=2,
-            formal_theorem="lemma h1a : True",
+            formal_theorem="theorem h1a : True",
             preamble=DEFAULT_IMPORTS,
             syntactic=True,
             formal_proof="trivial",
@@ -961,6 +983,7 @@ def test_reconstruct_complete_proof_multiple_children_at_each_level(kimina_serve
             ast=None,
             self_correction_attempts=1,
             proof_history=[],
+            llm_lean_output=None,
             pass_attempts=0,
         )
         _annotate_hole_offsets(grandchild1a, str(child1_decomposed["proof_sketch"]), hole_name="h1a", anchor="have h1a")
@@ -968,7 +991,7 @@ def test_reconstruct_complete_proof_multiple_children_at_each_level(kimina_serve
         grandchild1b = FormalTheoremProofState(
             parent=cast(TreeNode, child1_decomposed),
             depth=2,
-            formal_theorem="lemma h1b : True",
+            formal_theorem="theorem h1b : True",
             preamble=DEFAULT_IMPORTS,
             syntactic=True,
             formal_proof="trivial",
@@ -977,6 +1000,7 @@ def test_reconstruct_complete_proof_multiple_children_at_each_level(kimina_serve
             ast=None,
             self_correction_attempts=1,
             proof_history=[],
+            llm_lean_output=None,
             pass_attempts=0,
         )
         _annotate_hole_offsets(grandchild1b, str(child1_decomposed["proof_sketch"]), hole_name="h1b", anchor="have h1b")
@@ -985,7 +1009,7 @@ def test_reconstruct_complete_proof_multiple_children_at_each_level(kimina_serve
         grandchild2a = FormalTheoremProofState(
             parent=cast(TreeNode, child2_decomposed),
             depth=2,
-            formal_theorem="lemma h2a : True",
+            formal_theorem="theorem h2a : True",
             preamble=DEFAULT_IMPORTS,
             syntactic=True,
             formal_proof="trivial",
@@ -994,6 +1018,7 @@ def test_reconstruct_complete_proof_multiple_children_at_each_level(kimina_serve
             ast=None,
             self_correction_attempts=1,
             proof_history=[],
+            llm_lean_output=None,
             pass_attempts=0,
         )
         _annotate_hole_offsets(grandchild2a, str(child2_decomposed["proof_sketch"]), hole_name="h2a", anchor="have h2a")
@@ -1059,6 +1084,7 @@ def test_reconstruct_complete_proof_edge_case_empty_children(kimina_server_url: 
             ast=sketch_ast,
             self_correction_attempts=1,
             decomposition_history=[],
+            llm_lean_output=None,
         )
 
         # Add a valid child for the sorry hole
@@ -1069,7 +1095,7 @@ def test_reconstruct_complete_proof_edge_case_empty_children(kimina_server_url: 
         child = FormalTheoremProofState(
             parent=cast(TreeNode, decomposed),
             depth=1,
-            formal_theorem=f"lemma proof_{uuid.uuid4().hex} : True",
+            formal_theorem=f"theorem proof_{uuid.uuid4().hex} : True",
             preamble=DEFAULT_IMPORTS,
             syntactic=True,
             formal_proof="trivial",
@@ -1078,6 +1104,7 @@ def test_reconstruct_complete_proof_edge_case_empty_children(kimina_server_url: 
             ast=None,
             self_correction_attempts=1,
             proof_history=[],
+            llm_lean_output=None,
             pass_attempts=0,
             hole_name=temp_child.get("hole_name"),
             hole_start=temp_child.get("hole_start"),
@@ -1140,6 +1167,7 @@ def test_reconstruct_complete_proof_edge_case_missing_proof(kimina_server_url: s
             ast=sketch_ast,
             self_correction_attempts=1,
             decomposition_history=[],
+            llm_lean_output=None,
         )
 
         # Child with valid proof
@@ -1150,7 +1178,7 @@ def test_reconstruct_complete_proof_edge_case_missing_proof(kimina_server_url: s
         child = FormalTheoremProofState(
             parent=cast(TreeNode, decomposed),
             depth=1,
-            formal_theorem="lemma h : True",
+            formal_theorem="theorem h : True",
             preamble=DEFAULT_IMPORTS,
             syntactic=True,
             formal_proof="trivial",  # Valid proof
@@ -1159,6 +1187,7 @@ def test_reconstruct_complete_proof_edge_case_missing_proof(kimina_server_url: s
             ast=None,
             self_correction_attempts=1,
             proof_history=[],
+            llm_lean_output=None,
             pass_attempts=0,
             hole_name=temp_child.get("hole_name"),
             hole_start=temp_child.get("hole_start"),
@@ -1215,9 +1244,10 @@ def test_reconstruct_complete_proof_edge_case_nested_missing_proof(kimina_server
             ast=root_ast,
             self_correction_attempts=1,
             decomposition_history=[],
+            llm_lean_output=None,
         )
 
-        child_sketch = """lemma h1 : True := by
+        child_sketch = """theorem h1 : True := by
   have h2 : True := by sorry
   exact h2"""
         child_ast = _create_ast_for_sketch(child_sketch, DEFAULT_IMPORTS, kimina_server_url)
@@ -1231,7 +1261,7 @@ def test_reconstruct_complete_proof_edge_case_nested_missing_proof(kimina_server
             parent=cast(TreeNode, root),
             children=[],
             depth=1,
-            formal_theorem="lemma h1 : True",
+            formal_theorem="theorem h1 : True",
             preamble=DEFAULT_IMPORTS,
             proof_sketch=child_sketch,
             syntactic=True,
@@ -1239,6 +1269,7 @@ def test_reconstruct_complete_proof_edge_case_nested_missing_proof(kimina_server
             ast=child_ast,
             self_correction_attempts=1,
             decomposition_history=[],
+            llm_lean_output=None,
             hole_name=temp_child_decomposed.get("hole_name"),
             hole_start=temp_child_decomposed.get("hole_start"),
             hole_end=temp_child_decomposed.get("hole_end"),
@@ -1254,7 +1285,7 @@ def test_reconstruct_complete_proof_edge_case_nested_missing_proof(kimina_server
         grandchild = FormalTheoremProofState(
             parent=cast(TreeNode, child_decomposed),
             depth=2,
-            formal_theorem="lemma h2 : True",
+            formal_theorem="theorem h2 : True",
             preamble=DEFAULT_IMPORTS,
             syntactic=True,
             formal_proof="trivial",  # Valid proof
@@ -1263,6 +1294,7 @@ def test_reconstruct_complete_proof_edge_case_nested_missing_proof(kimina_server
             ast=None,
             self_correction_attempts=1,
             proof_history=[],
+            llm_lean_output=None,
             pass_attempts=0,
             hole_name=temp_grandchild.get("hole_name"),
             hole_start=temp_grandchild.get("hole_start"),
@@ -1334,6 +1366,7 @@ def test_reconstruct_complete_proof_edge_case_no_sketch(kimina_server_url: str) 
             ast=sketch_ast,
             self_correction_attempts=1,
             decomposition_history=[],
+            llm_lean_output=None,
         )
 
         state.formal_theorem_proof = cast(TreeNode, decomposed)
@@ -1374,11 +1407,11 @@ def test_reconstruct_complete_proof_edge_case_very_deep_nesting(kimina_server_ur
         for i in range(5):
             parent = levels[-1] if levels else None
             level_sketch = (
-                f"""{"lemma " if i > 0 else ""}{theorem_sig if i == 0 else f"level{i} : True"} := by
+                f"""{"theorem " if i > 0 else ""}{theorem_sig if i == 0 else f"level{i} : True"} := by
   have level{i + 1} : True := by sorry
   exact level{i + 1}"""
                 if i < 4
-                else f"lemma level{i} : True := by\n  sorry"
+                else f"theorem level{i} : True := by\n  sorry"
             )
             # Normalize sketch to match what _create_ast_for_sketch does
             normalized_level_sketch = level_sketch.strip()
@@ -1390,7 +1423,7 @@ def test_reconstruct_complete_proof_edge_case_very_deep_nesting(kimina_server_ur
                 parent=cast(TreeNode, parent) if parent else None,
                 children=[],
                 depth=i,
-                formal_theorem=f"lemma level{i} : True" if i > 0 else theorem,
+                formal_theorem=f"theorem level{i} : True" if i > 0 else theorem,
                 preamble=DEFAULT_IMPORTS,
                 proof_sketch=normalized_level_sketch,
                 syntactic=True,
@@ -1398,6 +1431,7 @@ def test_reconstruct_complete_proof_edge_case_very_deep_nesting(kimina_server_ur
                 ast=level_ast,
                 self_correction_attempts=1,
                 decomposition_history=[],
+                llm_lean_output=None,
             )
             levels.append(level)
             if parent:
@@ -1414,7 +1448,7 @@ def test_reconstruct_complete_proof_edge_case_very_deep_nesting(kimina_server_ur
         leaf = FormalTheoremProofState(
             parent=cast(TreeNode, levels[-1]),
             depth=5,
-            formal_theorem="lemma level5 : True",
+            formal_theorem="theorem level5 : True",
             preamble=DEFAULT_IMPORTS,
             syntactic=True,
             formal_proof="trivial",
@@ -1423,6 +1457,7 @@ def test_reconstruct_complete_proof_edge_case_very_deep_nesting(kimina_server_ur
             ast=None,
             self_correction_attempts=1,
             proof_history=[],
+            llm_lean_output=None,
             pass_attempts=0,
         )
         _annotate_hole_offsets(leaf, str(levels[-1]["proof_sketch"]), hole_name="<main body>", anchor=None)

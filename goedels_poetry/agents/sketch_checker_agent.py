@@ -117,8 +117,12 @@ def _check_sketch(
     # Create a client to access the Kimina Server
     kimina_client = KiminaClient(api_url=server_url, http_timeout=server_timeout, n_retries=server_max_retries)
 
+    # Use the raw LLM output directly for validation
+    # state["llm_lean_output"] contains the complete declaration from the LLM
+    raw_output = str(state["llm_lean_output"]) if state["llm_lean_output"] else ""
+
     # Check the proof sketch with the stored preamble prefix
-    sketch_with_imports = combine_preamble_and_body(state["preamble"], str(state["proof_sketch"]))
+    sketch_with_imports = combine_preamble_and_body(state["preamble"], raw_output)
     check_response = kimina_client.check(sketch_with_imports, timeout=server_timeout)
 
     # Parse check_response

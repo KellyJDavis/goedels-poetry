@@ -14,7 +14,6 @@ from goedels_poetry.agents.util.common import (
     _format_theorem_hints_section,
     combine_preamble_and_body,
     load_prompt,
-    strip_known_preamble,
 )
 from goedels_poetry.agents.util.debug import log_llm_prompt, log_llm_response
 
@@ -188,13 +187,16 @@ def _proof_sketcher(llm: BaseChatModel, state: DecomposedFormalTheoremState) -> 
 
     # Parse sketcher response
     try:
-        proof_sketch = _parse_proof_sketcher_response(normalized_content, state["preamble"])
+        raw_code = _parse_proof_sketcher_response(normalized_content, state["preamble"])
 
-        # Add the proof sketch to the state
-        state["proof_sketch"] = proof_sketch
+        # Store the raw LLM output in the new field
+        state["llm_lean_output"] = raw_code
 
-        # Add the proof sketch to the state's decomposition_history
-        state["decomposition_history"] += [AIMessage(content=proof_sketch)]
+        # Clear proof_sketch initially - it will be populated by the sketch_parser_agent
+        state["proof_sketch"] = None
+
+        # Add the raw code to the state's decomposition_history
+        state["decomposition_history"] += [AIMessage(content=raw_code)]
     except LLMParsingError:
         # Set parse failure markers - state manager will handle requeueing and attempt increments
         state["proof_sketch"] = None
@@ -210,17 +212,19 @@ def _proof_sketcher(llm: BaseChatModel, state: DecomposedFormalTheoremState) -> 
 
 def _parse_proof_sketcher_response(response: str, expected_preamble: str) -> str:
     """
-    Extract the final lean code snippet from the passed string and remove DEFAULT_IMPORTS.
+    Extract the final lean code snippet from the passed string.
 
     Parameters
     ----------
     response: str
         The string to extract the final lean code snippet from
+    expected_preamble: str
+        DEPRECATED: No longer used for stripping preamble here.
 
     Returns
     -------
     str
-        A string containing the lean code snippet if found.
+        A string containing the raw lean code snippet if found.
 
     Raises
     ------
@@ -233,8 +237,4 @@ def _parse_proof_sketcher_response(response: str, expected_preamble: str) -> str
     if not matches:
         raise LLMParsingError("Failed to extract code block from LLM response", response)  # noqa: TRY003
     proof_sketch = cast(str, matches[-1]).strip()
-    if not proof_sketch:
-        return proof_sketch
-
-    stripped, matched = strip_known_preamble(proof_sketch, expected_preamble)
-    return stripped if matched else proof_sketch
+    return proof_sketch

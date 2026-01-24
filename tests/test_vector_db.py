@@ -92,6 +92,7 @@ def test_get_theorems_with_search_queries_for_vectordb_with_items(temp_state: Go
         decomposition_history=[],
         search_queries=["query1", "query2"],
         search_results=None,
+        llm_lean_output=None,
     )
     temp_state.decomposition_query_queue.append(decomposed_state)
 
@@ -208,6 +209,7 @@ def test_remove_decomposition_node_from_queues_includes_query_queue(temp_state: 
         decomposition_history=[],
         search_queries=["query1"],
         search_results=None,
+        llm_lean_output=None,
     )
 
     # Add to query queue
@@ -275,6 +277,7 @@ def test_query_vectordb_with_none_search_queries() -> None:
         decomposition_history=[],
         search_queries=None,
         search_results=None,
+        llm_lean_output=None,
     )
 
     result = _query_vectordb("http://localhost:8001/api/v1", ["Mathlib"], state)
@@ -299,6 +302,7 @@ def test_query_vectordb_with_empty_search_queries() -> None:
         decomposition_history=[],
         search_queries=[],
         search_results=None,
+        llm_lean_output=None,
     )
 
     result = _query_vectordb("http://localhost:8001/api/v1", ["Mathlib"], state)
@@ -346,6 +350,7 @@ def test_query_vectordb_with_single_query(mock_asyncio_run: MagicMock, mock_clie
         decomposition_history=[],
         search_queries=["test query"],
         search_results=None,
+        llm_lean_output=None,
     )
 
     result = _query_vectordb("http://localhost:8001/api/v1", ["Mathlib", "Batteries"], state)
@@ -403,6 +408,7 @@ def test_query_vectordb_with_multiple_queries(mock_asyncio_run: MagicMock, mock_
         decomposition_history=[],
         search_queries=["query0", "query1", "query2"],
         search_results=None,
+        llm_lean_output=None,
     )
 
     result = _query_vectordb("http://localhost:8001/api/v1", ["Mathlib"], state)
@@ -451,6 +457,7 @@ def test_query_vectordb_propagates_exceptions(mock_asyncio_run: MagicMock, mock_
         decomposition_history=[],
         search_queries=["test query"],
         search_results=None,
+        llm_lean_output=None,
     )
 
     # Exception should propagate
@@ -483,6 +490,7 @@ def test_decomposed_formal_theorem_state_initialization_with_search_results() ->
         decomposition_history=[],
         search_queries=None,
         search_results=None,
+        llm_lean_output=None,
     )
 
     assert state["search_results"] is None
@@ -564,6 +572,7 @@ def test_backtracking_removes_node_from_query_queue(temp_state: GoedelsPoetrySta
         decomposition_history=[],
         search_queries=None,
         search_results=None,
+        llm_lean_output=None,
     )
 
     parent["children"] = [cast(TreeNode, failed_child)]
@@ -586,6 +595,7 @@ def test_backtracking_removes_node_from_query_queue(temp_state: GoedelsPoetrySta
         self_correction_attempts=0,
         proof_history=[],
         pass_attempts=0,
+        llm_lean_output=None,
     )
     failed_child["children"] = [cast(TreeNode, proof_state)]
 

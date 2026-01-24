@@ -147,6 +147,7 @@ def test_kimina_guided_reconstruction_recovers_from_baseline_failure(kimina_serv
             hole_name="h_goal",
             hole_start=sorry_start,
             hole_end=sorry_end,
+            llm_lean_output=None,
         )
 
         root["children"].append(cast(TreeNode, child))

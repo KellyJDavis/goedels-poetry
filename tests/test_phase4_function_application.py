@@ -584,6 +584,7 @@ class TestAnalyzeProofStructure:
             "formal_proof": child_proof,
             "ast": child_ast,
             "proved": True,
+            "llm_lean_output": None,
         }
 
         analysis = state_manager._analyze_proof_structure_ast_based(
@@ -641,6 +642,7 @@ class TestAnalyzeProofStructure:
             "formal_proof": child_proof,
             "ast": child_ast,
             "proved": True,
+            "llm_lean_output": None,
         }
 
         analysis = state_manager._analyze_proof_structure_ast_based(
@@ -698,6 +700,7 @@ class TestAnalyzeProofStructure:
             "formal_proof": child_proof,
             "ast": child_ast,
             "proved": True,
+            "llm_lean_output": None,
         }
 
         analysis = state_manager._analyze_proof_structure_ast_based(
@@ -752,6 +755,7 @@ class TestAnalyzeProofStructure:
             "formal_proof": child_proof,
             "ast": child_ast,
             "proved": True,
+            "llm_lean_output": None,
         }
 
         analysis = state_manager._analyze_proof_structure_ast_based(
@@ -810,6 +814,7 @@ class TestAnalyzeProofStructure:
             "formal_proof": child_proof,
             "ast": child_ast,
             "proved": True,
+            "llm_lean_output": None,
         }
 
         analysis = state_manager._analyze_proof_structure_ast_based(
@@ -1049,6 +1054,7 @@ class TestRealWorldScenarios:
             "formal_proof": child_proof,
             "ast": child_ast,
             "proved": True,
+            "llm_lean_output": None,
         }
 
         analysis = state_manager._analyze_proof_structure_ast_based(
@@ -1104,6 +1110,7 @@ class TestRealWorldScenarios:
             "formal_proof": child_proof,
             "ast": child_ast,
             "proved": True,
+            "llm_lean_output": None,
         }
 
         analysis = state_manager._analyze_proof_structure_ast_based(
@@ -1155,6 +1162,7 @@ class TestRealWorldScenarios:
             "formal_proof": child_proof,
             "ast": child_ast,
             "proved": True,
+            "llm_lean_output": None,
         }
 
         analysis = state_manager._analyze_proof_structure_ast_based(
@@ -1249,6 +1257,7 @@ class TestStressScenarios:
             "formal_proof": child_f_proof,
             "ast": child_f_ast,
             "proved": True,
+            "llm_lean_output": None,
         }
 
         analysis_f = state_manager._analyze_proof_structure_ast_based(
@@ -1275,6 +1284,7 @@ class TestStressScenarios:
             "formal_proof": child_h_proof,
             "ast": child_h_ast,
             "proved": True,
+            "llm_lean_output": None,
         }
 
         analysis_h = state_manager._analyze_proof_structure_ast_based(

@@ -3,7 +3,6 @@ from __future__ import annotations
 import logging
 import os
 import pickle
-import re
 from datetime import datetime
 from hashlib import sha256
 from pathlib import Path
@@ -135,6 +134,7 @@ class GoedelsPoetryState:
                 hole_name=None,
                 hole_start=None,
                 hole_end=None,
+                llm_lean_output=None,
             )
             self.formal_theorem_proof = cast(TreeNode, initial_formal_state)
             theorem_for_metadata = combine_preamble_and_body(preamble, body)
@@ -631,6 +631,7 @@ class GoedelsPoetryStateManager:
                 hole_name=None,
                 hole_start=None,
                 hole_end=None,
+                llm_lean_output=None,
             )
             # Queue theorem_to_prove to be proven
             self._state.proof_prove_queue += [theorem_to_prove]
@@ -869,6 +870,7 @@ class GoedelsPoetryStateManager:
                 hole_name=proof_too_difficult.get("hole_name"),
                 hole_start=proof_too_difficult.get("hole_start"),
                 hole_end=proof_too_difficult.get("hole_end"),
+                llm_lean_output=proof_too_difficult["llm_lean_output"],
             )
             self._state.decomposition_search_queue.append(formal_theorem_to_decompose)
 
@@ -2405,7 +2407,7 @@ class GoedelsPoetryStateManager:
 
         return strategies
 
-    def _extract_proof_body_ast_guided(  # noqa: C901
+    def _extract_proof_body_ast_guided(
         self,
         child: TreeNode,
         *,
@@ -2455,6 +2457,9 @@ class GoedelsPoetryStateManager:
         )
         from goedels_poetry.agents.util.kimina_server import parse_kimina_ast_code_response
         from goedels_poetry.parsers.ast import AST
+        from goedels_poetry.parsers.util.foundation.decl_extraction import (
+            extract_proof_body_from_ast,
+        )
 
         if isinstance(child, dict) and "formal_proof" in child and "children" not in child:
             # Leaf node (FormalTheoremProofState)
@@ -2539,45 +2544,20 @@ class GoedelsPoetryStateManager:
                     body_start=body_start,
                 )
 
-                # Use AST-based extraction with the reconstructed proof AST
-                # Pass proof_with_preamble to match the AST's source_text for consistency
-                # (Note: _extract_proof_body_from_ast() doesn't currently use the proof_text parameter,
-                # but passing proof_with_preamble matches the AST structure and is future-proof)
-                proof_body = self._extract_proof_body_from_ast(reconstructed_ast, proof_with_preamble)
-                if proof_body is not None:
-                    # Validate that extracted proof body is not empty
-                    # (AST extraction may return empty string instead of None)
-                    if not proof_body or not proof_body.strip():
-                        # AST extraction returned empty, fall through to regex fallback
-                        proof_body = None
-                    else:
-                        # Successfully extracted using AST
-                        return proof_body
+                # Use robust AST-based extraction from decl_extraction.py
+                target_sig = str(decomposed_state["formal_theorem"]).strip()
+                proof_body = extract_proof_body_from_ast(reconstructed_ast, target_sig)
+                if proof_body is not None and proof_body.strip():
+                    # Successfully extracted using AST
+                    return proof_body
 
-            # Fallback: text-based extraction if AST parsing failed or extraction returned None
-            match = re.search(r":=\s*by", complete_proof)
-            proof_body = complete_proof[match.end() :].strip() if match else complete_proof.strip()
-
-            # Validate proof body is not empty (should not happen under assumptions)
-            if not proof_body or not proof_body.strip():
-                # Enhanced error message: provide context about why extraction might have failed
-                # Determine extraction method used (check if AST parsing succeeded)
-                # Use try-except for defensive programming: parsed_ast might not be defined or might not be a dict
-                try:
-                    extraction_method = (
-                        "AST-based extraction (re-parsed reconstructed proof)"
-                        if (parsed_ast.get("error") is None and parsed_ast.get("ast") is not None)
-                        else "text-based extraction (regex)"
-                    )
-                except (AttributeError, NameError):
-                    # parsed_ast is not defined or not a dict - default to text-based
-                    extraction_method = "text-based extraction (regex)"
-                raise ProofReconstructionError(  # noqa: TRY003
-                    f"Recursively reconstructed proof body is empty or whitespace-only after {extraction_method}. "
-                    f"This should not happen under assumptions (proven child proofs). "
-                    f"The complete_proof from reconstruction was: {repr(complete_proof[:200]) if complete_proof else 'None'}..."
-                )
-            return proof_body
+            # If we reach here, AST extraction failed or returned empty - raise error
+            # No regex fallback as per Option B plan to eliminate all regex heuristics.
+            raise ProofReconstructionError(  # noqa: TRY003
+                f"AST-based extraction failed for reconstructed proof body of internal node with signature: "
+                f"'{decomposed_state.get('formal_theorem')}'. "
+                f"This should not happen under assumptions (syntactic sketches, proven child proofs)."
+            )
 
         # Should not reach here - all child types should be handled above
         raise ProofReconstructionError("Unable to extract proof body from child node. Unknown child type or structure.")  # noqa: TRY003
@@ -2749,134 +2729,6 @@ class GoedelsPoetryStateManager:
             "variable_conflicts": conflicts,
             "proof_body": proof_body,
         }
-
-    def _extract_proof_body_from_ast(  # noqa: C901
-        self, ast: AST, proof_text: str
-    ) -> str | None:
-        """
-        Extract proof body (tactics after ":=" by) from AST structure.
-
-        Uses AST to find the byTactic or tacticSeq node that represents the proof body,
-        then extracts its source text.
-
-        **Usage**: This method is used for internal nodes (DecomposedFormalTheoremState)
-        where we need to extract from reconstructed AST. It is NOT used for leaf nodes,
-        which now use `formal_proof` directly.
-
-        **Known limitation**: This method contains a bug where it finds the first byTactic
-        after `:=` instead of after `by`, which can cause it to find nested byTactics
-        (e.g., in `have` statements) instead of the main proof body. This bug is documented
-        in `RECONSTRUCTION_BUG_ANALYSIS.md`. The bug does not affect leaf nodes since they
-        use `formal_proof` directly.
-
-        Required imports for this method:
-        - from typing import Any
-        - from goedels_poetry.parsers.util import _ast_to_code
-
-        Parameters
-        ----------
-        ast : AST
-            The AST containing the theorem/lemma with proof
-        proof_text : str
-            The full proof text (fallback if AST extraction fails)
-
-        Returns
-        -------
-        str | None
-            The proof body text, or None if extraction fails
-        """
-        from typing import Any
-
-        from goedels_poetry.parsers.util import _ast_to_code
-
-        ast_dict = ast.get_ast()
-        if not isinstance(ast_dict, dict):
-            return None
-
-        # Find theorem/lemma node
-        def find_theorem(node: Any) -> dict | None:
-            """Recursively find theorem/lemma node."""
-            if isinstance(node, dict):
-                kind = node.get("kind", "")
-                if kind in {"Lean.Parser.Command.theorem", "Lean.Parser.Command.lemma", "Lean.Parser.Command.example"}:
-                    return node
-                # Recurse into args
-                for arg in node.get("args", []):
-                    result = find_theorem(arg)
-                    if result:
-                        return result
-            elif isinstance(node, list):
-                for item in node:
-                    result = find_theorem(item)
-                    if result:
-                        return result
-            return None
-
-        theorem_node = find_theorem(ast_dict)
-        if not theorem_node:
-            return None
-
-        # Find proof body: look for := followed by byTactic or tacticSeq
-        args = theorem_node.get("args", [])
-        seen_assign = False
-        proof_node = None
-
-        for arg in args:
-            # Check if this is the ":=" token
-            if isinstance(arg, dict) and arg.get("val") == ":=":
-                seen_assign = True
-                continue
-
-            # Only look for proof body after ":="
-            if seen_assign and isinstance(arg, dict):
-                kind = arg.get("kind", "")
-                if kind in {"Lean.Parser.Term.byTactic", "Lean.Parser.Tactic.tacticSeq"}:
-                    proof_node = arg
-                    break
-
-        # If not found in flat args, search recursively in nested structures after :=
-        if not proof_node and seen_assign:
-
-            def find_proof_in_node(node: Any) -> dict | None:
-                """Recursively search for byTactic or tacticSeq node in nested structures."""
-                if isinstance(node, dict):
-                    kind = node.get("kind", "")
-                    if kind in {"Lean.Parser.Term.byTactic", "Lean.Parser.Tactic.tacticSeq"}:
-                        return node
-                    for v in node.values():
-                        result = find_proof_in_node(v)
-                        if result:
-                            return result
-                elif isinstance(node, list):
-                    for item in node:
-                        result = find_proof_in_node(item)
-                        if result:
-                            return result
-                return None
-
-            # Search in the part after :=
-            assign_idx = next((i for i, a in enumerate(args) if isinstance(a, dict) and a.get("val") == ":="), None)
-            if assign_idx is not None:
-                for arg in args[assign_idx + 1 :]:
-                    proof_node = find_proof_in_node(arg)
-                    if proof_node:
-                        break
-
-        if not proof_node:
-            return None
-
-        # Extract proof body text from AST node
-        try:
-            proof_body_ast = _ast_to_code(proof_node)
-            proof_body = str(proof_body_ast).strip()
-            # Remove leading "by" keyword if present (byTactic includes it)
-            if proof_body.startswith("by"):
-                proof_body = proof_body[2:].lstrip()
-        except Exception:
-            # AST extraction failed, return None to trigger fallback
-            return None
-        else:
-            return proof_body
 
     def reconstruct_complete_proof(
         self,

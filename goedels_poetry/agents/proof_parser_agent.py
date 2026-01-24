@@ -8,12 +8,15 @@ from langgraph.types import Send
 from goedels_poetry.agents.state import FormalTheoremProofState, FormalTheoremProofStates
 from goedels_poetry.agents.util.common import (
     combine_preamble_and_body,
-    combine_theorem_with_proof,
     remove_default_imports_from_ast,
 )
 from goedels_poetry.agents.util.debug import log_kimina_response
 from goedels_poetry.agents.util.kimina_server import parse_kimina_ast_code_response
 from goedels_poetry.parsers.ast import AST
+from goedels_poetry.parsers.util.foundation.decl_extraction import (
+    extract_preamble_from_ast,
+    extract_proof_body_from_ast,
+)
 
 
 class ProofParserAgentFactory:
@@ -122,16 +125,13 @@ def _parse_proof(
     # Create a client to access the Kimina Server
     kimina_client = KiminaClient(api_url=server_url, http_timeout=server_timeout, n_retries=server_max_retries)
 
-    # Combine the original theorem statement with the proof body
-    # state["formal_theorem"] contains the theorem with `:= by sorry`
-    # state["formal_proof"] contains only the proof body (tactics after `:= by`)
-    theorem_with_proof = combine_theorem_with_proof(
-        str(state["formal_theorem"]), str(state["formal_proof"]) if state["formal_proof"] else ""
-    )
+    # Use the raw LLM output for parsing
+    # state["llm_lean_output"] contains the complete declaration from the LLM
+    raw_output = str(state["llm_lean_output"]) if state["llm_lean_output"] else ""
 
     # Parse formal proof of the passed state with the stored preamble prefix
     normalized_preamble = state["preamble"].strip()
-    normalized_body = theorem_with_proof.strip()
+    normalized_body = raw_output.strip()
     proof_with_imports = combine_preamble_and_body(normalized_preamble, normalized_body)
     # Compute the body start offset based on the actual combined string (avoid assuming "\n\n").
     if normalized_preamble and normalized_body:
@@ -146,6 +146,32 @@ def _parse_proof(
 
     # Log debug response
     log_kimina_response("ast_code", parsed_response)
+
+    # Extract proof body and preamble from AST
+    ast = AST(
+        parsed_response["ast"],
+        sorries=parsed_response.get("sorries"),
+        source_text=proof_with_imports,
+        body_start=body_start,
+    )
+
+    # Use robust signature matching to find proof body
+    target_sig = str(state["formal_theorem"]).strip()
+    extracted_proof = extract_proof_body_from_ast(ast, target_sig)
+
+    # If extraction failed, we have a major problem - state should have been valid if we got here
+    if extracted_proof is None:
+        raise ValueError(f"Structural extraction failed for target signature: {target_sig}")  # noqa: TRY003
+
+    state["formal_proof"] = extracted_proof
+
+    # Extract and update preamble (merging imports/opens)
+    extracted_preamble = extract_preamble_from_ast(ast)
+    if extracted_preamble:
+        # Merge with existing preamble, deduplicating if necessary
+        # For now, we prefer the AST-extracted preamble as it's the "ground truth"
+        # of what the LLM produced and Kimina parsed.
+        state["preamble"] = extracted_preamble
 
     # Remove the preamble-specific commands from the parsed AST when applicable
     ast_without_imports = remove_default_imports_from_ast(parsed_response["ast"], preamble=state["preamble"])

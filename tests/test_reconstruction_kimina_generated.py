@@ -342,6 +342,7 @@ if IMPORTS_AVAILABLE:
                 "decomposition_history": [],
                 "search_queries": None,
                 "search_results": None,
+                "llm_lean_output": None,
             },
         )
 

@@ -66,6 +66,7 @@ def test_get_sketches_to_backtrack_with_items(temp_state: GoedelsPoetryState) ->
         ast=None,
         self_correction_attempts=0,
         decomposition_history=[],
+        llm_lean_output=None,
     )
     temp_state.decomposition_backtrack_queue.append(decomposed_state)
 
@@ -123,6 +124,7 @@ def test_set_backtracked_sketches_clears_queue(temp_state: GoedelsPoetryState) -
         ast=None,
         self_correction_attempts=0,
         decomposition_history=[],
+        llm_lean_output=None,
     )
     temp_state.decomposition_backtrack_queue.append(decomposed_state)
 
@@ -221,6 +223,7 @@ def test_backtracking_integration_with_validated_sketches(temp_state: GoedelsPoe
         ast=None,
         self_correction_attempts=0,
         decomposition_history=[],
+        llm_lean_output=None,
     )
 
     # Create a child that has failed (reached max retries - 1, will reach max after increment)
@@ -236,6 +239,7 @@ def test_backtracking_integration_with_validated_sketches(temp_state: GoedelsPoe
         ast=None,
         self_correction_attempts=DECOMPOSER_AGENT_MAX_SELF_CORRECTION_ATTEMPTS - 1,  # Will reach max after increment
         decomposition_history=[],
+        llm_lean_output=None,
     )
     parent["children"] = [cast(TreeNode, child)]
 
@@ -283,6 +287,7 @@ def test_backtracking_sets_finished_when_no_ancestor(temp_state: GoedelsPoetrySt
         ast=None,
         self_correction_attempts=DECOMPOSER_AGENT_MAX_SELF_CORRECTION_ATTEMPTS - 1,  # Will reach max after increment
         decomposition_history=[],
+        llm_lean_output=None,
     )
 
     temp_state.formal_theorem_proof = cast(TreeNode, root)
@@ -322,6 +327,7 @@ def test_backtracking_removes_descendants_from_queues(temp_state: GoedelsPoetryS
         ast=None,
         self_correction_attempts=0,
         decomposition_history=[],
+        llm_lean_output=None,
     )
 
     # Create a child decomposed state
@@ -337,6 +343,7 @@ def test_backtracking_removes_descendants_from_queues(temp_state: GoedelsPoetryS
         ast=None,
         self_correction_attempts=0,
         decomposition_history=[],
+        llm_lean_output=None,
     )
 
     # Create a grandchild proof state
@@ -374,6 +381,7 @@ def test_backtracking_removes_descendants_from_queues(temp_state: GoedelsPoetryS
         ast=None,
         self_correction_attempts=DECOMPOSER_AGENT_MAX_SELF_CORRECTION_ATTEMPTS - 1,
         decomposition_history=[],
+        llm_lean_output=None,
     )
     parent["children"].append(cast(TreeNode, failed_child))
 
@@ -416,6 +424,7 @@ def test_backtracking_with_valid_sketches(temp_state: GoedelsPoetryState) -> Non
         ast=None,
         self_correction_attempts=0,
         decomposition_history=[],
+        llm_lean_output=None,
     )
 
     # Create a parent for the failed sketch
@@ -431,6 +440,7 @@ def test_backtracking_with_valid_sketches(temp_state: GoedelsPoetryState) -> Non
         ast=None,
         self_correction_attempts=0,
         decomposition_history=[],
+        llm_lean_output=None,
     )
 
     # Create a failed sketch
@@ -446,6 +456,7 @@ def test_backtracking_with_valid_sketches(temp_state: GoedelsPoetryState) -> Non
         ast=None,
         self_correction_attempts=DECOMPOSER_AGENT_MAX_SELF_CORRECTION_ATTEMPTS - 1,
         decomposition_history=[],
+        llm_lean_output=None,
     )
     parent_of_failed["children"] = [cast(TreeNode, failed_sketch)]
 
@@ -501,6 +512,7 @@ def test_backtracking_preserves_history(temp_state: GoedelsPoetryState) -> None:
         ast=None,
         self_correction_attempts=DECOMPOSER_AGENT_MAX_SELF_CORRECTION_ATTEMPTS - 1,
         decomposition_history=[],
+        llm_lean_output=None,
     )
     parent["children"] = [cast(TreeNode, child)]
 
@@ -542,6 +554,7 @@ def test_set_decomposed_sketches_with_too_deep_children_backtracks(temp_state: G
         ast=None,
         self_correction_attempts=0,  # Has attempts remaining
         decomposition_history=[],
+        llm_lean_output=None,
     )
 
     parent = DecomposedFormalTheoremState(
@@ -556,6 +569,7 @@ def test_set_decomposed_sketches_with_too_deep_children_backtracks(temp_state: G
         ast=None,
         self_correction_attempts=0,
         decomposition_history=[],
+        llm_lean_output=None,
     )
     grandparent["children"] = [cast(TreeNode, parent)]
 
@@ -573,6 +587,7 @@ def test_set_decomposed_sketches_with_too_deep_children_backtracks(temp_state: G
         self_correction_attempts=0,
         proof_history=[],
         pass_attempts=0,
+        llm_lean_output=None,
     )
     parent["children"] = [cast(TreeNode, too_deep_child)]
 
@@ -625,6 +640,7 @@ def test_set_decomposed_sketches_with_too_deep_children_no_backtrackable_ancesto
         ast=None,
         self_correction_attempts=DECOMPOSER_AGENT_MAX_SELF_CORRECTION_ATTEMPTS,  # Exhausted
         decomposition_history=[],
+        llm_lean_output=None,
     )
 
     parent = DecomposedFormalTheoremState(
@@ -639,6 +655,7 @@ def test_set_decomposed_sketches_with_too_deep_children_no_backtrackable_ancesto
         ast=None,
         self_correction_attempts=0,
         decomposition_history=[],
+        llm_lean_output=None,
     )
     grandparent["children"] = [cast(TreeNode, parent)]
 
@@ -656,6 +673,7 @@ def test_set_decomposed_sketches_with_too_deep_children_no_backtrackable_ancesto
         self_correction_attempts=0,
         proof_history=[],
         pass_attempts=0,
+        llm_lean_output=None,
     )
     parent["children"] = [cast(TreeNode, too_deep_child)]
 
@@ -697,6 +715,7 @@ def test_set_decomposed_sketches_with_too_deep_children_no_grandparent(
         ast=None,
         self_correction_attempts=0,
         decomposition_history=[],
+        llm_lean_output=None,
     )
 
     # Create a child that exceeds max depth
@@ -713,6 +732,7 @@ def test_set_decomposed_sketches_with_too_deep_children_no_grandparent(
         self_correction_attempts=0,
         proof_history=[],
         pass_attempts=0,
+        llm_lean_output=None,
     )
     parent["children"] = [cast(TreeNode, too_deep_child)]
 
@@ -748,6 +768,7 @@ def test_set_decomposed_sketches_with_mixed_depth_children(temp_state: GoedelsPo
         ast=None,
         self_correction_attempts=0,
         decomposition_history=[],
+        llm_lean_output=None,
     )
 
     parent = DecomposedFormalTheoremState(
@@ -762,6 +783,7 @@ def test_set_decomposed_sketches_with_mixed_depth_children(temp_state: GoedelsPo
         ast=None,
         self_correction_attempts=0,
         decomposition_history=[],
+        llm_lean_output=None,
     )
     grandparent["children"] = [cast(TreeNode, parent)]
 
@@ -779,6 +801,7 @@ def test_set_decomposed_sketches_with_mixed_depth_children(temp_state: GoedelsPo
         self_correction_attempts=0,
         proof_history=[],
         pass_attempts=0,
+        llm_lean_output=None,
     )
 
     # Create one normal child (not too deep)
@@ -795,6 +818,7 @@ def test_set_decomposed_sketches_with_mixed_depth_children(temp_state: GoedelsPo
         self_correction_attempts=0,
         proof_history=[],
         pass_attempts=0,
+        llm_lean_output=None,
     )
 
     parent["children"] = [cast(TreeNode, too_deep_child), cast(TreeNode, normal_child)]
@@ -841,6 +865,7 @@ def test_set_decomposed_sketches_with_multiple_too_deep_children_same_grandparen
         ast=None,
         self_correction_attempts=0,
         decomposition_history=[],
+        llm_lean_output=None,
     )
 
     parent1 = DecomposedFormalTheoremState(
@@ -855,6 +880,7 @@ def test_set_decomposed_sketches_with_multiple_too_deep_children_same_grandparen
         ast=None,
         self_correction_attempts=0,
         decomposition_history=[],
+        llm_lean_output=None,
     )
 
     parent2 = DecomposedFormalTheoremState(
@@ -869,6 +895,7 @@ def test_set_decomposed_sketches_with_multiple_too_deep_children_same_grandparen
         ast=None,
         self_correction_attempts=0,
         decomposition_history=[],
+        llm_lean_output=None,
     )
 
     grandparent["children"] = [cast(TreeNode, parent1), cast(TreeNode, parent2)]
@@ -887,6 +914,7 @@ def test_set_decomposed_sketches_with_multiple_too_deep_children_same_grandparen
         self_correction_attempts=0,
         proof_history=[],
         pass_attempts=0,
+        llm_lean_output=None,
     )
 
     too_deep_child2 = FormalTheoremProofState(
@@ -902,6 +930,7 @@ def test_set_decomposed_sketches_with_multiple_too_deep_children_same_grandparen
         self_correction_attempts=0,
         proof_history=[],
         pass_attempts=0,
+        llm_lean_output=None,
     )
 
     parent1["children"] = [cast(TreeNode, too_deep_child1)]
@@ -939,6 +968,7 @@ def test_set_decomposed_sketches_with_no_too_deep_children(temp_state: GoedelsPo
         ast=None,
         self_correction_attempts=0,
         decomposition_history=[],
+        llm_lean_output=None,
     )
 
     # Create children that are NOT too deep
@@ -955,6 +985,7 @@ def test_set_decomposed_sketches_with_no_too_deep_children(temp_state: GoedelsPo
         self_correction_attempts=0,
         proof_history=[],
         pass_attempts=0,
+        llm_lean_output=None,
     )
 
     child2 = FormalTheoremProofState(
@@ -970,6 +1001,7 @@ def test_set_decomposed_sketches_with_no_too_deep_children(temp_state: GoedelsPo
         self_correction_attempts=0,
         proof_history=[],
         pass_attempts=0,
+        llm_lean_output=None,
     )
 
     parent["children"] = [cast(TreeNode, child1), cast(TreeNode, child2)]

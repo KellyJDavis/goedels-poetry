@@ -93,6 +93,7 @@ if IMPORTS_AVAILABLE:
             "self_correction_attempts": 0,
             "proof_history": [],
             "pass_attempts": 0,
+            "llm_lean_output": None,
         }
         if overrides:
             base.update(overrides)
@@ -117,6 +118,7 @@ if IMPORTS_AVAILABLE:
             "ast": None,
             "self_correction_attempts": 0,
             "decomposition_history": [],
+            "llm_lean_output": None,
         }
         if overrides:
             base.update(overrides)

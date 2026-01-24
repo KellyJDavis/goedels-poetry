@@ -81,6 +81,7 @@ def _mk_leaf(
         hole_name=hole_name,
         hole_start=hole_start,
         hole_end=hole_end,
+        llm_lean_output=None,
     )
 
 
@@ -144,6 +145,7 @@ def test_reconstruction_fills_named_have_holes_by_offsets(kimina_server_url: str
         decomposition_history=[],
         search_queries=None,
         search_results=None,
+        llm_lean_output=None,
     )
 
     root["children"].append(
