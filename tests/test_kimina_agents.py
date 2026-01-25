@@ -158,10 +158,11 @@ if IMPORTS_AVAILABLE:
                 server_url=kimina_server_url, server_max_retries=3, server_timeout=3600
             )
 
-            # Create input state
+            # Create input state (checker uses llm_lean_output as the code to check)
             state = _make_formal_theorem_state(
                 SIMPLE_THEOREM,
                 formal_proof=VALID_LEAN_CODE,
+                overrides={"llm_lean_output": VALID_LEAN_CODE},
             )
             input_states: FormalTheoremProofStates = {"inputs": [state], "outputs": []}
 
@@ -181,10 +182,11 @@ if IMPORTS_AVAILABLE:
                 server_url=kimina_server_url, server_max_retries=3, server_timeout=3600
             )
 
-            # Create input state with invalid proof
+            # Create input state with invalid proof (checker uses llm_lean_output)
             state = _make_formal_theorem_state(
                 SIMPLE_THEOREM,
                 formal_proof=INVALID_LEAN_CODE,
+                overrides={"llm_lean_output": INVALID_LEAN_CODE},
             )
             input_states: FormalTheoremProofStates = {"inputs": [state], "outputs": []}
 
@@ -204,10 +206,11 @@ if IMPORTS_AVAILABLE:
                 server_url=kimina_server_url, server_max_retries=3, server_timeout=3600
             )
 
-            # Create input state with proof containing sorry
+            # Create input state with proof containing sorry (checker uses llm_lean_output)
             state = _make_formal_theorem_state(
                 SIMPLE_THEOREM,
                 formal_proof=PROOF_WITH_SORRY,
+                overrides={"llm_lean_output": PROOF_WITH_SORRY},
             )
             input_states: FormalTheoremProofStates = {"inputs": [state], "outputs": []}
 
@@ -236,10 +239,11 @@ if IMPORTS_AVAILABLE:
                 server_url=kimina_server_url, server_max_retries=3, server_timeout=3600
             )
 
-            # Create input state
+            # Parser uses llm_lean_output as the code to parse; it must match formal_theorem.
             state = _make_formal_theorem_state(
                 SIMPLE_THEOREM,
                 formal_proof=VALID_LEAN_CODE,
+                overrides={"llm_lean_output": SIMPLE_THEOREM},
             )
             input_states: FormalTheoremProofStates = {"inputs": [state], "outputs": []}
 
@@ -268,10 +272,11 @@ if IMPORTS_AVAILABLE:
                 server_url=kimina_server_url, server_max_retries=3, server_timeout=3600
             )
 
-            # Create input state
+            # Sketch checker uses llm_lean_output as the code to check.
             state = _make_decomposed_theorem_state(
                 SIMPLE_THEOREM,
                 proof_sketch=VALID_LEAN_CODE,
+                overrides={"llm_lean_output": VALID_LEAN_CODE},
             )
             input_states: DecomposedFormalTheoremStates = {"inputs": [state], "outputs": []}
 
@@ -291,10 +296,11 @@ if IMPORTS_AVAILABLE:
                 server_url=kimina_server_url, server_max_retries=3, server_timeout=3600
             )
 
-            # Create input state with invalid sketch
+            # Sketch checker uses llm_lean_output as the code to check.
             state = _make_decomposed_theorem_state(
                 SIMPLE_THEOREM,
                 proof_sketch=INVALID_LEAN_CODE,
+                overrides={"llm_lean_output": INVALID_LEAN_CODE},
             )
             input_states: DecomposedFormalTheoremStates = {"inputs": [state], "outputs": []}
 
@@ -324,10 +330,11 @@ if IMPORTS_AVAILABLE:
                 server_url=kimina_server_url, server_max_retries=3, server_timeout=3600
             )
 
-            # Create input state
+            # Sketch parser uses llm_lean_output as the code to parse; it must match formal_theorem.
             state = _make_decomposed_theorem_state(
                 SIMPLE_THEOREM,
                 proof_sketch=VALID_LEAN_CODE,
+                overrides={"llm_lean_output": SIMPLE_THEOREM},
             )
             input_states: DecomposedFormalTheoremStates = {"inputs": [state], "outputs": []}
 
