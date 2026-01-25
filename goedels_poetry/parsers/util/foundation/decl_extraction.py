@@ -5,6 +5,84 @@ from goedels_poetry.parsers.util.foundation.ast_to_code import _ast_to_code
 from goedels_poetry.parsers.util.foundation.kind_utils import __is_theorem_or_lemma_kind, __normalize_kind
 
 
+def _is_comment_kind(kind: str) -> bool:
+    """True if the node kind indicates a comment (docstring, block, or line comment)."""
+    if not isinstance(kind, str):
+        return False
+    k = kind.lower()
+    return "doccomment" in k or "comment" in k
+
+
+def _reconstruct_signature_from_decl_node(decl_node: dict, *, skip_comments: bool = True) -> str:
+    """
+    Reconstruct the declaration signature (up to but not including ':=') from a decl AST node.
+
+    Iterates decl_node.args, optionally skips comment-like nodes, stops at := / declValSimple /
+    declValEqns, and joins reconstructed text. Recurses into 'group' args (e.g. lemma) so we
+    stop at declVal/:= inside them. Used for both signature extraction and proof-body matching.
+    """
+
+    def collect(args: list, parts: list[str]) -> bool:
+        """Append signature parts from args; return True if we stopped at :=/declVal."""
+        for arg in args:
+            if not isinstance(arg, dict):
+                parts.append(_ast_to_code(arg))
+                continue
+            kind = arg.get("kind", "")
+            if skip_comments and _is_comment_kind(kind):
+                continue
+            if kind in ("Lean.Parser.Command.declValSimple", "Lean.Parser.Command.declValEqns"):
+                return True
+            if "declval" in kind.lower():
+                return True
+            if arg.get("val") == ":=":
+                return True
+            if kind == "group":
+                if collect(arg.get("args", []), parts):
+                    return True
+                continue
+            parts.append(_ast_to_code(arg))
+        return False
+
+    out: list[str] = []
+    collect(decl_node.get("args", []), out)
+    return "".join(out).strip()
+
+
+def extract_signature_from_ast(ast: AST) -> str | None:
+    """
+    Return the signature only (e.g. `theorem n : True`) for the last theorem/lemma in the AST.
+
+    No comments, no `:= by sorry` or variants. Returns None if no such declaration exists.
+    Reuses the same traversal and last-occurrence heuristic as extract_proof_body_from_ast.
+    """
+    ast_root = ast.get_ast()
+    if not isinstance(ast_root, dict):
+        return None
+
+    commands = ast_root.get("commands", [])
+    if not commands:
+        commands = ast_root.get("args", [])
+
+    last_decl_node: dict | None = None
+    for cmd in commands:
+        if not isinstance(cmd, dict):
+            continue
+        target_node = cmd
+        kind = cmd.get("kind", "")
+        if kind == "Lean.Parser.Command.declaration":
+            for arg in cmd.get("args", []):
+                if isinstance(arg, dict) and __is_theorem_or_lemma_kind(arg.get("kind")):
+                    target_node = arg
+                    break
+        if __is_theorem_or_lemma_kind(target_node.get("kind")):
+            last_decl_node = target_node
+
+    if last_decl_node is None:
+        return None
+    return _reconstruct_signature_from_decl_node(last_decl_node, skip_comments=True)
+
+
 def extract_proof_body_from_ast(ast: AST, target_signature: str) -> str | None:  # noqa: C901
     """
     Finds the proof body (tactics) of a declaration matching the target signature.
@@ -63,24 +141,9 @@ def extract_proof_body_from_ast(ast: AST, target_signature: str) -> str | None: 
                 matching_proof_node = proof_node
                 continue
 
-        # 2. Fallback: Reconstruct signature text from AST and compare
-        # We take all arguments of target_node up to but not including the value part
-        sig_parts = []
-        for arg in target_node.get("args", []):
-            if not isinstance(arg, dict):
-                sig_parts.append(_ast_to_code(arg))
-                continue
-
-            kind = arg.get("kind", "")
-            # Stop before declValSimple or declValEqns or anything starting with :=
-            if kind in ["Lean.Parser.Command.declValSimple", "Lean.Parser.Command.declValEqns"]:
-                break
-            if arg.get("val") == ":=":
-                break
-            sig_parts.append(_ast_to_code(arg))
-
-        reconstructed_sig = "".join(sig_parts).strip()
-        # Clean up any extra spaces for comparison
+        # 2. Fallback: Reconstruct signature text from AST and compare (skip_comments=True
+        #    so both sides are normalised; see plan 1.3 / 7.6)
+        reconstructed_sig = _reconstruct_signature_from_decl_node(target_node, skip_comments=True)
         if " ".join(reconstructed_sig.split()) == " ".join(target_signature.split()):
             proof_node = _find_proof_body_node_structurally(target_node)
             if proof_node:

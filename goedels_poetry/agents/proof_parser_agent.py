@@ -11,11 +11,12 @@ from goedels_poetry.agents.util.common import (
     remove_default_imports_from_ast,
 )
 from goedels_poetry.agents.util.debug import log_kimina_response
-from goedels_poetry.agents.util.kimina_server import parse_kimina_ast_code_response
+from goedels_poetry.agents.util.kimina_server import is_no_usable_ast, parse_kimina_ast_code_response
 from goedels_poetry.parsers.ast import AST
 from goedels_poetry.parsers.util.foundation.decl_extraction import (
     extract_preamble_from_ast,
     extract_proof_body_from_ast,
+    extract_signature_from_ast,
 )
 
 
@@ -99,6 +100,14 @@ def _map_edge(states: FormalTheoremProofStates) -> list[Send]:
     return [Send("parser_agent", state) for state in states["inputs"]]
 
 
+def _actionable_suffix(parsed: dict, code_preview: str) -> str:
+    """Always include something actionable: error when present, else short preview (plan 2.3, 8.7)."""
+    err = parsed.get("error")
+    if err:
+        return f"; error: {err}"
+    return f"; preview: {code_preview[:200]!r}"
+
+
 def _parse_proof(
     server_url: str, server_max_retries: int, server_timeout: int, state: FormalTheoremProofState
 ) -> FormalTheoremProofStates:
@@ -122,67 +131,77 @@ def _parse_proof(
         A FormalTheoremProofStates with the FormalTheoremProofState with the parsed proof added
         to the FormalTheoremProofStates "outputs" member.
     """
-    # Create a client to access the Kimina Server
     kimina_client = KiminaClient(api_url=server_url, http_timeout=server_timeout, n_retries=server_max_retries)
-
-    # Use the raw LLM output for parsing
-    # state["llm_lean_output"] contains the complete declaration from the LLM
-    raw_output = str(state["llm_lean_output"]) if state["llm_lean_output"] else ""
-
-    # Parse formal proof of the passed state with the stored preamble prefix
     normalized_preamble = state["preamble"].strip()
+    normalized_formal = str(state["formal_theorem"]).strip()
+    formal_with_preamble = combine_preamble_and_body(normalized_preamble, normalized_formal)
+
+    if normalized_preamble and normalized_formal:
+        idx = formal_with_preamble.find(normalized_formal, len(normalized_preamble))
+        body_start_formal = idx if idx != -1 else len(normalized_preamble)
+    else:
+        body_start_formal = 0
+
+    ast_code_response_formal = kimina_client.ast_code(formal_with_preamble)
+    parsed_formal = parse_kimina_ast_code_response(ast_code_response_formal)
+    log_kimina_response("ast_code_formal", parsed_formal)
+
+    if is_no_usable_ast(parsed_formal):
+        raise ValueError(
+            "Kimina failed to parse formal theorem" + _actionable_suffix(parsed_formal, formal_with_preamble)
+        )
+
+    ast_formal = AST(
+        parsed_formal["ast"],
+        sorries=parsed_formal.get("sorries"),
+        source_text=formal_with_preamble,
+        body_start=body_start_formal,
+    )
+    target_sig = extract_signature_from_ast(ast_formal)
+    if target_sig is None:
+        raise ValueError(
+            "Could not extract signature from formal theorem AST"
+            + _actionable_suffix(parsed_formal, formal_with_preamble)
+        )
+
+    raw_output = str(state["llm_lean_output"]) if state["llm_lean_output"] else ""
     normalized_body = raw_output.strip()
     proof_with_imports = combine_preamble_and_body(normalized_preamble, normalized_body)
-    # Compute the body start offset based on the actual combined string (avoid assuming "\n\n").
     if normalized_preamble and normalized_body:
-        body_start = proof_with_imports.find(normalized_body, len(normalized_preamble))
-        body_start = body_start if body_start != -1 else len(normalized_preamble)
+        idx = proof_with_imports.find(normalized_body, len(normalized_preamble))
+        body_start = idx if idx != -1 else len(normalized_preamble)
     else:
         body_start = 0
+
     ast_code_response = kimina_client.ast_code(proof_with_imports)
-
-    # Parse ast_code_response
     parsed_response = parse_kimina_ast_code_response(ast_code_response)
-
-    # Log debug response
     log_kimina_response("ast_code", parsed_response)
 
-    # Extract proof body and preamble from AST
+    if is_no_usable_ast(parsed_response):
+        raise ValueError("Kimina failed to parse proof" + _actionable_suffix(parsed_response, proof_with_imports))
+
     ast = AST(
         parsed_response["ast"],
         sorries=parsed_response.get("sorries"),
         source_text=proof_with_imports,
         body_start=body_start,
     )
-
-    # Use robust signature matching to find proof body
-    target_sig = str(state["formal_theorem"]).strip()
     extracted_proof = extract_proof_body_from_ast(ast, target_sig)
-
-    # If extraction failed, we have a major problem - state should have been valid if we got here
     if extracted_proof is None:
-        raise ValueError(f"Structural extraction failed for target signature: {target_sig}")  # noqa: TRY003
+        msg = f"Structural extraction failed for target signature: {target_sig}; preview: {proof_with_imports[:200]!r}"
+        raise ValueError(msg)
 
     state["formal_proof"] = extracted_proof
 
-    # Extract and update preamble (merging imports/opens)
     extracted_preamble = extract_preamble_from_ast(ast)
     if extracted_preamble:
-        # Merge with existing preamble, deduplicating if necessary
-        # For now, we prefer the AST-extracted preamble as it's the "ground truth"
-        # of what the LLM produced and Kimina parsed.
         state["preamble"] = extracted_preamble
 
-    # Remove the preamble-specific commands from the parsed AST when applicable
     ast_without_imports = remove_default_imports_from_ast(parsed_response["ast"], preamble=state["preamble"])
-
-    # Set state["ast"] with the parsed_response (without DEFAULT_IMPORTS)
     state["ast"] = AST(
         ast_without_imports,
         sorries=parsed_response.get("sorries"),
         source_text=proof_with_imports,
         body_start=body_start,
     )
-
-    # Return a FormalTheoremProofStates with state added to its outputs
     return {"outputs": [state]}  # type: ignore[typeddict-item]

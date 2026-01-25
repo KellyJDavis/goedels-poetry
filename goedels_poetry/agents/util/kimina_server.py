@@ -129,6 +129,22 @@ def parse_kimina_ast_code_response(ast_code_response: AstModuleResponse) -> dict
     return parsed_response
 
 
+def is_no_usable_ast(parsed: dict) -> bool:
+    """
+    True if the parsed ast_code response has no usable AST (parse failure).
+
+    Covers: error set, ast None, or ast a dict with neither "commands" nor "args".
+    """
+    if parsed.get("error"):
+        return True
+    ast = parsed.get("ast")
+    if ast is None:
+        return True
+    if not isinstance(ast, dict):
+        return True
+    return not (ast.get("commands") or ast.get("args"))
+
+
 def extract_hypotheses_from_check_response(parsed_check_response: dict) -> list[str]:
     """
     Extract hypothesis strings from "unsolved goals" error messages in a parsed check response.

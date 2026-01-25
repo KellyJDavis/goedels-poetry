@@ -8,6 +8,7 @@ from goedels_poetry.parsers.ast import AST
 from goedels_poetry.parsers.util.foundation.decl_extraction import (
     extract_preamble_from_ast,
     extract_proof_body_from_ast,
+    extract_signature_from_ast,
 )
 
 
@@ -28,6 +29,11 @@ def _create_ast(code: str, server_url: str) -> AST:
     if parsed.get("error"):
         pytest.fail(f"AST creation failed: {parsed['error']}")
     return AST(parsed["ast"], source_text=code)
+
+
+def _normalise_sig(s: str) -> str:
+    """Whitespace-normalise signature for comparison (plan 3.1, 7.5)."""
+    return " ".join(s.strip().split())
 
 
 @pytest.mark.usefixtures("skip_if_no_lean")
@@ -109,3 +115,85 @@ theorem target (x : Nat) : x = x := by rfl
         target_sig = "theorem target (x : Nat) : x = x"
         body = extract_proof_body_from_ast(ast, target_sig)
         assert body == "rfl"
+
+
+@pytest.mark.usefixtures("skip_if_no_lean")
+class TestExtractSignatureFromAst:
+    """Unit tests for extract_signature_from_ast (plan 3.1)."""
+
+    def test_case1_inline_sorry(self, kimina_server_url: str) -> None:
+        code = f"""{DEFAULT_IMPORTS}
+theorem t : True := by sorry
+"""
+        ast = _create_ast(code, kimina_server_url)
+        got = extract_signature_from_ast(ast)
+        assert got is not None
+        assert _normalise_sig(got) == _normalise_sig("theorem t : True")
+
+    def test_case2_newline_before_sorry(self, kimina_server_url: str) -> None:
+        code = f"""{DEFAULT_IMPORTS}
+theorem t : True := by
+  sorry
+"""
+        ast = _create_ast(code, kimina_server_url)
+        got = extract_signature_from_ast(ast)
+        assert got is not None
+        assert _normalise_sig(got) == _normalise_sig("theorem t : True")
+
+    def test_case3_block_comment_before_sorry(self, kimina_server_url: str) -> None:
+        code = f"""{DEFAULT_IMPORTS}
+theorem t : True := by
+  /- block -/
+  sorry
+"""
+        ast = _create_ast(code, kimina_server_url)
+        got = extract_signature_from_ast(ast)
+        assert got is not None
+        assert _normalise_sig(got) == _normalise_sig("theorem t : True")
+
+    def test_case4_multiple_block_comments(self, kimina_server_url: str) -> None:
+        code = f"""{DEFAULT_IMPORTS}
+theorem t : True := by
+  /- one -/
+  /- two -/
+  sorry
+"""
+        ast = _create_ast(code, kimina_server_url)
+        got = extract_signature_from_ast(ast)
+        assert got is not None
+        assert _normalise_sig(got) == _normalise_sig("theorem t : True")
+
+    def test_case5_docstring_stripped(self, kimina_server_url: str) -> None:
+        code = f"""{DEFAULT_IMPORTS}
+/- doc -/ theorem t : True := by sorry
+"""
+        ast = _create_ast(code, kimina_server_url)
+        got = extract_signature_from_ast(ast)
+        assert got is not None
+        assert _normalise_sig(got) == _normalise_sig("theorem t : True")
+
+    def test_case6_last_occurrence(self, kimina_server_url: str) -> None:
+        code = f"""{DEFAULT_IMPORTS}
+theorem t1 : True := by sorry
+theorem t2 : True := by sorry
+"""
+        ast = _create_ast(code, kimina_server_url)
+        got = extract_signature_from_ast(ast)
+        assert got is not None
+        assert _normalise_sig(got) == _normalise_sig("theorem t2 : True")
+
+    def test_case7_lemma(self, kimina_server_url: str) -> None:
+        code = f"""{DEFAULT_IMPORTS}
+lemma L : 1 = 1 := by rfl
+"""
+        ast = _create_ast(code, kimina_server_url)
+        got = extract_signature_from_ast(ast)
+        assert got is not None
+        assert _normalise_sig(got) == _normalise_sig("lemma L : 1 = 1")
+
+    def test_case8_no_theorem_returns_none(self, kimina_server_url: str) -> None:
+        code = f"""{DEFAULT_IMPORTS}
+"""
+        ast = _create_ast(code, kimina_server_url)
+        got = extract_signature_from_ast(ast)
+        assert got is None
