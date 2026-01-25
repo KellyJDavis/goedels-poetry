@@ -8,7 +8,6 @@ from langgraph.types import Send
 from goedels_poetry.agents.state import FormalTheoremProofState, FormalTheoremProofStates
 from goedels_poetry.agents.util.common import (
     combine_preamble_and_body,
-    combine_theorem_with_proof,
     get_error_str,
 )
 from goedels_poetry.agents.util.debug import log_kimina_response
@@ -121,15 +120,12 @@ def _check_proof(
     # Create a client to access the Kimina Server
     kimina_client = KiminaClient(api_url=server_url, http_timeout=server_timeout, n_retries=server_max_retries)
 
-    # Combine the original theorem statement with the proof body
-    # state["formal_theorem"] contains the theorem with `:= by sorry`
-    # state["formal_proof"] contains only the proof body (tactics after `:= by`)
-    theorem_with_proof = combine_theorem_with_proof(
-        str(state["formal_theorem"]), str(state["formal_proof"]) if state["formal_proof"] else ""
-    )
+    # Use the raw LLM output directly for validation
+    # state["llm_lean_output"] contains the complete declaration from the LLM
+    raw_output = str(state["llm_lean_output"]) if state["llm_lean_output"] else ""
 
     # Check the formal proof with the stored preamble prefix
-    proof_with_imports = combine_preamble_and_body(state["preamble"], theorem_with_proof)
+    proof_with_imports = combine_preamble_and_body(state["preamble"], raw_output)
     check_response = kimina_client.check(proof_with_imports, timeout=server_timeout)
 
     # Parse check_response

@@ -104,5 +104,8 @@ def _corrector(state: DecomposedFormalTheoremState) -> DecomposedFormalTheoremSt
     # Add correction request to the state's decomposition_history
     state["decomposition_history"] += [HumanMessage(content=prompt)]
 
+    # Reset llm_lean_output as it is now invalid for this new round
+    state["llm_lean_output"] = None
+
     # Return a DecomposedFormalTheoremStates with state added to its outputs
     return {"outputs": [state]}  # type: ignore[typeddict-item]

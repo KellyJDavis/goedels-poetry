@@ -104,5 +104,8 @@ def _corrector(state: FormalTheoremProofState) -> FormalTheoremProofStates:
     # Add correction request to the state's proof_history
     state["proof_history"] += [HumanMessage(content=prompt)]
 
+    # Reset llm_lean_output as it is now invalid for this new round
+    state["llm_lean_output"] = None
+
     # Return a FormalTheoremProofStates with state added to its outputs
     return {"outputs": [state]}  # type: ignore[typeddict-item]

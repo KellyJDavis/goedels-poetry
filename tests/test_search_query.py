@@ -102,6 +102,7 @@ def test_set_theorems_with_search_queries_generated(temp_state: GoedelsPoetrySta
             decomposition_history=[],
             search_queries=[f"query{i}", f"query{i}_alt"],
             search_results=None,
+            llm_lean_output=None,
         )
         states.append(state)
 
@@ -141,6 +142,7 @@ def test_queue_proofs_for_decomposition_adds_to_search_queue(temp_state: Goedels
         self_correction_attempts=0,
         proof_history=[],
         pass_attempts=0,
+        llm_lean_output=None,
     )
 
     from goedels_poetry.config.llm import PROVER_AGENT_MAX_PASS

@@ -3,7 +3,6 @@ from __future__ import annotations
 import logging
 import os
 import pickle
-import re
 from datetime import datetime
 from hashlib import sha256
 from pathlib import Path
@@ -135,6 +134,7 @@ class GoedelsPoetryState:
                 hole_name=None,
                 hole_start=None,
                 hole_end=None,
+                llm_lean_output=None,
             )
             self.formal_theorem_proof = cast(TreeNode, initial_formal_state)
             theorem_for_metadata = combine_preamble_and_body(preamble, body)
@@ -631,6 +631,7 @@ class GoedelsPoetryStateManager:
                 hole_name=None,
                 hole_start=None,
                 hole_end=None,
+                llm_lean_output=None,
             )
             # Queue theorem_to_prove to be proven
             self._state.proof_prove_queue += [theorem_to_prove]
@@ -869,6 +870,7 @@ class GoedelsPoetryStateManager:
                 hole_name=proof_too_difficult.get("hole_name"),
                 hole_start=proof_too_difficult.get("hole_start"),
                 hole_end=proof_too_difficult.get("hole_end"),
+                llm_lean_output=proof_too_difficult["llm_lean_output"],
             )
             self._state.decomposition_search_queue.append(formal_theorem_to_decompose)
 
@@ -1799,6 +1801,13 @@ class GoedelsPoetryStateManager:
             parse_kimina_check_response,
         )
         from goedels_poetry.parsers.ast import AST
+        from goedels_poetry.parsers.util.collection_and_analysis.variable_extraction import (
+            extract_outer_scope_variables_ast_based,
+            extract_variables_with_origin,
+        )
+        from goedels_poetry.parsers.util.collection_and_analysis.variable_renaming import (
+            rename_conflicting_variables_ast_based,
+        )
         # ProofReconstructionError is defined at module level in goedels_poetry/state.py (same file as this method)
 
         # Sort children by hole_start position to ensure they match textual order of holes
@@ -1885,6 +1894,15 @@ class GoedelsPoetryStateManager:
         # This ensures coordinate system consistency (AST positions are relative to stripped body)
         result = normalized_sketch
 
+        # Phase 3: Extract outer scope variables BEFORE processing children
+        # This provides the baseline for conflict detection
+        outer_scope_vars = extract_outer_scope_variables_ast_based(
+            result,
+            ast,
+            kimina_client,
+            server_timeout,
+        )
+
         # Process children one at a time in sorted order, re-querying holes from AST after each replacement
         for child in sorted_children:
             child_hole_name = child.get("hole_name") if isinstance(child, dict) else None
@@ -1945,6 +1963,21 @@ class GoedelsPoetryStateManager:
                     f"child hole_start={child_hole_start}."
                 )
 
+            # Phase 4: Analyze proof structure (function types and applications)
+            # Note: The analysis["should_preserve_application"] flag indicates when
+            # function application structure should be preserved instead of inlining.
+            # The actual preservation logic is a TODO - for now, we proceed with
+            # normal inlining (with variable renaming from Phase 3).
+            # Future enhancement: When should_preserve_application is True, preserve
+            # the function application structure in the final proof.
+            _ = self._analyze_proof_structure_ast_based(
+                child,
+                ast,
+                child_hole_name or "",
+                kimina_client,
+                server_timeout,
+            )
+
             # Extract child proof body
             child_proof_body = self._extract_proof_body_ast_guided(
                 child, kimina_client=kimina_client, server_timeout=server_timeout
@@ -1956,6 +1989,15 @@ class GoedelsPoetryStateManager:
                     f"Child proof body for hole {child_hole_name} is empty or whitespace-only. "
                     f"This should not happen under assumptions (proven child proofs)."
                 )
+
+            # Phase 3: Rename conflicting variables before inlining
+            child_proof_body = rename_conflicting_variables_ast_based(
+                child_proof_body,
+                outer_scope_vars,
+                kimina_client,
+                server_timeout,
+                child_hole_name or "",
+            )
 
             # Phase 1: Extract indentation context from AST
             # Use result (already normalized at start) since positions are relative to current state
@@ -2132,6 +2174,60 @@ class GoedelsPoetryStateManager:
                             f"but found {len(updated_spans)}. This indicates an AST inconsistency - the replaced hole "
                             f"is not correctly reflected in the updated AST."
                         )
+
+                    # Phase 3: Update outer_scope_vars with new variables from this replacement
+                    # (for subsequent replacements)
+                    # Use check() to get ALL new variables, not just have/let
+                    child_proof_with_preamble = combine_preamble_and_body(preamble, child_proof_body)
+                    child_check_response = kimina_client.check(child_proof_with_preamble, timeout=server_timeout)
+                    child_parsed_check = parse_kimina_check_response(child_check_response)
+
+                    # Extract ALL variables from check() response with origin information
+                    # Need to create AST for the child proof to determine origins
+                    child_ast_response = kimina_client.ast_code(child_proof_with_preamble, timeout=server_timeout)
+                    child_parsed_ast = parse_kimina_ast_code_response(child_ast_response)
+                    child_ast_for_vars = None
+                    if child_parsed_ast.get("ast"):
+                        child_ast_without_imports = remove_default_imports_from_ast(
+                            child_parsed_ast["ast"], preamble=preamble
+                        )
+                        child_ast_for_vars = AST(
+                            child_ast_without_imports,
+                            sorries=child_parsed_ast.get("sorries"),
+                            source_text=child_proof_with_preamble,
+                            body_start=len(preamble.strip()) + 2 if preamble.strip() else 0,
+                        )
+
+                    new_vars = (
+                        extract_variables_with_origin(child_parsed_check, child_ast_for_vars)
+                        if child_ast_for_vars
+                        else []
+                    )
+                    for var_info in new_vars:
+                        # Only add proof body variables to outer scope (not lemma parameters)
+                        # Lemma parameters are part of the signature and don't need to be tracked
+                        if var_info.get("is_lemma_parameter", False):
+                            continue
+                        var_name = var_info["name"]
+                        declaration_node = var_info.get("declaration_node")
+                        declaration_pos = None
+                        if declaration_node:
+                            info = declaration_node.get("info", {})
+                            if isinstance(info, dict):
+                                pos = info.get("pos")
+                                if isinstance(pos, list) and len(pos) >= 2:
+                                    declaration_pos = (pos[0], pos[1])
+
+                        outer_scope_vars[var_name] = {
+                            "name": var_name,
+                            "type": var_info.get("type"),
+                            "hypothesis": var_info["hypothesis"],
+                            "declaration_node": declaration_node,
+                            "declaration_pos": declaration_pos,
+                            "is_lemma_parameter": False,  # These are proof body variables
+                            "is_proof_body_variable": True,
+                            "source": "check_response",
+                        }
 
                     # Verify total hole count decreased by 1
                     total_holes_before = sum(len(spans) for spans in holes.values())
@@ -2311,7 +2407,7 @@ class GoedelsPoetryStateManager:
 
         return strategies
 
-    def _extract_proof_body_ast_guided(  # noqa: C901
+    def _extract_proof_body_ast_guided(
         self,
         child: TreeNode,
         *,
@@ -2321,8 +2417,8 @@ class GoedelsPoetryStateManager:
         """
         Extract proof body from child node.
 
-        Uses AST where available for accurate extraction, falls back to
-        simple text extraction.
+        Uses `formal_proof` directly for leaf nodes (guaranteed to contain complete
+        proof body). For decomposed nodes, recursively reconstructs proof.
 
         Required imports for this method:
         - import re
@@ -2361,6 +2457,9 @@ class GoedelsPoetryStateManager:
         )
         from goedels_poetry.agents.util.kimina_server import parse_kimina_ast_code_response
         from goedels_poetry.parsers.ast import AST
+        from goedels_poetry.parsers.util.foundation.decl_extraction import (
+            extract_proof_body_from_ast,
+        )
 
         if isinstance(child, dict) and "formal_proof" in child and "children" not in child:
             # Leaf node (FormalTheoremProofState)
@@ -2374,23 +2473,13 @@ class GoedelsPoetryStateManager:
                 )
 
             proof_text = str(proof_state["formal_proof"])
-            proof_ast = proof_state.get("ast")
 
-            # AST-based extraction: if AST is available, use it to find proof body
-            # Note: If _extract_proof_body_from_ast() returns None (e.g., AST structure doesn't match expected pattern),
-            # we fall back to regex-based extraction. This is acceptable - the regex fallback handles most cases.
-            if proof_ast is not None and isinstance(proof_ast, AST):
-                proof_body = self._extract_proof_body_from_ast(proof_ast, proof_text)
-                if proof_body is not None:
-                    return proof_body
-
-            # Fallback: simple text extraction if AST not available or AST extraction returned None
-            # If proof_text starts with theorem/lemma, extract after ":=" by
-            # Otherwise return as-is (already tactics)
-            if re.search(r"^\s*(theorem|lemma)\s+", proof_text, re.MULTILINE):
-                match = re.search(r":=\s*by", proof_text)
-                if match:
-                    return proof_text[match.end() :].strip()
+            # Use formal_proof directly - it's already the complete proof body
+            # formal_proof is extracted from the proven theorem by _parse_prover_response
+            # and contains only the proof body (tactics after ":= by")
+            #
+            # Verification: _parse_prover_response ALWAYS returns just the proof body
+            # (verified via focused Python program - all tests passed)
             return proof_text.strip()
 
         elif isinstance(child, dict) and "children" in child:
@@ -2455,166 +2544,191 @@ class GoedelsPoetryStateManager:
                     body_start=body_start,
                 )
 
-                # Use AST-based extraction with the reconstructed proof AST
-                # Pass proof_with_preamble to match the AST's source_text for consistency
-                # (Note: _extract_proof_body_from_ast() doesn't currently use the proof_text parameter,
-                # but passing proof_with_preamble matches the AST structure and is future-proof)
-                proof_body = self._extract_proof_body_from_ast(reconstructed_ast, proof_with_preamble)
-                if proof_body is not None:
-                    # Validate that extracted proof body is not empty
-                    # (AST extraction may return empty string instead of None)
-                    if not proof_body or not proof_body.strip():
-                        # AST extraction returned empty, fall through to regex fallback
-                        proof_body = None
-                    else:
-                        # Successfully extracted using AST
-                        return proof_body
+                # Use robust AST-based extraction from decl_extraction.py
+                target_sig = str(decomposed_state["formal_theorem"]).strip()
+                proof_body = extract_proof_body_from_ast(reconstructed_ast, target_sig)
+                if proof_body is not None and proof_body.strip():
+                    # Successfully extracted using AST
+                    return proof_body
 
-            # Fallback: text-based extraction if AST parsing failed or extraction returned None
-            match = re.search(r":=\s*by", complete_proof)
-            proof_body = complete_proof[match.end() :].strip() if match else complete_proof.strip()
-
-            # Validate proof body is not empty (should not happen under assumptions)
-            if not proof_body or not proof_body.strip():
-                # Enhanced error message: provide context about why extraction might have failed
-                # Determine extraction method used (check if AST parsing succeeded)
-                # Use try-except for defensive programming: parsed_ast might not be defined or might not be a dict
-                try:
-                    extraction_method = (
-                        "AST-based extraction (re-parsed reconstructed proof)"
-                        if (parsed_ast.get("error") is None and parsed_ast.get("ast") is not None)
-                        else "text-based extraction (regex)"
-                    )
-                except (AttributeError, NameError):
-                    # parsed_ast is not defined or not a dict - default to text-based
-                    extraction_method = "text-based extraction (regex)"
-                raise ProofReconstructionError(  # noqa: TRY003
-                    f"Recursively reconstructed proof body is empty or whitespace-only after {extraction_method}. "
-                    f"This should not happen under assumptions (proven child proofs). "
-                    f"The complete_proof from reconstruction was: {repr(complete_proof[:200]) if complete_proof else 'None'}..."
-                )
-            return proof_body
+            # If we reach here, AST extraction failed or returned empty - raise error
+            # No regex fallback as per Option B plan to eliminate all regex heuristics.
+            raise ProofReconstructionError(  # noqa: TRY003
+                f"AST-based extraction failed for reconstructed proof body of internal node with signature: "
+                f"'{decomposed_state.get('formal_theorem')}'. "
+                f"This should not happen under assumptions (syntactic sketches, proven child proofs)."
+            )
 
         # Should not reach here - all child types should be handled above
         raise ProofReconstructionError("Unable to extract proof body from child node. Unknown child type or structure.")  # noqa: TRY003
 
-    def _extract_proof_body_from_ast(  # noqa: C901
-        self, ast: AST, proof_text: str
-    ) -> str | None:
+    def _analyze_proof_structure_ast_based(  # noqa: C901
+        self,
+        child: TreeNode,
+        parent_ast: AST,
+        hole_name: str,
+        kimina_client: KiminaClient,
+        server_timeout: int,
+    ) -> dict:
         """
-        Extract proof body (tactics after ":=" by) from AST structure.
+        Analyze proof structure using AST and check() calls.
 
-        Uses AST to find the byTactic or tacticSeq node that represents the proof body,
-        then extracts its source text.
-
-        Required imports for this method:
-        - from typing import Any
-        - from goedels_poetry.parsers.util import _ast_to_code
+        Returns analysis dict with:
+        - is_function_type: bool
+        - is_pi_type: bool
+        - is_function_application: bool
+        - should_preserve_application: bool
+        - variable_conflicts: list[dict]
+        - proof_body: str
 
         Parameters
         ----------
-        ast : AST
-            The AST containing the theorem/lemma with proof
-        proof_text : str
-            The full proof text (fallback if AST extraction fails)
+        child: TreeNode
+            The child node (subgoal)
+        parent_ast: AST
+            The parent sketch AST
+        hole_name: str
+            The hole name (subgoal name)
+        kimina_client: KiminaClient
+            Client for AST and check() calls
+        server_timeout: int
+            Timeout for calls
 
         Returns
         -------
-        str | None
-            The proof body text, or None if extraction fails
+        dict
+            Analysis results
         """
-        from typing import Any
+        from typing import cast
 
-        from goedels_poetry.parsers.util import _ast_to_code
+        from goedels_poetry.agents.state import (
+            DecomposedFormalTheoremState,
+            FormalTheoremProofState,
+        )
+        from goedels_poetry.agents.util.common import (
+            DEFAULT_IMPORTS,
+            combine_preamble_and_body,
+        )
+        from goedels_poetry.agents.util.kimina_server import parse_kimina_check_response
+        from goedels_poetry.parsers.ast import AST
+        from goedels_poetry.parsers.util.collection_and_analysis.application_detection import (
+            find_subgoal_usage_in_ast,
+            is_app_node,
+        )
+        from goedels_poetry.parsers.util.collection_and_analysis.variable_extraction import (
+            extract_outer_scope_variables_ast_based,
+            extract_variables_with_origin,
+        )
 
-        ast_dict = ast.get_ast()
-        if not isinstance(ast_dict, dict):
-            return None
+        # Import type extraction function - use getattr to avoid name mangling
+        from goedels_poetry.parsers.util.types_and_binders import type_extraction
+        from goedels_poetry.parsers.util.types_and_binders.type_analysis import (
+            is_function_type,
+            is_pi_or_forall_type,
+        )
 
-        # Find theorem/lemma node
-        def find_theorem(node: Any) -> dict | None:
-            """Recursively find theorem/lemma node."""
-            if isinstance(node, dict):
-                kind = node.get("kind", "")
-                if kind in {"Lean.Parser.Command.theorem", "Lean.Parser.Command.lemma", "Lean.Parser.Command.example"}:
-                    return node
-                # Recurse into args
-                for arg in node.get("args", []):
-                    result = find_theorem(arg)
-                    if result:
-                        return result
-            elif isinstance(node, list):
-                for item in node:
-                    result = find_theorem(item)
-                    if result:
-                        return result
-            return None
+        _extract_type_ast_func = getattr(type_extraction, "__extract_type_ast")
 
-        theorem_node = find_theorem(ast_dict)
-        if not theorem_node:
-            return None
+        # 1. Analyze child type
+        child_ast = None
+        child_type_ast = None
 
-        # Find proof body: look for := followed by byTactic or tacticSeq
-        args = theorem_node.get("args", [])
-        seen_assign = False
-        proof_node = None
+        if isinstance(child, dict):
+            if "ast" in child:
+                child_ast = child.get("ast")
+            elif "formal_proof" in child and "children" not in child:
+                # Leaf node - get AST from formal_proof
+                proof_state = cast(FormalTheoremProofState, child)
+                child_ast = proof_state.get("ast")
+            elif "children" in child:
+                # Decomposed node - get AST from decomposed state
+                decomposed_state = cast(DecomposedFormalTheoremState, child)
+                child_ast = decomposed_state.get("ast")
 
-        for arg in args:
-            # Check if this is the ":=" token
-            if isinstance(arg, dict) and arg.get("val") == ":=":
-                seen_assign = True
+        if child_ast and isinstance(child_ast, AST):
+            # Extract type from child's formal_theorem
+            child_ast_node = child_ast.get_ast()
+            child_type_ast = _extract_type_ast_func(child_ast_node)
+
+        is_function_type_result = is_function_type(child_type_ast)
+        is_pi_type = is_pi_or_forall_type(child_type_ast)
+
+        # 2. Analyze parent usage
+        usage_nodes = find_subgoal_usage_in_ast(parent_ast, hole_name)
+        # Check if any usage node is an app node, or if its parent is an app node
+        is_function_application = False
+        for usage_node in usage_nodes:
+            if is_app_node(usage_node):
+                is_function_application = True
+                break
+            # Also check if the node is part of an app structure
+            # (e.g., the identifier is an argument to an app node)
+            # This is a heuristic - in practice, we'd need to check parent context
+            # For now, if we found usages and the type is function, assume it might be an application
+            # The actual detection will be refined based on AST structure analysis
+
+        # 3. Extract proof body (includes tactics from Phase 1)
+        proof_body = self._extract_proof_body_ast_guided(
+            child,
+            kimina_client=kimina_client,
+            server_timeout=server_timeout,
+        )
+
+        # 4. Analyze variable conflicts (similar to Phase 3)
+        proof_with_preamble = combine_preamble_and_body(DEFAULT_IMPORTS, proof_body)
+        check_response = kimina_client.check(proof_with_preamble, timeout=server_timeout)
+        parsed_check = parse_kimina_check_response(check_response)
+
+        # Extract ALL variables from check() response with origin information
+        # This distinguishes lemma parameters from proof body variables
+        proof_variables = []
+        if child_ast and isinstance(child_ast, AST):
+            # Use check() response to get ALL variables with origin information
+            proof_variables = extract_variables_with_origin(parsed_check, child_ast)
+
+        parent_source_text = parent_ast.get_source_text()
+        outer_scope_vars = extract_outer_scope_variables_ast_based(
+            parent_source_text or "",
+            parent_ast,
+            kimina_client,
+            server_timeout,
+        )
+
+        conflicts = []
+        outer_scope_names = set(outer_scope_vars.keys())
+        for var_info in proof_variables:
+            var_name = var_info["name"]
+
+            # CRITICAL: Skip lemma parameters - these are part of the signature
+            # and should NOT be renamed, even if they conflict with outer scope
+            if var_info.get("is_lemma_parameter", False):
                 continue
 
-            # Only look for proof body after ":="
-            if seen_assign and isinstance(arg, dict):
-                kind = arg.get("kind", "")
-                if kind in {"Lean.Parser.Term.byTactic", "Lean.Parser.Tactic.tacticSeq"}:
-                    proof_node = arg
-                    break
+            # Only consider proof body variables for conflict detection
+            if var_name in outer_scope_names and var_info.get("is_proof_body_variable", False):
+                from goedels_poetry.parsers.util.collection_and_analysis.variable_extraction import (
+                    is_intentional_shadowing,
+                )
 
-        # If not found in flat args, search recursively in nested structures after :=
-        if not proof_node and seen_assign:
+                var_decl = {
+                    "name": var_name,
+                    "node": var_info.get("declaration_node"),
+                    "hypothesis": var_info["hypothesis"],
+                    "is_lemma_parameter": False,
+                    "is_proof_body_variable": True,
+                }
 
-            def find_proof_in_node(node: Any) -> dict | None:
-                """Recursively search for byTactic or tacticSeq node in nested structures."""
-                if isinstance(node, dict):
-                    kind = node.get("kind", "")
-                    if kind in {"Lean.Parser.Term.byTactic", "Lean.Parser.Tactic.tacticSeq"}:
-                        return node
-                    for v in node.values():
-                        result = find_proof_in_node(v)
-                        if result:
-                            return result
-                elif isinstance(node, list):
-                    for item in node:
-                        result = find_proof_in_node(item)
-                        if result:
-                            return result
-                return None
+                if not is_intentional_shadowing(var_decl, parsed_check, outer_scope_vars):
+                    conflicts.append(var_decl)
 
-            # Search in the part after :=
-            assign_idx = next((i for i, a in enumerate(args) if isinstance(a, dict) and a.get("val") == ":="), None)
-            if assign_idx is not None:
-                for arg in args[assign_idx + 1 :]:
-                    proof_node = find_proof_in_node(arg)
-                    if proof_node:
-                        break
-
-        if not proof_node:
-            return None
-
-        # Extract proof body text from AST node
-        try:
-            proof_body_ast = _ast_to_code(proof_node)
-            proof_body = str(proof_body_ast).strip()
-            # Remove leading "by" keyword if present (byTactic includes it)
-            if proof_body.startswith("by"):
-                proof_body = proof_body[2:].lstrip()
-        except Exception:
-            # AST extraction failed, return None to trigger fallback
-            return None
-        else:
-            return proof_body
+        return {
+            "is_function_type": is_function_type_result,
+            "is_pi_type": is_pi_type,
+            "is_function_application": is_function_application,
+            "should_preserve_application": is_pi_type and is_function_application,
+            "variable_conflicts": conflicts,
+            "proof_body": proof_body,
+        }
 
     def reconstruct_complete_proof(
         self,

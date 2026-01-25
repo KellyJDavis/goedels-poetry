@@ -155,6 +155,7 @@ class TestProverParseFailure:
             "self_correction_attempts": 0,
             "proof_history": [],
             "pass_attempts": 0,
+            "llm_lean_output": None,
         }
 
         input_states: FormalTheoremProofStates = {"inputs": [input_state], "outputs": []}

@@ -67,6 +67,7 @@ class TestProofResetRouting:
                 "hole_name": None,
                 "hole_start": None,
                 "hole_end": None,
+                "llm_lean_output": None,
             }
 
             reset_proof_states: FormalTheoremProofStates = {"outputs": [reset_proof_state]}
@@ -148,6 +149,7 @@ class TestProofResetRouting:
                 "hole_name": None,
                 "hole_start": None,
                 "hole_end": None,
+                "llm_lean_output": None,
             }
 
             correction_proof_states: FormalTheoremProofStates = {"outputs": [correction_proof_state]}
@@ -225,6 +227,7 @@ class TestProofResetRouting:
                 "hole_name": None,
                 "hole_start": None,
                 "hole_end": None,
+                "llm_lean_output": None,
             }
 
             max_pass_proof_states: FormalTheoremProofStates = {"outputs": [max_pass_proof_state]}
@@ -292,6 +295,7 @@ class TestProofResetRouting:
                 "hole_name": None,
                 "hole_start": None,
                 "hole_end": None,
+                "llm_lean_output": None,
             }
 
             successful_proof_states: FormalTheoremProofStates = {"outputs": [successful_proof_state]}
@@ -360,6 +364,7 @@ class TestProofResetRouting:
                 "hole_name": None,
                 "hole_start": None,
                 "hole_end": None,
+                "llm_lean_output": None,
             }
 
             # 2. Correction proof (below max attempts, has errors)
@@ -380,6 +385,7 @@ class TestProofResetRouting:
                 "hole_name": None,
                 "hole_start": None,
                 "hole_end": None,
+                "llm_lean_output": None,
             }
 
             # 3. Successful proof
@@ -399,6 +405,7 @@ class TestProofResetRouting:
                 "hole_name": None,
                 "hole_start": None,
                 "hole_end": None,
+                "llm_lean_output": None,
             }
 
             mixed_proof_states: FormalTheoremProofStates = {

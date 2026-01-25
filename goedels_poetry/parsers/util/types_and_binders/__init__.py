@@ -14,6 +14,7 @@ from .binding_types import (
     __get_binding_type_from_node,
     __handle_set_let_binding_as_equality,
 )
+from .type_analysis import is_function_type, is_pi_or_forall_type
 from .type_extraction import (
     __extract_all_exists_witness_binders,
     __extract_exists_witness_binder,
@@ -35,4 +36,7 @@ __all__ = [
     "__make_binder_from_type_string",
     "__make_equality_binder",
     "__strip_leading_colon",
+    # Phase 4: Function type analysis
+    "is_function_type",
+    "is_pi_or_forall_type",
 ]

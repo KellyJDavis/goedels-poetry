@@ -140,7 +140,7 @@ class _DummyAstResult:
     def __init__(self) -> None:
         self.module = "dummy"
         self.error = None
-        self.ast = _theorem_with_subgoals()
+        self.ast = {"commands": [_theorem_with_subgoals()]}
         self.sorries = _sorries()
 
 
@@ -255,7 +255,7 @@ def test_sketch_parser_passes_goal_context(monkeypatch: pytest.MonkeyPatch) -> N
         "parent": None,
         "children": [],
         "depth": 0,
-        "formal_theorem": "theorem A303656 : True := by sorry",
+        "formal_theorem": "theorem A303656 : True",
         "preamble": DEFAULT_IMPORTS,
         "proof_sketch": "theorem A303656 : True := by sorry",
         "syntactic": True,
@@ -265,6 +265,7 @@ def test_sketch_parser_passes_goal_context(monkeypatch: pytest.MonkeyPatch) -> N
         "decomposition_history": [],
         "search_queries": None,
         "search_results": None,
+        "llm_lean_output": "theorem A303656 : True := by\n  sorry",
         "hole_name": None,
         "hole_start": None,
         "hole_end": None,
@@ -284,7 +285,7 @@ def test_proof_parser_passes_goal_context(monkeypatch: pytest.MonkeyPatch) -> No
     state = {
         "parent": None,
         "depth": 0,
-        "formal_theorem": "theorem A303656 : True := by sorry",
+        "formal_theorem": "theorem A303656 : True",
         "preamble": DEFAULT_IMPORTS,
         "syntactic": True,
         "formal_proof": "",
@@ -294,6 +295,7 @@ def test_proof_parser_passes_goal_context(monkeypatch: pytest.MonkeyPatch) -> No
         "self_correction_attempts": 0,
         "proof_history": [],
         "pass_attempts": 0,
+        "llm_lean_output": "theorem A303656 : True := by\n  sorry",
         "hole_name": None,
         "hole_start": None,
         "hole_end": None,
@@ -310,7 +312,7 @@ class _QuantifiedAstResult:
     def __init__(self) -> None:
         self.module = "dummy"
         self.error = None
-        self.ast = _quantified_theorem_with_subgoals()
+        self.ast = {"commands": [_quantified_theorem_with_subgoals()]}
         self.sorries = _quantified_sorries()
 
 
@@ -335,7 +337,7 @@ def test_quantified_header_reconstructs_binders_from_sorries(monkeypatch: pytest
         "parent": None,
         "children": [],
         "depth": 0,
-        "formal_theorem": "theorem A_quant : ∀ n : Int, n > 1 → True := by sorry",
+        "formal_theorem": "theorem A_quant : ∀ n : Int, n > 1 → True",
         "preamble": DEFAULT_IMPORTS,
         "proof_sketch": "theorem A_quant : ∀ n : Int, n > 1 → True := by sorry",
         "syntactic": True,
@@ -345,6 +347,7 @@ def test_quantified_header_reconstructs_binders_from_sorries(monkeypatch: pytest
         "decomposition_history": [],
         "search_queries": None,
         "search_results": None,
+        "llm_lean_output": "theorem A_quant : ∀ n : Int, n > 1 → True := by\n  sorry",
         "hole_name": None,
         "hole_start": None,
         "hole_end": None,
@@ -363,7 +366,7 @@ class _ExistentialAstResult:
     def __init__(self) -> None:
         self.module = "dummy"
         self.error = None
-        self.ast = _existential_theorem_with_subgoals()
+        self.ast = {"commands": [_existential_theorem_with_subgoals()]}
         self.sorries = _existential_sorries()
 
 
@@ -388,7 +391,7 @@ def test_existential_header_preserves_goal_context_binders(monkeypatch: pytest.M
         "parent": None,
         "children": [],
         "depth": 0,
-        "formal_theorem": "theorem A_exist : ∃ q : Nat, q > 5 ∧ True := by sorry",
+        "formal_theorem": "theorem A_exist : ∃ q : Nat, q > 5 ∧ True",
         "preamble": DEFAULT_IMPORTS,
         "proof_sketch": "theorem A_exist : ∃ q : Nat, q > 5 ∧ True := by sorry",
         "syntactic": True,
@@ -398,6 +401,7 @@ def test_existential_header_preserves_goal_context_binders(monkeypatch: pytest.M
         "decomposition_history": [],
         "search_queries": None,
         "search_results": None,
+        "llm_lean_output": "theorem A_exist : ∃ q : Nat, q > 5 ∧ True := by\n  sorry",
         "hole_name": None,
         "hole_start": None,
         "hole_end": None,
@@ -420,7 +424,7 @@ def test_quantified_header_reconstructs_binders_proof_parser(monkeypatch: pytest
     state = {
         "parent": None,
         "depth": 0,
-        "formal_theorem": "theorem A_quant : ∀ n : Int, n > 1 → True := by sorry",
+        "formal_theorem": "theorem A_quant : ∀ n : Int, n > 1 → True",
         "preamble": DEFAULT_IMPORTS,
         "syntactic": True,
         "formal_proof": "",
@@ -430,6 +434,7 @@ def test_quantified_header_reconstructs_binders_proof_parser(monkeypatch: pytest
         "self_correction_attempts": 0,
         "proof_history": [],
         "pass_attempts": 0,
+        "llm_lean_output": "theorem A_quant : ∀ n : Int, n > 1 → True := by\n  sorry",
         "hole_name": None,
         "hole_start": None,
         "hole_end": None,
@@ -453,7 +458,7 @@ def test_existential_header_preserves_goal_context_binders_proof_parser(
     state = {
         "parent": None,
         "depth": 0,
-        "formal_theorem": "theorem A_exist : ∃ q : Nat, q > 5 ∧ True := by sorry",
+        "formal_theorem": "theorem A_exist : ∃ q : Nat, q > 5 ∧ True",
         "preamble": DEFAULT_IMPORTS,
         "syntactic": True,
         "formal_proof": "",
@@ -463,6 +468,7 @@ def test_existential_header_preserves_goal_context_binders_proof_parser(
         "self_correction_attempts": 0,
         "proof_history": [],
         "pass_attempts": 0,
+        "llm_lean_output": "theorem A_exist : ∃ q : Nat, q > 5 ∧ True := by\n  sorry",
         "hole_name": None,
         "hole_start": None,
         "hole_end": None,

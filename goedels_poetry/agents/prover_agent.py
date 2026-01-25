@@ -13,7 +13,6 @@ from goedels_poetry.agents.util.common import (
     LLMParsingError,
     combine_preamble_and_body,
     load_prompt,
-    strip_known_preamble,
 )
 from goedels_poetry.agents.util.debug import log_llm_prompt, log_llm_response
 
@@ -139,13 +138,16 @@ def _prover(llm: BaseChatModel, state: FormalTheoremProofState) -> FormalTheorem
 
     # Parse prover response
     try:
-        formal_proof = _parse_prover_response(str(response_content), state["preamble"])
+        raw_code = _extract_code_block(str(response_content))
 
-        # Add the formal proof to the state
-        state["formal_proof"] = formal_proof
+        # Store the raw LLM output in the new field
+        state["llm_lean_output"] = raw_code
 
-        # Add the formal proof to the state's proof_history
-        state["proof_history"] += [AIMessage(content=formal_proof)]
+        # Clear formal_proof initially - it will be populated by the proof_parser_agent
+        state["formal_proof"] = None
+
+        # Add the raw code to the state's proof_history
+        state["proof_history"] += [AIMessage(content=raw_code)]
     except LLMParsingError:
         # Set parse failure markers - state manager will handle requeueing and attempt increments
         state["formal_proof"] = None
@@ -225,98 +227,15 @@ def _extract_code_block(response: str) -> str:
         # Likely nested blocks in doc comments - use fallback
         return _extract_code_block_fallback(response)
 
-    # Standard extraction worked fine
     return cast(str, matches[-1].group(1)).strip()
-
-
-def _extract_proof_body(code_without_preamble: str, prefer_theorem: bool = True) -> str | None:
-    """
-    Extract proof body from code, optionally preferring theorem/example declarations.
-
-    Parameters
-    ----------
-    code_without_preamble: str
-        Code without preamble
-    prefer_theorem: bool
-        If True, try to find theorem/example declarations first. If False, find any := by pattern.
-
-    Returns
-    -------
-    Optional[str]
-        The proof body if found, None if prefer_theorem=True and no theorem/example found,
-        empty string if prefer_theorem=False and no := by pattern found
-    """
-    # Find := by pattern, optionally requiring it to be in a theorem/example
-    if prefer_theorem:
-        # Try to find := by within a theorem/example declaration
-        theorem_pattern = r"(theorem|example)\s+[a-zA-Z0-9_']+.*?:=\s*by"
-        match = re.search(theorem_pattern, code_without_preamble, re.DOTALL)
-        if not match:
-            return None
-        # The match ends at "by", so proof starts right after
-        proof_start = match.end()
-        proof_body_raw = code_without_preamble[proof_start:]
-    else:
-        # Find any := by pattern
-        by_match = re.search(r":=\s*by", code_without_preamble, re.DOTALL)
-        if not by_match:
-            return code_without_preamble.strip()
-        proof_start = by_match.end()
-        proof_body_raw = code_without_preamble[proof_start:]
-
-    # Stop at next declaration
-    next_decl_match = re.search(
-        r"\n\s*(?:/-.*?-\/\s*)?(theorem|lemma|def|abbrev|example|end|namespace)\s+",
-        proof_body_raw,
-        re.DOTALL,
-    )
-    if next_decl_match:
-        proof_body_raw = proof_body_raw[: next_decl_match.start()]
-
-    # Find first non-empty line (preserving leading empty lines for indentation)
-    lines = proof_body_raw.split("\n")
-    first_idx = next((i for i, line in enumerate(lines) if line.strip()), None)
-    if first_idx is not None:
-        return "\n".join(lines[first_idx:]).rstrip()
-
-    return None if prefer_theorem else ""
 
 
 def _parse_prover_response(response: str, expected_preamble: str) -> str:
     """
-    Extract the final lean code snippet from the passed string, remove DEFAULT_IMPORTS,
-    and extract only the proof body (the tactics after `:= by`).
-
-    Parameters
-    ----------
-    response: str
-        The string to extract the final lean code snippet from
-    expected_preamble: str
-        The expected preamble to strip from the response
-
-    Returns
-    -------
-    str
-        A string containing only the proof body (tactics after `:= by`).
-
-    Raises
-    ------
-    LLMParsingError
-        If no code block is found in the response.
+    DEPRECATED: No longer used. Replaced by direct extraction in _prover.
+    Originally extracted the final lean code snippet, removed preamble,
+    and extracted only the proof body (tactics after `:= by`).
     """
+    # This remains for potential internal references, but the agent now calls _extract_code_block directly
     formal_proof = _extract_code_block(response)
-    if not formal_proof:
-        return formal_proof
-
-    # Strip the preamble if it matches
-    stripped, matched = strip_known_preamble(formal_proof, expected_preamble)
-    code_without_preamble = stripped if matched else formal_proof
-
-    # Try to extract proof from theorem/example first (preferred)
-    proof_body = _extract_proof_body(code_without_preamble, prefer_theorem=True)
-    if proof_body is not None:
-        return proof_body
-
-    # Fallback: extract from any := by pattern
-    fallback_result = _extract_proof_body(code_without_preamble, prefer_theorem=False)
-    return fallback_result if fallback_result is not None else ""
+    return formal_proof

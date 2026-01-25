@@ -21,6 +21,10 @@ classifiers = [
 ]
 dependencies = [
     "jinja2>=3.1.6",
+    # Note: kimina-ast-client>=0.2.2 has a compatibility issue on Python 3.11 where
+    # it uses typing.TypedDict but Pydantic 2.11.9 requires typing_extensions.TypedDict.
+    # This is a known issue that should be fixed in a future version of kimina-ast-client.
+    # If you encounter this error, try updating to the latest version of kimina-ast-client.
     "kimina-ast-client>=0.2.2",
     "langchain-core>=0.3.77",
     "langchain-openai>=0.3.34",
