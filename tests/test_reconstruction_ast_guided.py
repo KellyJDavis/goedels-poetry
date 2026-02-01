@@ -116,8 +116,8 @@ def test_reconstruction_fills_named_have_holes_by_offsets(kimina_server_url: str
         "have h_main : (1 / 3 : ℝ) * (30 * (13 / 2 : ℝ)) = 65 := by",
         "    norm_num",
         "",
-        "  -- close the goal",
-        "  exact h_main",
+        "-- close the goal",
+        "exact h_main",
     ])
 
     # Build a minimal state tree rooted at a decomposed node.

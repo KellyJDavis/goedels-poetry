@@ -6,7 +6,7 @@ variations) so we can iterate on reconstruction correctness without proving real
 
 Configuration (env vars)
 ------------------------
-- RECONSTRUCTION_TEST_CASES: number of generated cases to run (default: 600). Set to 0 to skip.
+- RECONSTRUCTION_TEST_CASES: number of generated cases to run (default: 100). Set to 0 to skip.
 - RECONSTRUCTION_TEST_SEED: seed used to shuffle the deterministic corpus (default: 0).
 
 These tests match the conventions in `tests/test_kimina_agents.py`:
@@ -116,7 +116,7 @@ def _mk_case_named_haves(case_id: str, *, closer: str, comment_before_close: boo
         proof_h2_lines.append("")
     if comment_before_close:
         proof_h2_lines.append(comment)
-    proof_h2_lines.append(f"  {close_line}")
+    proof_h2_lines.append(f"{close_line}")
     proof_h2 = "\n".join(proof_h2_lines)
 
     return ReconCase(case_id=case_id, parent_body=parent_body, child_proofs={"h₁": proof_h1, "h₂": proof_h2})
@@ -149,7 +149,7 @@ def _mk_case_calc(case_id: str, *, closer: str, comment_before_close: bool) -> R
     proof_step_lines = ["have h_main : n = n := by", "  simpa using h₁"]
     if comment_before_close:
         proof_step_lines.append("-- close step")
-    proof_step_lines.append(f"  {close_line if closer != 'rfl' else 'exact h_main'}")
+    proof_step_lines.append(f"{close_line if closer != 'rfl' else 'exact h_main'}")
     proof_h_step = "\n".join(proof_step_lines)
     return ReconCase(case_id=case_id, parent_body=parent_body, child_proofs={"h₁": proof_h1, "h_step": proof_h_step})
 
@@ -242,7 +242,7 @@ def _mk_case_inline_by_sorry(case_id: str, *, closer: str, comment_before_close:
 
 def _generate_cases() -> list[ReconCase]:
     # Generate a deterministic corpus (no randomness here). We intentionally produce a corpus
-    # larger than the default selection size (200) so the seed-shuffle has meaningful effect.
+    # larger than the default selection size (100) so the seed-shuffle has meaningful effect.
     closers = _minimal_safe_closers()
     cases: list[ReconCase] = []
 
@@ -388,7 +388,7 @@ if IMPORTS_AVAILABLE:
         assert parsed_check["complete"] is True, parsed_check
 
     def _selected_cases() -> list[ReconCase]:
-        n = _env_int("RECONSTRUCTION_TEST_CASES", 25)
+        n = _env_int("RECONSTRUCTION_TEST_CASES", 100)
         seed = _env_int("RECONSTRUCTION_TEST_SEED", 0)
         if n <= 0:
             return []

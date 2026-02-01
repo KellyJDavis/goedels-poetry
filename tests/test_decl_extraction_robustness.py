@@ -53,7 +53,7 @@ theorem other (n : Nat) : n = n := by
         ast = _create_ast(code, kimina_server_url)
         target_sig = "theorem target (n : Nat) : n = n"
         body = extract_proof_body_from_ast(ast, target_sig)
-        assert body == "rfl"
+        assert body == "  -- Correct body\n  rfl"
 
     def test_last_occurrence_heuristic(self, kimina_server_url: str) -> None:
         """Test that the last occurrence of a matching signature is selected."""
@@ -69,7 +69,7 @@ theorem target : True := by
         ast = _create_ast(code, kimina_server_url)
         target_sig = "theorem target : True"
         body = extract_proof_body_from_ast(ast, target_sig)
-        assert body == "trivial"
+        assert body == "  -- Second attempt (correct)\n  trivial"
 
     def test_nested_block_prevention(self, kimina_server_url: str) -> None:
         """Test that nested proofs (e.g. in 'have') are not misidentified as main body."""
@@ -114,7 +114,7 @@ theorem target (x : Nat) : x = x := by rfl
         ast = _create_ast(code, kimina_server_url)
         target_sig = "theorem target (x : Nat) : x = x"
         body = extract_proof_body_from_ast(ast, target_sig)
-        assert body == "rfl"
+        assert body == " rfl"
 
 
 @pytest.mark.usefixtures("skip_if_no_lean")

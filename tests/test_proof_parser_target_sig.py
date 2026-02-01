@@ -171,7 +171,7 @@ def test_parse_proof_formal_theorem_variants(
     state = _base_state(formal_theorem=formal_theorem, llm_lean_output=llm_lean_output)
     result = proof_parser_agent._parse_proof("url", 0, 0, state)  # type: ignore[arg-type]
     out = result["outputs"][0]
-    assert out["formal_proof"] == "trivial"
+    assert out["formal_proof"] == "  trivial"
 
 
 def test_parse_proof_mathd_algebra_478_regression(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -184,5 +184,5 @@ theorem t : True := by sorry"""
     state = _base_state(formal_theorem=formal, llm_lean_output=proof)
     result = proof_parser_agent._parse_proof("url", 0, 0, state)  # type: ignore[arg-type]
     out = result["outputs"][0]
-    assert out["formal_proof"] == "trivial"
+    assert out["formal_proof"] == "  trivial"
     assert "volume of a cone" in formal
