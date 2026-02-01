@@ -1711,7 +1711,7 @@ def test_reconstruct_complete_proof_normalizes_misindented_trailing_apply(kimina
         # - inner proof is at indent 4
         # - trailing `apply h_main` is at indent 2 (invalid intermediate dedent level)
         # This mirrors the pattern in partial.log that causes "expected command".
-        child_formal_proof = "have h_main : True := by\n    trivial\n  apply h_main\n"
+        child_formal_proof = "have h_main : True := by\n  trivial\napply h_main\n"
 
         # Normalize sketch before annotation to match AST coordinate system
         normalized_sketch = get_normalized_sketch(sketch)
@@ -4156,10 +4156,10 @@ def test_replace_sorry_for_have_exact_partial_log_case(kimina_server_url: str) -
             # When inserted with base_indent=4, 'have h₄' will be at 4 spaces, and 'calc' needs to be
             # at 6 spaces (4 + 2 for the 'by' block). So 'calc' should be at 2 spaces relative to 'have h₄'
             formal_proof="""have h₄ : v = (1 / 3 : ℝ) * (30 * (13 / 2 : ℝ)) := by
-      calc
-        v = 1 / 3 * (b * h) := h₁
-        _ = 1 / 3 * (30 * (13 / 2 : ℝ)) := by rw [h₂, h₃]
-    exact h₄""",
+  calc
+    v = 1 / 3 * (b * h) := h₁
+    _ = 1 / 3 * (30 * (13 / 2 : ℝ)) := by rw [h₂, h₃]
+exact h₄""",
             proved=True,
             errors=None,
             ast=None,
@@ -4178,10 +4178,10 @@ def test_replace_sorry_for_have_exact_partial_log_case(kimina_server_url: str) -
             preamble=DEFAULT_IMPORTS,
             syntactic=True,
             formal_proof="""have h₄ : (30 : ℝ) * (13 / 2 : ℝ) = 195 := by norm_num
-  have h₅ : (1 / 3 : ℝ) * (195 : ℝ) = 65 := by norm_num
-  calc
-    ((1 / 3 : ℝ) * (30 * (13 / 2 : ℝ))) = (1 / 3 : ℝ) * (195 : ℝ) := by rw [h₄]
-    _ = 65 := by rw [h₅]""",
+have h₅ : (1 / 3 : ℝ) * (195 : ℝ) = 65 := by norm_num
+calc
+  ((1 / 3 : ℝ) * (30 * (13 / 2 : ℝ))) = (1 / 3 : ℝ) * (195 : ℝ) := by rw [h₄]
+  _ = 65 := by rw [h₅]""",
             proved=True,
             errors=None,
             ast=None,

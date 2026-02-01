@@ -2065,10 +2065,17 @@ class GoedelsPoetryStateManager:
                 normalized_test = test_result if test_result.endswith("\n") else test_result + "\n"
                 test_with_preamble = combine_preamble_and_body(preamble, normalized_test)
 
+                test_response = kimina_client.check(test_with_preamble, timeout=server_timeout)
+                test_check = parse_kimina_check_response(test_response)
+
                 ast_response = kimina_client.ast_code(test_with_preamble, timeout=server_timeout)
                 parsed_ast = parse_kimina_ast_code_response(ast_response)
 
-                if parsed_ast.get("error") is None and parsed_ast.get("ast") is not None:
+                if (
+                    parsed_ast.get("error") is None
+                    and parsed_ast.get("ast") is not None
+                    and "unsolved goals" not in test_check.get("data", "")
+                ):
                     # Syntax validation passed - use this strategy
                     replacement_text = indent_strategy
 
@@ -2976,41 +2983,7 @@ class GoedelsPoetryStateManager:
             indent_count = self._calculate_line_indent(ln)
             indents.append(indent_count)
 
-        # Check for mixed indentation: min is 0 but others exist
-        is_mixed_indentation = False
-        min_non_zero = 0
-        if indents and min(indents) == 0 and any(i > 0 for i in indents):
-            is_mixed_indentation = True
-            non_zero_indents = [i for i in indents if i > 0]
-            min_non_zero = min(non_zero_indents) if non_zero_indents else 0
-
-            # Step 2: Handle mixed indentation case
-        if is_mixed_indentation:
-            indent_len = len(indent)
-            result_lines = []
-
-            for line in lines:
-                if not line.strip():
-                    # Empty or whitespace-only line: preserve as-is
-                    result_lines.append(line)
-                else:
-                    line_indent = self._calculate_line_indent(line)
-                    # Use max(0, ...) to ensure lines with indent <= min_non_zero
-                    # get base indent (clamped to avoid negative offsets)
-                    relative_offset = max(0, line_indent - min_non_zero)
-
-                    # New indent = base indent + relative offset
-                    new_indent_len = indent_len + relative_offset
-                    new_indent = " " * new_indent_len
-
-                    # Strip original indent and add new indent
-                    stripped_line = line.lstrip()
-                    result_lines.append(new_indent + stripped_line)
-
-            result = "\n".join(result_lines)
-            return result
-
-        # Step 3: Normal case (backward compatible behavior)
+        # Step 2: Normal case
         indented_lines = []
         for line in lines:
             if line.strip():

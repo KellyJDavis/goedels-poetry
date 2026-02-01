@@ -62,13 +62,13 @@ class TestIndentProofBody:
         line1_indent = len(lines[0]) - len(lines[0].lstrip())
         assert line1_indent == 4, f"Expected 4 spaces, got {line1_indent}"
 
-        # Line 2: should be at base + 2 (6 spaces)
+        # Line 2: should be at base + 4 (8 spaces)
         line2_indent = len(lines[1]) - len(lines[1].lstrip())
-        assert line2_indent == 6, f"Expected 6 spaces, got {line2_indent}"
+        assert line2_indent == 8, f"Expected 8 spaces, got {line2_indent}"
 
-        # Line 3: should be at base (4 spaces)
+        # Line 3: should be at base + 2 (6 spaces)
         line3_indent = len(lines[2]) - len(lines[2].lstrip())
-        assert line3_indent == 4, f"Expected 4 spaces, got {line3_indent}"
+        assert line3_indent == 6, f"Expected 6 spaces, got {line3_indent}"
 
         # Verify content is preserved
         assert "have h3" in lines[0]
@@ -119,13 +119,7 @@ class TestIndentProofBody:
         lines = result.split("\n")
         assert len(lines) == 4
 
-        # min_non_zero = 2
-        # Line 1: 0 -> 2 + max(0,0-2) = 2 spaces
-        # Line 2: 6 -> 2 + max(0,6-2) = 6 spaces
-        # Line 3: 4 -> 2 + max(0,4-2) = 4 spaces
-        # Line 4: 2 -> 2 + max(0,2-2) = 2 spaces
-
-        expected_indents = [2, 6, 4, 2]
+        expected_indents = [2, 8, 6, 4]
         for i, line in enumerate(lines):
             if line.strip():
                 actual_indent = len(line) - len(line.lstrip())
@@ -204,12 +198,8 @@ class TestIndentProofBody:
         result = manager._indent_proof_body(proof_body, indent)
         lines = result.split("\n")
         assert len(lines) == 2
-        # Should handle correctly (no crashes, correct indentation)
-        # This is mixed indentation (0, 4), so min_non_zero = 4
-        # Line 1: 0 indent -> base (4) + max(0, 0-4) = 4 spaces
-        # Line 2: 4 indent -> base (4) + max(0, 4-4) = 4 spaces (at min_non_zero, gets base)
         assert len(lines[0]) - len(lines[0].lstrip()) == 4
-        assert len(lines[1]) - len(lines[1].lstrip()) == 4  # Mixed indentation preserves relative structure
+        assert len(lines[1]) - len(lines[1].lstrip()) == 8  # Mixed indentation preserves relative structure
 
     # Test 10: Idempotency (Multiple Calls)
     def test_indent_proof_body_idempotent(self, temp_state):
@@ -258,7 +248,7 @@ class TestIndentProofBody:
         # - test_reconstruct_complete_proof_nested_with_non_ascii_names
 
         # Example (to be replaced with actual extracted data):
-        proof_body = "have h3 : True := by \n    trivial\n  exact h3"  # From actual test
+        proof_body = "have h3 : True := by\n  trivial\nexact h3"  # From actual test
         indent = "    "  # 4 spaces
 
         manager = GoedelsPoetryStateManager(temp_state)

@@ -220,7 +220,13 @@ def _extract_tactics_from_proof_node(proof_node: dict) -> str:
         # byTactic -> args[0] = "by", args[1] = tactics (tacticSeq)
         by_args = proof_node.get("args", [])
         if len(by_args) >= 2:
-            return _ast_to_code(by_args[1]).strip()
+            # trailing of "by" contains a \n and the indent of the next line
+            next_line_indent = ""
+            if by_args[0].get("val", "") == "by":
+                info = by_args[0].get("info", {})
+                trailing = info.get("trailing", "")
+                next_line_indent = trailing.lstrip("\n")
+            return next_line_indent + _ast_to_code(by_args[1]).strip()
     elif kind == "Lean.Parser.Tactic.tacticSeq":
         return _ast_to_code(proof_node).strip()
 
