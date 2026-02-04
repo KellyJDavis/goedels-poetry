@@ -1,5 +1,6 @@
 import re
 from functools import partial
+from uuid import uuid4
 
 from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.messages import AIMessage, HumanMessage
@@ -136,56 +137,68 @@ def _search_query_generator(llm: BaseChatModel, state: DecomposedFormalTheoremSt
         A DecomposedFormalTheoremStates with the DecomposedFormalTheoremState with the search queries
         added to the DecomposedFormalTheoremStates "outputs" member.
     """
+    # Copy state to prevent issues with LangGraph's mapreduce implementation
+    new_state: DecomposedFormalTheoremState = {
+        **state,  # shallow copy is OK if you also copy mutables
+        "decomposition_history": list(state["decomposition_history"]),
+    }
+
     # Combine the stored preamble with the formal theorem for the prompt
-    formal_theorem_with_imports = combine_preamble_and_body(state["preamble"], state["formal_theorem"])
+    formal_theorem_with_imports = combine_preamble_and_body(
+        str(new_state["preamble"]), str(new_state["formal_theorem"])
+    )
 
     # Detect if this is a backtrack scenario
     is_backtracking = _is_backtracking(state)
 
+    # Create transaction id
+    transaction_id = uuid4().hex
+
     if is_backtracking:
         # Use backtrack prompt - the full history is already in decomposition_history
         prompt = load_prompt("search-query-backtrack", formal_theorem=formal_theorem_with_imports)
+
         # Log debug prompt
         log_llm_prompt(
-            "SEARCH_QUERY_AGENT",
+            f"SEARCH_QUERY_AGENT ({transaction_id})",
             prompt,
             "search-query-backtrack",
-            attempt_num=state["self_correction_attempts"],
+            attempt_num=new_state["self_correction_attempts"],
         )
     else:
         prompt = load_prompt("search-query-initial", formal_theorem=formal_theorem_with_imports)
         # Log debug prompt
         log_llm_prompt(
-            "SEARCH_QUERY_AGENT",
+            f"SEARCH_QUERY_AGENT ({transaction_id})",
             prompt,
             "search-query-initial",
-            attempt_num=state["self_correction_attempts"],
+            attempt_num=new_state["self_correction_attempts"],
         )
 
     # Add the prompt to decomposition_history
-    state["decomposition_history"] += [HumanMessage(content=prompt)]
+    new_state["decomposition_history"] += [HumanMessage(content=prompt)]
 
     # Generate search queries - LLM receives full history including the new prompt
-    response_content = llm.invoke(state["decomposition_history"]).content
+    response_content = llm.invoke(new_state["decomposition_history"]).content
 
     # Log debug response
     log_llm_response(
-        "SEARCH_QUERY_AGENT_LLM",
+        f"SEARCH_QUERY_AGENT ({transaction_id})",
         str(response_content),
-        attempt_num=state["self_correction_attempts"],
+        attempt_num=new_state["self_correction_attempts"],
     )
 
     # Parse search query response
     search_queries = _parse_search_queries_response(str(response_content))
 
     # Add the search queries to the state
-    state["search_queries"] = search_queries
+    new_state["search_queries"] = search_queries
 
     # Add the LLM response to decomposition_history
-    state["decomposition_history"] += [AIMessage(content=str(response_content))]
+    new_state["decomposition_history"] += [AIMessage(content=str(response_content))]
 
     # Return a DecomposedFormalTheoremStates with state added to its outputs
-    return {"outputs": [state]}  # type: ignore[typeddict-item]
+    return {"outputs": [new_state]}  # type: ignore[typeddict-item]
 
 
 def _parse_search_queries_response(response: str) -> list[str]:

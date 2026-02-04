@@ -85,12 +85,18 @@ def _backtrack(state: DecomposedFormalTheoremState) -> DecomposedFormalTheoremSt
         A DecomposedFormalTheoremStates containing in its outputs the modified
         DecomposedFormalTheoremState
     """
+    # Copy state to prevent issues with LangGraph's mapreduce implementation
+    new_state: DecomposedFormalTheoremState = {
+        **state,  # shallow copy is OK if you also copy mutables
+        "decomposition_history": list(state["decomposition_history"]),
+    }
+
     # Format theorem hints section from search results
-    theorem_hints_section = _format_theorem_hints_section(state["search_results"])
+    theorem_hints_section = _format_theorem_hints_section(new_state["search_results"])
     # Construct the prompt for backtracking
     prompt = load_prompt(
         "decomposer-backtrack",
-        prev_round_num=str(state["self_correction_attempts"]),
+        prev_round_num=str(new_state["self_correction_attempts"]),
         theorem_hints_section=theorem_hints_section,
     )
 
@@ -99,11 +105,11 @@ def _backtrack(state: DecomposedFormalTheoremState) -> DecomposedFormalTheoremSt
         "SKETCH_BACKTRACK_AGENT",
         prompt,
         "decomposer-backtrack",
-        attempt_num=state["self_correction_attempts"],
+        attempt_num=new_state["self_correction_attempts"],
     )
 
     # Add backtrack request to the state's decomposition_history
-    state["decomposition_history"] += [HumanMessage(content=prompt)]
+    new_state["decomposition_history"] += [HumanMessage(content=prompt)]
 
     # Return a DecomposedFormalTheoremStates with state added to its outputs
-    return {"outputs": [state]}  # type: ignore[typeddict-item]
+    return {"outputs": [new_state]}  # type: ignore[typeddict-item]

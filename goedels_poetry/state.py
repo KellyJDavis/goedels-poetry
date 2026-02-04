@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 import os
 import pickle
+import uuid
 from datetime import datetime
 from hashlib import sha256
 from pathlib import Path
@@ -37,7 +38,7 @@ from goedels_poetry.config.llm import (
 
 # Note: All LLM instances are imported from goedels_poetry.config.llm
 from goedels_poetry.functools import maybe_save
-from goedels_poetry.util.tree import TreeNode
+from goedels_poetry.util.tree import InternalTreeNode, TreeNode, add_child, remove_child
 
 logger = logging.getLogger(__name__)
 
@@ -119,6 +120,7 @@ class GoedelsPoetryState:
 
             self._root_preamble = preamble
             initial_formal_state = FormalTheoremProofState(
+                id=uuid.uuid4().hex,
                 parent=None,
                 depth=0,
                 formal_theorem=body,
@@ -616,6 +618,7 @@ class GoedelsPoetryStateManager:
             # If it is semantically valid, create an associated FormalTheoremProofState
             default_preamble = ensure_mandatory_preamble(DEFAULT_IMPORTS)
             theorem_to_prove = FormalTheoremProofState(
+                id=uuid.uuid4().hex,
                 parent=None,
                 depth=0,
                 formal_theorem=str(semantically_checked_informal_theorem["formal_theorem"]),
@@ -642,6 +645,45 @@ class GoedelsPoetryStateManager:
         else:
             # If it isn't semantically valid, queue it to be re-formalized
             self._state.informal_formalizer_queue = semantically_checked_informal_theorem
+
+    def _reconstruct_tree(self, tree_nodes: list[TreeNode]) -> None:
+        """
+        Insert modified TreeNode instances back into the tree rooted at formal_theorem_proof.
+
+        LangGraph Send API returns modified copies of TreeNodes; they share the same id as nodes
+        in the current tree but are different objects. This method replaces nodes in the tree with
+        their modified versions when present in tree_nodes, and fixes parent pointers so the tree
+        remains consistent. The passed list need not contain the root (a node with parent None).
+
+        Parameters
+        ----------
+        tree_nodes : list[TreeNode]
+            Modified TreeNode instances (e.g. from mapreduce outputs) keyed by the same id as
+            nodes in the current tree.
+        """
+        if not tree_nodes:
+            return
+        current_root = self._state.formal_theorem_proof
+        if current_root is None:
+            return
+        id_to_modified = {cast(dict, n)["id"]: n for n in tree_nodes}
+
+        # Replace root with modified version if present
+        root_id = cast(dict, current_root)["id"]
+        new_root = id_to_modified.get(root_id, current_root)
+        self._state.formal_theorem_proof = new_root
+
+        def replace_with_modified(node: TreeNode) -> None:
+            if not isinstance(node, dict) or "children" not in node:
+                return
+            internal = cast(DecomposedFormalTheoremState, node)
+            for cid in list(internal["children"].keys()):
+                if cid in id_to_modified:
+                    internal["children"][cid] = id_to_modified[cid]
+                    cast(dict, id_to_modified[cid])["parent"] = node
+                replace_with_modified(internal["children"][cid])
+
+        replace_with_modified(new_root)
 
     def get_theorems_to_validate(self) -> FormalTheoremProofStates:
         """
@@ -672,6 +714,9 @@ class GoedelsPoetryStateManager:
         """
         # Remove all elements from the syntax queue
         self._state.proof_syntax_queue.clear()
+
+        # Reset proof tree root to modified FormalTheoremProofState
+        self._reconstruct_tree(cast(list[TreeNode], validated_theorems["outputs"]))
 
         # Get FormalTheoremProofStates outputs
         validated_theorems_outputs = validated_theorems["outputs"]
@@ -713,6 +758,9 @@ class GoedelsPoetryStateManager:
         """
         # Remove all attempted proofs elements from the queue to be proven
         self._state.proof_prove_queue.clear()
+
+        # Reset proof tree root to modified FormalTheoremProofState
+        self._reconstruct_tree(cast(list[TreeNode], proven_theorems["outputs"]))
 
         # Partition outputs into parse failures and successful parses
         parse_failure_message = (
@@ -786,6 +834,9 @@ class GoedelsPoetryStateManager:
         # Remove all elements from the queue of proofs to validate
         self._state.proof_validate_queue.clear()
 
+        # Reset proof tree root to modified FormalTheoremProofState
+        self._reconstruct_tree(cast(list[TreeNode], validated_proofs["outputs"]))
+
         # Get validated_proofs outputs
         validated_proofs_outputs = validated_proofs["outputs"]
 
@@ -852,8 +903,9 @@ class GoedelsPoetryStateManager:
         for proof_too_difficult in proofs_too_difficult:
             # Create a new DecomposedFormalTheoremState and add it to the search queue
             formal_theorem_to_decompose = DecomposedFormalTheoremState(
+                id=uuid.uuid4().hex,
                 parent=proof_too_difficult["parent"],
-                children=[],
+                children={},
                 depth=proof_too_difficult["depth"],
                 formal_theorem=proof_too_difficult["formal_theorem"],
                 preamble=proof_too_difficult["preamble"],
@@ -876,8 +928,9 @@ class GoedelsPoetryStateManager:
 
             # Remove proof_too_difficult from the proof tree
             if proof_too_difficult["parent"] is not None:
-                cast(DecomposedFormalTheoremState, proof_too_difficult["parent"])["children"].remove(
-                    cast(TreeNode, proof_too_difficult)
+                remove_child(
+                    cast(InternalTreeNode, proof_too_difficult["parent"]),
+                    cast(TreeNode, proof_too_difficult),
                 )
                 proof_too_difficult["parent"] = None
 
@@ -887,8 +940,9 @@ class GoedelsPoetryStateManager:
                 self._state.formal_theorem_proof = cast(TreeNode, formal_theorem_to_decompose)
             else:
                 # If not, add formal_theorem_to_decompose as its parent's child
-                cast(DecomposedFormalTheoremState, formal_theorem_to_decompose["parent"])["children"].append(
-                    cast(TreeNode, formal_theorem_to_decompose)
+                add_child(
+                    cast(InternalTreeNode, formal_theorem_to_decompose["parent"]),
+                    cast(TreeNode, formal_theorem_to_decompose),
                 )
 
     def get_proofs_to_correct(self) -> FormalTheoremProofStates:
@@ -922,6 +976,9 @@ class GoedelsPoetryStateManager:
         # Remove all elements from the queue of proofs to correct
         self._state.proof_correct_queue.clear()
 
+        # Reset proof tree root to modified FormalTheoremProofState
+        self._reconstruct_tree(cast(list[TreeNode], corrected_proofs["outputs"]))
+
         # Place all proofs marked for correction into the queue to be proven
         self._state.proof_prove_queue += corrected_proofs["outputs"]
 
@@ -954,6 +1011,9 @@ class GoedelsPoetryStateManager:
         # Remove all elements from the queue of proofs to generate ASTs for
         self._state.proof_ast_queue.clear()
 
+        # Reset proof tree root to modified FormalTheoremProofState
+        self._reconstruct_tree(cast(list[TreeNode], parsed_proofs["outputs"]))
+
         # TODO: Figure out how to deal with parent AST's. Doe we add this AST to ther parent here?
         #       If we do, the grandparent won't have this AST. So do we do so recursively? If we do
         #       when we find a decomposition or proof didn't work, we'll need to to lots of cleanup
@@ -982,6 +1042,9 @@ class GoedelsPoetryStateManager:
         # Clear the search queue
         self._state.decomposition_search_queue.clear()
 
+        # Reset proof tree root to modified DecomposedFormalTheoremState
+        self._reconstruct_tree(cast(list[TreeNode], states_with_queries["outputs"]))
+
         # Move states with queries to query queue (for vector DB lookup)
         self._state.decomposition_query_queue += states_with_queries["outputs"]
 
@@ -1008,6 +1071,9 @@ class GoedelsPoetryStateManager:
         """
         # Clear the query queue
         self._state.decomposition_query_queue.clear()
+
+        # Reset proof tree root to modified DecomposedFormalTheoremState
+        self._reconstruct_tree(cast(list[TreeNode], states_with_results["outputs"]))
 
         # Move states with results to sketch queue
         self._state.decomposition_sketch_queue += states_with_results["outputs"]
@@ -1042,6 +1108,9 @@ class GoedelsPoetryStateManager:
         """
         # Remove all elements from the queue of theorems to sketch
         self._state.decomposition_sketch_queue.clear()
+
+        # Reset proof tree root to modified DecomposedFormalTheoremState
+        self._reconstruct_tree(cast(list[TreeNode], sketched_theorems["outputs"]))
 
         # Partition outputs into parse failures and successful parses
         parse_failure_message = (
@@ -1105,6 +1174,9 @@ class GoedelsPoetryStateManager:
         """
         # Remove all elements from the queue of decompositions to validate
         self._state.decomposition_validate_queue.clear()
+
+        # Reset proof tree root to modified DecomposedFormalTheoremState
+        self._reconstruct_tree(cast(list[TreeNode], validated_sketches["outputs"]))
 
         # Get validated_sketches outputs
         validated_sketches_outputs = validated_sketches["outputs"]
@@ -1227,7 +1299,7 @@ class GoedelsPoetryStateManager:
         # Check if this is an internal node with children
         if isinstance(node, dict) and "children" in node:
             internal_node = cast(DecomposedFormalTheoremState, node)
-            for child in internal_node["children"]:
+            for child in internal_node["children"].values():
                 descendants.append(child)
                 # Recursively collect descendants of this child
                 descendants.extend(self._collect_all_descendants(child))
@@ -1308,7 +1380,7 @@ class GoedelsPoetryStateManager:
             The node to prepare for re-sketching
         """
         # Clear children (they will be removed from tree separately)
-        node["children"] = []
+        node["children"] = {}
         # Clear sketch-related fields
         node["proof_sketch"] = None
         node["syntactic"] = False
@@ -1397,6 +1469,9 @@ class GoedelsPoetryStateManager:
         # Remove all elements from the queue of sketches to correct
         self._state.decomposition_correct_queue.clear()
 
+        # Reset proof tree root to modified DecomposedFormalTheoremState
+        self._reconstruct_tree(cast(list[TreeNode], corrected_sketches["outputs"]))
+
         # Place all sketches marked for correction into the queue to be sketched
         self._state.decomposition_sketch_queue += corrected_sketches["outputs"]
 
@@ -1414,6 +1489,9 @@ class GoedelsPoetryStateManager:
         """
         # Remove all elements from the queue of sketches to backtrack
         self._state.decomposition_backtrack_queue.clear()
+
+        # Reset proof tree root to modified DecomposedFormalTheoremState
+        self._reconstruct_tree(cast(list[TreeNode], backtracked_sketches["outputs"]))
 
         # Place all backtracked sketches into the search queue to regenerate queries
         # (search_queries was cleared in _prepare_node_for_resketching)
@@ -1448,6 +1526,9 @@ class GoedelsPoetryStateManager:
         """
         # Remove all elements from the queue of elements to parse
         self._state.decomposition_ast_queue.clear()
+
+        # Reset proof tree root to modified DecomposedFormalTheoremState
+        self._reconstruct_tree(cast(list[TreeNode], parsed_sketches["outputs"]))
 
         # TODO: Figure out how to deal with parent AST's. Doe we add this AST to ther parent here?
         #       If we do, the grandparent won't have this AST. So do we do so recursively? If we do
@@ -1488,9 +1569,12 @@ class GoedelsPoetryStateManager:
         # Remove all elements from the queue of elements to decompose
         self._state.decomposition_decompose_queue.clear()
 
+        # Reset proof tree root to modified DecomposedFormalTheoremState
+        self._reconstruct_tree(cast(list[TreeNode], decomposed_sketches["outputs"]))
+
         # Gather all children FormalTheoremProofState's that need to be proven
         all_children = [
-            cast(FormalTheoremProofState, dt) for ds in decomposed_sketches["outputs"] for dt in ds["children"]
+            cast(FormalTheoremProofState, dt) for ds in decomposed_sketches["outputs"] for dt in ds["children"].values()
         ]
 
         # Identify children that are too deep
@@ -1680,7 +1764,7 @@ class GoedelsPoetryStateManager:
             reconstructed = self._replace_holes_using_ast(
                 sketch,
                 ast,
-                decomposed_state["children"],
+                list(decomposed_state["children"].values()),
                 kimina_client=kimina_client,
                 server_timeout=server_timeout,
                 preamble=preamble,  # Use the preamble that was used to create the AST

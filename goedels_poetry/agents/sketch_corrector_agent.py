@@ -86,11 +86,17 @@ def _corrector(state: DecomposedFormalTheoremState) -> DecomposedFormalTheoremSt
         A DecomposedFormalTheoremStates containing in its outputs the modified
         DecomposedFormalTheoremState
     """
+    # Copy state to prevent issues with LangGraph's mapreduce implementation
+    new_state: DecomposedFormalTheoremState = {
+        **state,  # shallow copy is OK if you also copy mutables
+        "decomposition_history": list(state["decomposition_history"]),
+    }
+
     # Construct the prompt
     prompt = load_prompt(
         "decomposer-subsequent",
-        prev_round_num=str(state["self_correction_attempts"] - 1),
-        error_message_for_prev_round=str(state["errors"]),
+        prev_round_num=str(new_state["self_correction_attempts"] - 1),
+        error_message_for_prev_round=str(new_state["errors"]),
     )
 
     # Log debug prompt
@@ -98,14 +104,14 @@ def _corrector(state: DecomposedFormalTheoremState) -> DecomposedFormalTheoremSt
         "SKETCH_CORRECTOR_AGENT",
         prompt,
         "decomposer-subsequent",
-        attempt_num=state["self_correction_attempts"],
+        attempt_num=new_state["self_correction_attempts"],
     )
 
     # Add correction request to the state's decomposition_history
-    state["decomposition_history"] += [HumanMessage(content=prompt)]
+    new_state["decomposition_history"] += [HumanMessage(content=prompt)]
 
     # Reset llm_lean_output as it is now invalid for this new round
-    state["llm_lean_output"] = None
+    new_state["llm_lean_output"] = None
 
     # Return a DecomposedFormalTheoremStates with state added to its outputs
-    return {"outputs": [state]}  # type: ignore[typeddict-item]
+    return {"outputs": [new_state]}  # type: ignore[typeddict-item]

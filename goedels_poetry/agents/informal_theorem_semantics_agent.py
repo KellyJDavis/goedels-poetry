@@ -1,4 +1,5 @@
 from functools import partial
+from uuid import uuid4
 
 from langchain_core.language_models.chat_models import BaseChatModel
 from langgraph.graph import END, START, StateGraph
@@ -95,9 +96,12 @@ def _check_semantics(llm: BaseChatModel, state: InformalTheoremState) -> Informa
         informal_statement=str(state["informal_theorem"]),
     )
 
+    # Create transaction id
+    transaction_id = uuid4().hex
+
     # Log debug prompt
     log_llm_prompt(
-        "SEMANTICS_AGENT",
+        f"SEMANTICS_AGENT ({transaction_id})",
         prompt,
         "goedel-semiotician-v2",
         attempt_num=state["formalization_attempts"],
@@ -108,7 +112,7 @@ def _check_semantics(llm: BaseChatModel, state: InformalTheoremState) -> Informa
 
     # Log debug response
     log_llm_response(
-        "SEMANTICS_AGENT_LLM",
+        f"SEMANTICS_AGENT ({transaction_id})",
         str(response_content),
         attempt_num=state["formalization_attempts"],
     )

@@ -1,4 +1,5 @@
 from functools import partial
+from uuid import uuid4
 
 from kimina_client import KiminaClient
 from langgraph.graph import END, START, StateGraph
@@ -128,9 +129,18 @@ def _parse_sketch(
         A DecomposedFormalTheoremStates with the DecomposedFormalTheoremState with the parsed proof
         sketch added to the DecomposedFormalTheoremStates "outputs" member.
     """
+    # Create transaction id
+    transaction_id = uuid4().hex
+
+    # Copy state to prevent issues with LangGraph's mapreduce implementation
+    new_state: DecomposedFormalTheoremState = {
+        **state,  # shallow copy is OK if you also copy mutables
+        "decomposition_history": list(state["decomposition_history"]),
+    }
+
     kimina_client = KiminaClient(api_url=server_url, http_timeout=server_timeout, n_retries=server_max_retries)
-    normalized_preamble = state["preamble"].strip()
-    normalized_formal = str(state["formal_theorem"]).strip()
+    normalized_preamble = new_state["preamble"].strip()
+    normalized_formal = str(new_state["formal_theorem"]).strip()
     formal_with_preamble = combine_preamble_and_body(normalized_preamble, normalized_formal)
 
     if normalized_preamble and normalized_formal:
@@ -141,7 +151,7 @@ def _parse_sketch(
 
     ast_code_response_formal = kimina_client.ast_code(formal_with_preamble)
     parsed_formal = parse_kimina_ast_code_response(ast_code_response_formal)
-    log_kimina_response("ast_code_formal", parsed_formal)
+    log_kimina_response(f"ast_code_formal ({transaction_id})", parsed_formal)
 
     if is_no_usable_ast(parsed_formal):
         raise ValueError(
@@ -161,7 +171,7 @@ def _parse_sketch(
             + _actionable_suffix(parsed_formal, formal_with_preamble)
         )
 
-    raw_output = str(state["llm_lean_output"]) if state["llm_lean_output"] else ""
+    raw_output = str(new_state["llm_lean_output"]) if new_state["llm_lean_output"] else ""
     normalized_body = raw_output.strip()
     sketch_with_imports = combine_preamble_and_body(normalized_preamble, normalized_body)
     if normalized_preamble and normalized_body:
@@ -172,13 +182,14 @@ def _parse_sketch(
 
     ast_code_response = kimina_client.ast_code(sketch_with_imports)
     parsed_response = parse_kimina_ast_code_response(ast_code_response)
-    log_kimina_response("ast_code", parsed_response)
+    log_kimina_response(f"ast_code ({transaction_id})", parsed_response)
 
     if is_no_usable_ast(parsed_response):
         raise ValueError("Kimina failed to parse proof" + _actionable_suffix(parsed_response, sketch_with_imports))
 
+    sketch_ast_without_imports = remove_default_imports_from_ast(parsed_response["ast"], preamble=normalized_preamble)
     ast = AST(
-        parsed_response["ast"],
+        sketch_ast_without_imports,
         sorries=parsed_response.get("sorries"),
         source_text=sketch_with_imports,
         body_start=body_start,
@@ -188,17 +199,23 @@ def _parse_sketch(
         msg = f"Structural extraction failed for target signature: {target_sig}; preview: {sketch_with_imports[:200]!r}"
         raise ValueError(msg)
 
-    state["proof_sketch"] = extracted_sketch
+    new_state["proof_sketch"] = extracted_sketch
 
-    extracted_preamble = extract_preamble_from_ast(ast)
+    ast_with_imports = AST(
+        parsed_response["ast"],
+        sorries=parsed_response.get("sorries"),
+        source_text=sketch_with_imports,
+        body_start=body_start,
+    )
+    extracted_preamble = extract_preamble_from_ast(ast_with_imports)
     if extracted_preamble:
-        state["preamble"] = extracted_preamble
+        new_state["preamble"] = extracted_preamble
 
-    ast_without_imports = remove_default_imports_from_ast(parsed_response["ast"], preamble=state["preamble"])
-    state["ast"] = AST(
+    ast_without_imports = remove_default_imports_from_ast(parsed_response["ast"], preamble=new_state["preamble"])
+    new_state["ast"] = AST(
         ast_without_imports,
         sorries=parsed_response.get("sorries"),
         source_text=sketch_with_imports,
         body_start=body_start,
     )
-    return {"outputs": [state]}  # type: ignore[typeddict-item]
+    return {"outputs": [new_state]}  # type: ignore[typeddict-item]

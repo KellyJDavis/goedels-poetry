@@ -4,6 +4,7 @@ import re
 from functools import partial
 from hashlib import sha256
 from typing import cast
+from uuid import uuid4
 
 from langchain_core.language_models.chat_models import BaseChatModel
 from langgraph.graph import END, START, StateGraph
@@ -95,9 +96,12 @@ def _formalizer(llm: BaseChatModel, state: InformalTheoremState) -> InformalTheo
         informal_statement=state["informal_theorem"],
     )
 
+    # Create transaction id
+    transaction_id = uuid4().hex
+
     # Log debug prompt
     log_llm_prompt(
-        "FORMALIZER_AGENT",
+        f"FORMALIZER_AGENT ({transaction_id})",
         prompt,
         "goedel-formalizer-v2",
         attempt_num=state["formalization_attempts"],
@@ -108,7 +112,7 @@ def _formalizer(llm: BaseChatModel, state: InformalTheoremState) -> InformalTheo
 
     # Log debug response
     log_llm_response(
-        "FORMALIZER_AGENT_LLM",
+        f"FORMALIZER_AGENT ({transaction_id})",
         str(response_content),
         attempt_num=state["formalization_attempts"],
     )

@@ -182,20 +182,24 @@ def _find_proof_body_node_structurally(decl_node: dict) -> dict | None:  # noqa:
                     if proof_node:
                         return proof_node
 
-    # 2. Fallback: Proof might be a direct child of the declaration's args (common in dummy ASTs)
-    seen_assign = False
-    for arg in args:
-        if not isinstance(arg, dict):
-            continue
-        if arg.get("val") == ":=":
-            seen_assign = True
-            continue
-        if seen_assign:
-            proof_node = _check_if_proof_node(arg)
-            if proof_node:
-                return proof_node
+    # 2. Fallback: Proof might be a (recursive) direct child of the declaration's args (common in dummy ASTs)
+    def _recursively_find_proof_node(args: dict) -> dict | None:
+        seen_assign = False
+        for arg in args:
+            if not isinstance(arg, dict):
+                continue
+            if arg.get("kind", "") == "group" and arg.get("args", []):
+                return _find_proof_body_node_structurally(arg)
+            if arg.get("val") == ":=":
+                seen_assign = True
+                continue
+            if seen_assign:
+                proof_node = _check_if_proof_node(arg)
+                if proof_node:
+                    return proof_node
+        return None
 
-    return None
+    return _recursively_find_proof_node(args)
 
 
 def _check_if_proof_node(node: dict) -> dict | None:

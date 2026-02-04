@@ -55,8 +55,9 @@ def test_get_sketches_to_backtrack_with_items(temp_state: GoedelsPoetryState) ->
 
     # Create a decomposed state and add it to the backtrack queue
     decomposed_state = DecomposedFormalTheoremState(
+        id=uuid.uuid4().hex,
         parent=None,
-        children=[],
+        children={},
         depth=0,
         formal_theorem="theorem test : True := by sorry",
         preamble=TEST_PREAMBLE,
@@ -85,8 +86,9 @@ def test_get_sketches_to_backtrack_with_multiple_items(temp_state: GoedelsPoetry
     states = []
     for i in range(3):
         state = DecomposedFormalTheoremState(
+            id=uuid.uuid4().hex,
             parent=None,
-            children=[],
+            children={},
             depth=i,
             formal_theorem=f"theorem test{i} : True := by sorry",
             preamble=TEST_PREAMBLE,
@@ -113,8 +115,9 @@ def test_set_backtracked_sketches_clears_queue(temp_state: GoedelsPoetryState) -
 
     # Add items to backtrack queue
     decomposed_state = DecomposedFormalTheoremState(
+        id=uuid.uuid4().hex,
         parent=None,
-        children=[],
+        children={},
         depth=0,
         formal_theorem="theorem test : True := by sorry",
         preamble=TEST_PREAMBLE,
@@ -145,8 +148,9 @@ def test_set_backtracked_sketches_adds_to_validate_queue(temp_state: GoedelsPoet
 
     # Create backtracked sketches
     decomposed_state = DecomposedFormalTheoremState(
+        id=uuid.uuid4().hex,
         parent=None,
-        children=[],
+        children={},
         depth=0,
         formal_theorem="theorem test : True := by sorry",
         preamble=TEST_PREAMBLE,
@@ -178,8 +182,9 @@ def test_set_backtracked_sketches_with_multiple_items(temp_state: GoedelsPoetryS
     states = []
     for i in range(3):
         state = DecomposedFormalTheoremState(
+            id=uuid.uuid4().hex,
             parent=None,
-            children=[],
+            children={},
             depth=i,
             formal_theorem=f"theorem test{i} : True := by sorry",
             preamble=TEST_PREAMBLE,
@@ -212,8 +217,9 @@ def test_backtracking_integration_with_validated_sketches(temp_state: GoedelsPoe
 
     # Create a parent decomposed state
     parent = DecomposedFormalTheoremState(
+        id=uuid.uuid4().hex,
         parent=None,
-        children=[],
+        children={},
         depth=0,
         formal_theorem="theorem parent : True := by sorry",
         preamble=TEST_PREAMBLE,
@@ -228,8 +234,9 @@ def test_backtracking_integration_with_validated_sketches(temp_state: GoedelsPoe
 
     # Create a child that has failed (reached max retries - 1, will reach max after increment)
     child = DecomposedFormalTheoremState(
+        id=uuid.uuid4().hex,
         parent=cast(TreeNode, parent),
-        children=[],
+        children={},
         depth=1,
         formal_theorem="theorem child : True := by sorry",
         preamble=TEST_PREAMBLE,
@@ -241,7 +248,7 @@ def test_backtracking_integration_with_validated_sketches(temp_state: GoedelsPoe
         decomposition_history=[],
         llm_lean_output=None,
     )
-    parent["children"] = [cast(TreeNode, child)]
+    parent["children"] = {cast(dict, child)["id"]: cast(TreeNode, child)}
 
     # Set up the state
     temp_state.formal_theorem_proof = cast(TreeNode, parent)
@@ -261,7 +268,7 @@ def test_backtracking_integration_with_validated_sketches(temp_state: GoedelsPoe
     assert temp_state.decomposition_backtrack_queue[0] == parent
 
     # Parent should have been prepared for re-sketching (children cleared)
-    assert parent["children"] == []
+    assert parent["children"] == {}
     assert parent["proof_sketch"] is None
     assert parent["syntactic"] is False
     assert parent["errors"] is None
@@ -276,8 +283,9 @@ def test_backtracking_sets_finished_when_no_ancestor(temp_state: GoedelsPoetrySt
 
     # Create a root that has also exhausted attempts
     root = DecomposedFormalTheoremState(
+        id=uuid.uuid4().hex,
         parent=None,
-        children=[],
+        children={},
         depth=0,
         formal_theorem="theorem root : True := by sorry",
         preamble=TEST_PREAMBLE,
@@ -316,8 +324,9 @@ def test_backtracking_removes_descendants_from_queues(temp_state: GoedelsPoetryS
 
     # Create a tree structure
     parent = DecomposedFormalTheoremState(
+        id=uuid.uuid4().hex,
         parent=None,
-        children=[],
+        children={},
         depth=0,
         formal_theorem="theorem parent : True := by sorry",
         preamble=TEST_PREAMBLE,
@@ -332,8 +341,9 @@ def test_backtracking_removes_descendants_from_queues(temp_state: GoedelsPoetryS
 
     # Create a child decomposed state
     child_decomposed = DecomposedFormalTheoremState(
+        id=uuid.uuid4().hex,
         parent=cast(TreeNode, parent),
-        children=[],
+        children={},
         depth=1,
         formal_theorem="theorem child_decomp : True := by sorry",
         preamble=TEST_PREAMBLE,
@@ -348,6 +358,7 @@ def test_backtracking_removes_descendants_from_queues(temp_state: GoedelsPoetryS
 
     # Create a grandchild proof state
     grandchild_proof = FormalTheoremProofState(
+        id=uuid.uuid4().hex,
         parent=cast(TreeNode, child_decomposed),
         depth=2,
         formal_theorem="theorem grandchild : True := by sorry",
@@ -365,13 +376,14 @@ def test_backtracking_removes_descendants_from_queues(temp_state: GoedelsPoetryS
         hole_end=None,
     )
 
-    child_decomposed["children"] = [cast(TreeNode, grandchild_proof)]
-    parent["children"] = [cast(TreeNode, child_decomposed)]
+    child_decomposed["children"] = {cast(dict, grandchild_proof)["id"]: cast(TreeNode, grandchild_proof)}
+    parent["children"] = {cast(dict, child_decomposed)["id"]: cast(TreeNode, child_decomposed)}
 
     # Create a failed child that will trigger backtracking
     failed_child = DecomposedFormalTheoremState(
+        id=uuid.uuid4().hex,
         parent=cast(TreeNode, parent),
-        children=[],
+        children={},
         depth=1,
         formal_theorem="theorem failed_child : True := by sorry",
         preamble=TEST_PREAMBLE,
@@ -383,7 +395,7 @@ def test_backtracking_removes_descendants_from_queues(temp_state: GoedelsPoetryS
         decomposition_history=[],
         llm_lean_output=None,
     )
-    parent["children"].append(cast(TreeNode, failed_child))
+    parent["children"][cast(dict, failed_child)["id"]] = cast(TreeNode, failed_child)
 
     # Add descendants to various queues
     temp_state.decomposition_sketch_queue.append(child_decomposed)
@@ -413,8 +425,9 @@ def test_backtracking_with_valid_sketches(temp_state: GoedelsPoetryState) -> Non
 
     # Create a valid sketch
     valid_sketch = DecomposedFormalTheoremState(
+        id=uuid.uuid4().hex,
         parent=None,
-        children=[],
+        children={},
         depth=0,
         formal_theorem="theorem valid : True := by sorry",
         preamble=TEST_PREAMBLE,
@@ -429,8 +442,9 @@ def test_backtracking_with_valid_sketches(temp_state: GoedelsPoetryState) -> Non
 
     # Create a parent for the failed sketch
     parent_of_failed = DecomposedFormalTheoremState(
+        id=uuid.uuid4().hex,
         parent=None,
-        children=[],
+        children={},
         depth=0,
         formal_theorem="theorem parent : True := by sorry",
         preamble=TEST_PREAMBLE,
@@ -445,8 +459,9 @@ def test_backtracking_with_valid_sketches(temp_state: GoedelsPoetryState) -> Non
 
     # Create a failed sketch
     failed_sketch = DecomposedFormalTheoremState(
+        id=uuid.uuid4().hex,
         parent=cast(TreeNode, parent_of_failed),
-        children=[],
+        children={},
         depth=1,
         formal_theorem="theorem failed : True := by sorry",
         preamble=TEST_PREAMBLE,
@@ -458,7 +473,7 @@ def test_backtracking_with_valid_sketches(temp_state: GoedelsPoetryState) -> Non
         decomposition_history=[],
         llm_lean_output=None,
     )
-    parent_of_failed["children"] = [cast(TreeNode, failed_sketch)]
+    parent_of_failed["children"] = {cast(dict, failed_sketch)["id"]: cast(TreeNode, failed_sketch)}
 
     from goedels_poetry.agents.state import DecomposedFormalTheoremStates
 
@@ -486,8 +501,9 @@ def test_backtracking_preserves_history(temp_state: GoedelsPoetryState) -> None:
 
     # Create parent with history
     parent = DecomposedFormalTheoremState(
+        id=uuid.uuid4().hex,
         parent=None,
-        children=[],
+        children={},
         depth=0,
         formal_theorem="theorem parent : True := by sorry",
         preamble=TEST_PREAMBLE,
@@ -501,8 +517,9 @@ def test_backtracking_preserves_history(temp_state: GoedelsPoetryState) -> None:
 
     # Create failed child
     child = DecomposedFormalTheoremState(
+        id=uuid.uuid4().hex,
         parent=cast(TreeNode, parent),
-        children=[],
+        children={},
         depth=1,
         formal_theorem="theorem child : True := by sorry",
         preamble=TEST_PREAMBLE,
@@ -514,7 +531,7 @@ def test_backtracking_preserves_history(temp_state: GoedelsPoetryState) -> None:
         decomposition_history=[],
         llm_lean_output=None,
     )
-    parent["children"] = [cast(TreeNode, child)]
+    parent["children"] = {cast(dict, child)["id"]: cast(TreeNode, child)}
 
     from goedels_poetry.agents.state import DecomposedFormalTheoremStates
 
@@ -543,8 +560,9 @@ def test_set_decomposed_sketches_with_too_deep_children_backtracks(temp_state: G
 
     # Create a tree structure: grandparent -> parent -> too_deep_child
     grandparent = DecomposedFormalTheoremState(
+        id=uuid.uuid4().hex,
         parent=None,
-        children=[],
+        children={},
         depth=0,
         formal_theorem="theorem grandparent : True := by sorry",
         preamble=TEST_PREAMBLE,
@@ -558,8 +576,9 @@ def test_set_decomposed_sketches_with_too_deep_children_backtracks(temp_state: G
     )
 
     parent = DecomposedFormalTheoremState(
+        id=uuid.uuid4().hex,
         parent=cast(TreeNode, grandparent),
-        children=[],
+        children={},
         depth=1,
         formal_theorem="theorem parent : True := by sorry",
         preamble=TEST_PREAMBLE,
@@ -571,10 +590,11 @@ def test_set_decomposed_sketches_with_too_deep_children_backtracks(temp_state: G
         decomposition_history=[],
         llm_lean_output=None,
     )
-    grandparent["children"] = [cast(TreeNode, parent)]
+    grandparent["children"] = {cast(dict, parent)["id"]: cast(TreeNode, parent)}
 
     # Create a child that exceeds max depth
     too_deep_child = FormalTheoremProofState(
+        id=uuid.uuid4().hex,
         parent=cast(TreeNode, parent),
         depth=PROVER_AGENT_MAX_DEPTH,  # At max depth
         formal_theorem="theorem too_deep : True := by sorry",
@@ -589,7 +609,7 @@ def test_set_decomposed_sketches_with_too_deep_children_backtracks(temp_state: G
         pass_attempts=0,
         llm_lean_output=None,
     )
-    parent["children"] = [cast(TreeNode, too_deep_child)]
+    parent["children"] = {cast(dict, too_deep_child)["id"]: cast(TreeNode, too_deep_child)}
 
     temp_state.formal_theorem_proof = cast(TreeNode, grandparent)
 
@@ -605,7 +625,7 @@ def test_set_decomposed_sketches_with_too_deep_children_backtracks(temp_state: G
     assert temp_state.decomposition_backtrack_queue[0] == grandparent
 
     # Grandparent should be prepared for re-sketching
-    assert grandparent["children"] == []
+    assert grandparent["children"] == {}
     assert grandparent["proof_sketch"] is None
     assert grandparent["syntactic"] is False
 
@@ -629,8 +649,9 @@ def test_set_decomposed_sketches_with_too_deep_children_no_backtrackable_ancesto
 
     # Create a tree where grandparent has exhausted attempts
     grandparent = DecomposedFormalTheoremState(
+        id=uuid.uuid4().hex,
         parent=None,
-        children=[],
+        children={},
         depth=0,
         formal_theorem="theorem grandparent : True := by sorry",
         preamble=TEST_PREAMBLE,
@@ -644,8 +665,9 @@ def test_set_decomposed_sketches_with_too_deep_children_no_backtrackable_ancesto
     )
 
     parent = DecomposedFormalTheoremState(
+        id=uuid.uuid4().hex,
         parent=cast(TreeNode, grandparent),
-        children=[],
+        children={},
         depth=1,
         formal_theorem="theorem parent : True := by sorry",
         preamble=TEST_PREAMBLE,
@@ -657,10 +679,11 @@ def test_set_decomposed_sketches_with_too_deep_children_no_backtrackable_ancesto
         decomposition_history=[],
         llm_lean_output=None,
     )
-    grandparent["children"] = [cast(TreeNode, parent)]
+    grandparent["children"] = {cast(dict, parent)["id"]: cast(TreeNode, parent)}
 
     # Create a child that exceeds max depth
     too_deep_child = FormalTheoremProofState(
+        id=uuid.uuid4().hex,
         parent=cast(TreeNode, parent),
         depth=PROVER_AGENT_MAX_DEPTH,
         formal_theorem="theorem too_deep : True := by sorry",
@@ -675,7 +698,7 @@ def test_set_decomposed_sketches_with_too_deep_children_no_backtrackable_ancesto
         pass_attempts=0,
         llm_lean_output=None,
     )
-    parent["children"] = [cast(TreeNode, too_deep_child)]
+    parent["children"] = {cast(dict, too_deep_child)["id"]: cast(TreeNode, too_deep_child)}
 
     temp_state.formal_theorem_proof = cast(TreeNode, grandparent)
 
@@ -704,8 +727,9 @@ def test_set_decomposed_sketches_with_too_deep_children_no_grandparent(
 
     # Create a parent with no grandparent (parent is root)
     parent = DecomposedFormalTheoremState(
+        id=uuid.uuid4().hex,
         parent=None,  # No parent, so no grandparent
-        children=[],
+        children={},
         depth=0,
         formal_theorem="theorem parent : True := by sorry",
         preamble=TEST_PREAMBLE,
@@ -720,6 +744,7 @@ def test_set_decomposed_sketches_with_too_deep_children_no_grandparent(
 
     # Create a child that exceeds max depth
     too_deep_child = FormalTheoremProofState(
+        id=uuid.uuid4().hex,
         parent=cast(TreeNode, parent),
         depth=PROVER_AGENT_MAX_DEPTH,
         formal_theorem="theorem too_deep : True := by sorry",
@@ -734,7 +759,7 @@ def test_set_decomposed_sketches_with_too_deep_children_no_grandparent(
         pass_attempts=0,
         llm_lean_output=None,
     )
-    parent["children"] = [cast(TreeNode, too_deep_child)]
+    parent["children"] = {cast(dict, too_deep_child)["id"]: cast(TreeNode, too_deep_child)}
 
     temp_state.formal_theorem_proof = cast(TreeNode, parent)
 
@@ -757,8 +782,9 @@ def test_set_decomposed_sketches_with_mixed_depth_children(temp_state: GoedelsPo
 
     # Create a grandparent
     grandparent = DecomposedFormalTheoremState(
+        id=uuid.uuid4().hex,
         parent=None,
-        children=[],
+        children={},
         depth=0,
         formal_theorem="theorem grandparent : True := by sorry",
         preamble=TEST_PREAMBLE,
@@ -772,8 +798,9 @@ def test_set_decomposed_sketches_with_mixed_depth_children(temp_state: GoedelsPo
     )
 
     parent = DecomposedFormalTheoremState(
+        id=uuid.uuid4().hex,
         parent=cast(TreeNode, grandparent),
-        children=[],
+        children={},
         depth=1,
         formal_theorem="theorem parent : True := by sorry",
         preamble=TEST_PREAMBLE,
@@ -785,10 +812,11 @@ def test_set_decomposed_sketches_with_mixed_depth_children(temp_state: GoedelsPo
         decomposition_history=[],
         llm_lean_output=None,
     )
-    grandparent["children"] = [cast(TreeNode, parent)]
+    grandparent["children"] = {cast(dict, parent)["id"]: cast(TreeNode, parent)}
 
     # Create one too-deep child
     too_deep_child = FormalTheoremProofState(
+        id=uuid.uuid4().hex,
         parent=cast(TreeNode, parent),
         depth=PROVER_AGENT_MAX_DEPTH,
         formal_theorem="theorem too_deep : True := by sorry",
@@ -806,6 +834,7 @@ def test_set_decomposed_sketches_with_mixed_depth_children(temp_state: GoedelsPo
 
     # Create one normal child (not too deep)
     normal_child = FormalTheoremProofState(
+        id=uuid.uuid4().hex,
         parent=cast(TreeNode, parent),
         depth=PROVER_AGENT_MAX_DEPTH - 1,  # Just under max
         formal_theorem="theorem normal : True := by sorry",
@@ -821,7 +850,10 @@ def test_set_decomposed_sketches_with_mixed_depth_children(temp_state: GoedelsPo
         llm_lean_output=None,
     )
 
-    parent["children"] = [cast(TreeNode, too_deep_child), cast(TreeNode, normal_child)]
+    parent["children"] = {
+        cast(dict, too_deep_child)["id"]: cast(TreeNode, too_deep_child),
+        cast(dict, normal_child)["id"]: cast(TreeNode, normal_child),
+    }
 
     temp_state.formal_theorem_proof = cast(TreeNode, grandparent)
 
@@ -854,8 +886,9 @@ def test_set_decomposed_sketches_with_multiple_too_deep_children_same_grandparen
 
     # Create a grandparent
     grandparent = DecomposedFormalTheoremState(
+        id=uuid.uuid4().hex,
         parent=None,
-        children=[],
+        children={},
         depth=0,
         formal_theorem="theorem grandparent : True := by sorry",
         preamble=TEST_PREAMBLE,
@@ -869,8 +902,9 @@ def test_set_decomposed_sketches_with_multiple_too_deep_children_same_grandparen
     )
 
     parent1 = DecomposedFormalTheoremState(
+        id=uuid.uuid4().hex,
         parent=cast(TreeNode, grandparent),
-        children=[],
+        children={},
         depth=1,
         formal_theorem="theorem parent1 : True := by sorry",
         preamble=TEST_PREAMBLE,
@@ -884,8 +918,9 @@ def test_set_decomposed_sketches_with_multiple_too_deep_children_same_grandparen
     )
 
     parent2 = DecomposedFormalTheoremState(
+        id=uuid.uuid4().hex,
         parent=cast(TreeNode, grandparent),
-        children=[],
+        children={},
         depth=1,
         formal_theorem="theorem parent2 : True := by sorry",
         preamble=TEST_PREAMBLE,
@@ -898,10 +933,14 @@ def test_set_decomposed_sketches_with_multiple_too_deep_children_same_grandparen
         llm_lean_output=None,
     )
 
-    grandparent["children"] = [cast(TreeNode, parent1), cast(TreeNode, parent2)]
+    grandparent["children"] = {
+        cast(dict, parent1)["id"]: cast(TreeNode, parent1),
+        cast(dict, parent2)["id"]: cast(TreeNode, parent2),
+    }
 
     # Create too-deep children for both parents
     too_deep_child1 = FormalTheoremProofState(
+        id=uuid.uuid4().hex,
         parent=cast(TreeNode, parent1),
         depth=PROVER_AGENT_MAX_DEPTH,
         formal_theorem="theorem too_deep1 : True := by sorry",
@@ -918,6 +957,7 @@ def test_set_decomposed_sketches_with_multiple_too_deep_children_same_grandparen
     )
 
     too_deep_child2 = FormalTheoremProofState(
+        id=uuid.uuid4().hex,
         parent=cast(TreeNode, parent2),
         depth=PROVER_AGENT_MAX_DEPTH,
         formal_theorem="theorem too_deep2 : True := by sorry",
@@ -933,8 +973,8 @@ def test_set_decomposed_sketches_with_multiple_too_deep_children_same_grandparen
         llm_lean_output=None,
     )
 
-    parent1["children"] = [cast(TreeNode, too_deep_child1)]
-    parent2["children"] = [cast(TreeNode, too_deep_child2)]
+    parent1["children"] = {cast(dict, too_deep_child1)["id"]: cast(TreeNode, too_deep_child1)}
+    parent2["children"] = {cast(dict, too_deep_child2)["id"]: cast(TreeNode, too_deep_child2)}
 
     temp_state.formal_theorem_proof = cast(TreeNode, grandparent)
 
@@ -957,8 +997,9 @@ def test_set_decomposed_sketches_with_no_too_deep_children(temp_state: GoedelsPo
     manager = GoedelsPoetryStateManager(temp_state)
 
     parent = DecomposedFormalTheoremState(
+        id=uuid.uuid4().hex,
         parent=None,
-        children=[],
+        children={},
         depth=0,
         formal_theorem="theorem parent : True := by sorry",
         preamble=TEST_PREAMBLE,
@@ -973,6 +1014,7 @@ def test_set_decomposed_sketches_with_no_too_deep_children(temp_state: GoedelsPo
 
     # Create children that are NOT too deep
     child1 = FormalTheoremProofState(
+        id=uuid.uuid4().hex,
         parent=cast(TreeNode, parent),
         depth=PROVER_AGENT_MAX_DEPTH - 1,
         formal_theorem="theorem child1 : True := by sorry",
@@ -989,6 +1031,7 @@ def test_set_decomposed_sketches_with_no_too_deep_children(temp_state: GoedelsPo
     )
 
     child2 = FormalTheoremProofState(
+        id=uuid.uuid4().hex,
         parent=cast(TreeNode, parent),
         depth=1,
         formal_theorem="theorem child2 : True := by sorry",
@@ -1004,7 +1047,10 @@ def test_set_decomposed_sketches_with_no_too_deep_children(temp_state: GoedelsPo
         llm_lean_output=None,
     )
 
-    parent["children"] = [cast(TreeNode, child1), cast(TreeNode, child2)]
+    parent["children"] = {
+        cast(dict, child1)["id"]: cast(TreeNode, child1),
+        cast(dict, child2)["id"]: cast(TreeNode, child2),
+    }
 
     temp_state.formal_theorem_proof = cast(TreeNode, parent)
 

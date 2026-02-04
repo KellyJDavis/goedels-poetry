@@ -51,6 +51,7 @@ class TestProofResetRouting:
 
             # Create state at max attempts (will be max after increment in set_validated_proofs)
             reset_proof_state: FormalTheoremProofState = {
+                "id": initial_state["id"],
                 "parent": initial_state["parent"],
                 "depth": initial_state["depth"],
                 "formal_theorem": initial_state["formal_theorem"],
@@ -134,6 +135,7 @@ class TestProofResetRouting:
 
             # Create state with errors but below max attempts
             correction_proof_state: FormalTheoremProofState = {
+                "id": initial_state["id"],
                 "parent": initial_state["parent"],
                 "depth": initial_state["depth"],
                 "formal_theorem": initial_state["formal_theorem"],
@@ -211,6 +213,7 @@ class TestProofResetRouting:
 
             # Create state at max attempts and max_pass
             max_pass_proof_state: FormalTheoremProofState = {
+                "id": initial_state["id"],
                 "parent": initial_state["parent"],
                 "depth": initial_state["depth"],
                 "formal_theorem": initial_state["formal_theorem"],
@@ -280,6 +283,7 @@ class TestProofResetRouting:
 
             # Create successful proof state
             successful_proof_state: FormalTheoremProofState = {
+                "id": initial_state["id"],
                 "parent": initial_state["parent"],
                 "depth": initial_state["depth"],
                 "formal_theorem": initial_state["formal_theorem"],
@@ -349,6 +353,7 @@ class TestProofResetRouting:
             # Create three different proof states
             # 1. Reset proof (max attempts, pass_attempts < max_pass)
             reset_proof: FormalTheoremProofState = {
+                "id": initial_state["id"],
                 "parent": initial_state["parent"],
                 "depth": initial_state["depth"],
                 "formal_theorem": initial_state["formal_theorem"],
@@ -370,6 +375,7 @@ class TestProofResetRouting:
             # 2. Correction proof (below max attempts, has errors)
             # Use 0 so after increment it becomes 1, which is still < max (assuming max >= 2)
             correction_proof: FormalTheoremProofState = {
+                "id": initial_state["id"],
                 "parent": initial_state["parent"],
                 "depth": initial_state["depth"],
                 "formal_theorem": initial_state["formal_theorem"],
@@ -390,6 +396,7 @@ class TestProofResetRouting:
 
             # 3. Successful proof
             successful_proof: FormalTheoremProofState = {
+                "id": initial_state["id"],
                 "parent": initial_state["parent"],
                 "depth": initial_state["depth"],
                 "formal_theorem": initial_state["formal_theorem"],

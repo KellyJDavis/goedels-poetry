@@ -130,14 +130,20 @@ def _query_vectordb(
         A DecomposedFormalTheoremStates with the DecomposedFormalTheoremState with search_results
         added to the DecomposedFormalTheoremStates "outputs" member.
     """
-    # Handle None or empty search_queries
-    if state["search_queries"] is None:
-        state["search_results"] = None
-        return {"outputs": [state]}  # type: ignore[typeddict-item]
+    # Copy state to prevent issues with LangGraph's mapreduce implementation
+    new_state: DecomposedFormalTheoremState = {
+        **state,  # shallow copy is OK if you also copy mutables
+        "decomposition_history": list(state["decomposition_history"]),
+    }
 
-    if not state["search_queries"]:
-        state["search_results"] = []
-        return {"outputs": [state]}  # type: ignore[typeddict-item]
+    # Handle None or empty search_queries
+    if new_state["search_queries"] is None:
+        new_state["search_results"] = None
+        return {"outputs": [new_state]}  # type: ignore[typeddict-item]
+
+    if not new_state["search_queries"]:
+        new_state["search_results"] = []
+        return {"outputs": [new_state]}  # type: ignore[typeddict-item]
 
     if Client is None:
         raise LeanExploreDependencyMissing()
@@ -147,7 +153,7 @@ def _query_vectordb(
 
     # Query the vector database for each search query sequentially
     search_results: list[APISearchResponseTypedDict] = []
-    for search_query in state["search_queries"]:
+    for search_query in new_state["search_queries"]:
         # Use asyncio.run() to wrap the async client.search() call
         # Exceptions are allowed to propagate (as per specification, similar to KiminaClient)
         api_response = asyncio.run(client.search(search_query, package_filters=package_filters))
@@ -207,7 +213,7 @@ def _query_vectordb(
     log_vectordb_response("search", search_results)
 
     # Update the state with the search results
-    state["search_results"] = search_results
+    new_state["search_results"] = search_results
 
     # Return a DecomposedFormalTheoremStates with state added to its outputs
-    return {"outputs": [state]}  # type: ignore[typeddict-item]
+    return {"outputs": [new_state]}  # type: ignore[typeddict-item]

@@ -114,15 +114,21 @@ def _check_sketch(
         A DecomposedFormalTheoremStates with the DecomposedFormalTheoremState with the sketch
         checked added to the DecomposedFormalTheoremStates "outputs" member.
     """
+    # Copy state to prevent issues with LangGraph's mapreduce implementation
+    new_state = {
+        **state,  # shallow copy is OK if you also copy mutables
+        "decomposition_history": list(state["decomposition_history"]),
+    }
+
     # Create a client to access the Kimina Server
     kimina_client = KiminaClient(api_url=server_url, http_timeout=server_timeout, n_retries=server_max_retries)
 
     # Use the raw LLM output directly for validation
-    # state["llm_lean_output"] contains the complete declaration from the LLM
-    raw_output = str(state["llm_lean_output"]) if state["llm_lean_output"] else ""
+    # new_state["llm_lean_output"] contains the complete declaration from the LLM
+    raw_output = str(new_state["llm_lean_output"]) if new_state["llm_lean_output"] else ""
 
     # Check the proof sketch with the stored preamble prefix
-    sketch_with_imports = combine_preamble_and_body(state["preamble"], raw_output)
+    sketch_with_imports = combine_preamble_and_body(str(new_state["preamble"]), raw_output)
     check_response = kimina_client.check(sketch_with_imports, timeout=server_timeout)
 
     # Parse check_response
@@ -132,11 +138,11 @@ def _check_sketch(
     log_kimina_response("check", parsed_response)
 
     # Update the state with the sketch check result
-    state["syntactic"] = parsed_response["pass"]
+    new_state["syntactic"] = parsed_response["pass"]
 
     # Update the state with the formatted error string
     # Note: get_error_str expects the code with DEFAULT_IMPORTS for proper line number handling
-    state["errors"] = get_error_str(sketch_with_imports, parsed_response.get("errors", []), False)
+    new_state["errors"] = get_error_str(sketch_with_imports, parsed_response.get("errors", []), False)
 
     # Return a DecomposedFormalTheoremStates with state added to its outputs
-    return {"outputs": [state]}  # type: ignore[typeddict-item]
+    return {"outputs": [new_state]}  # type: ignore[typeddict-item]
