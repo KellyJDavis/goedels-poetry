@@ -86,7 +86,7 @@ def get_ast_hole_names(ast) -> list[tuple[str, int]]:
 
 def verify_hole_positions_match(
     sketch: str,
-    children: list,
+    children: list | dict,
     server_url: str = "http://localhost:8000",
     server_timeout: int = 60,
     tolerance: int = 2,
@@ -96,8 +96,12 @@ def verify_hole_positions_match(
 
     Creates AST internally for consistency. Uses normalized sketch for comparison.
     This is a verification utility for test fixes.
+    children may be a list of nodes or a dict[str, TreeNode] (e.g. node["children"]).
     """
     from goedels_poetry.agents.util.common import DEFAULT_IMPORTS
+
+    if isinstance(children, dict):
+        children = list(children.values())
 
     # Normalize sketch to match AST coordinate system
     normalized_sketch = get_normalized_sketch(sketch)
@@ -242,8 +246,9 @@ def test_reconstruct_complete_proof_nested_with_non_ascii_names(kimina_server_ur
   exact α₁"""
         root_ast = _create_ast_for_sketch(root_sketch, DEFAULT_IMPORTS, kimina_server_url)
         root = DecomposedFormalTheoremState(
+            id=uuid.uuid4().hex,
             parent=None,
-            children=[],
+            children={},
             depth=0,
             formal_theorem=theorem,
             preamble=DEFAULT_IMPORTS,
@@ -262,8 +267,9 @@ def test_reconstruct_complete_proof_nested_with_non_ascii_names(kimina_server_ur
   exact β₂"""
         child_ast = _create_ast_for_sketch(child_sketch, DEFAULT_IMPORTS, kimina_server_url)
         child_decomposed = DecomposedFormalTheoremState(
+            id=uuid.uuid4().hex,
             parent=cast(TreeNode, root),
-            children=[],
+            children={},
             depth=1,
             formal_theorem="theorem α₁ : True",
             preamble=DEFAULT_IMPORTS,
@@ -279,6 +285,7 @@ def test_reconstruct_complete_proof_nested_with_non_ascii_names(kimina_server_ur
 
         # Grandchild with another unicode name
         grandchild = FormalTheoremProofState(
+            id=uuid.uuid4().hex,
             parent=cast(TreeNode, child_decomposed),
             depth=2,
             formal_theorem="theorem β₂ : True",
@@ -298,8 +305,8 @@ def test_reconstruct_complete_proof_nested_with_non_ascii_names(kimina_server_ur
         )
         _annotate_hole_offsets(grandchild, str(child_decomposed["proof_sketch"]), hole_name="β₂", anchor="have β₂")
 
-        child_decomposed["children"].append(cast(TreeNode, grandchild))
-        root["children"].append(cast(TreeNode, child_decomposed))
+        child_decomposed["children"][cast(dict, grandchild)["id"]] = cast(TreeNode, grandchild)
+        root["children"][cast(dict, child_decomposed)["id"]] = cast(TreeNode, child_decomposed)
         state.formal_theorem_proof = cast(TreeNode, root)
         manager = GoedelsPoetryStateManager(state)
 
@@ -347,8 +354,9 @@ def test_reconstruct_complete_proof_with_let_statement(kimina_server_url: str) -
         sketch_ast = _create_ast_for_sketch(sketch, DEFAULT_IMPORTS, kimina_server_url)
 
         decomposed = DecomposedFormalTheoremState(
+            id=uuid.uuid4().hex,
             parent=None,
-            children=[],
+            children={},
             depth=0,
             formal_theorem=theorem,
             preamble=DEFAULT_IMPORTS,
@@ -363,6 +371,7 @@ def test_reconstruct_complete_proof_with_let_statement(kimina_server_url: str) -
 
         # Child proof that depends on the let binding
         child = FormalTheoremProofState(
+            id=uuid.uuid4().hex,
             parent=cast(TreeNode, decomposed),
             depth=1,
             formal_theorem="theorem h (n : ℕ) : n > 0",  # noqa: RUF001
@@ -379,7 +388,7 @@ def test_reconstruct_complete_proof_with_let_statement(kimina_server_url: str) -
         )
         _annotate_hole_offsets(child, sketch, hole_name="h", anchor="have h")
 
-        decomposed["children"].append(cast(TreeNode, child))
+        decomposed["children"][cast(dict, child)["id"]] = cast(TreeNode, child)
         state.formal_theorem_proof = cast(TreeNode, decomposed)
         manager = GoedelsPoetryStateManager(state)
 
@@ -434,8 +443,9 @@ def test_reconstruct_complete_proof_with_obtain_statement(kimina_server_url: str
         holes_detected = sketch_ast.get_sorry_holes_by_name()
 
         decomposed = DecomposedFormalTheoremState(
+            id=uuid.uuid4().hex,
             parent=None,
-            children=[],
+            children={},
             depth=0,
             formal_theorem=theorem,
             preamble=DEFAULT_IMPORTS,
@@ -450,6 +460,7 @@ def test_reconstruct_complete_proof_with_obtain_statement(kimina_server_url: str
 
         # Child proof that depends on obtained variables
         child = FormalTheoremProofState(
+            id=uuid.uuid4().hex,
             parent=cast(TreeNode, decomposed),
             depth=1,
             formal_theorem="theorem h (x : ℕ) (hx : True) : True",  # noqa: RUF001
@@ -473,6 +484,7 @@ def test_reconstruct_complete_proof_with_obtain_statement(kimina_server_url: str
             for _i, (_hole_start, _hole_end) in enumerate(main_body_holes):
                 # The <main body> hole is the obtain's sorry, which needs to prove ∃ x, True
                 main_body_child = FormalTheoremProofState(
+                    id=uuid.uuid4().hex,
                     parent=cast(TreeNode, decomposed),
                     depth=1,
                     formal_theorem=f"theorem main_body_{uuid.uuid4().hex} : ∃ x, True",
@@ -493,7 +505,9 @@ def test_reconstruct_complete_proof_with_obtain_statement(kimina_server_url: str
                 )
                 main_body_children.append(main_body_child)
 
-        decomposed["children"].extend([cast(TreeNode, child)] + [cast(TreeNode, c) for c in main_body_children])
+        decomposed["children"][cast(dict, child)["id"]] = cast(TreeNode, child)
+        for c in main_body_children:
+            decomposed["children"][cast(dict, c)["id"]] = cast(TreeNode, c)
         state.formal_theorem_proof = cast(TreeNode, decomposed)
         manager = GoedelsPoetryStateManager(state)
 
@@ -540,8 +554,9 @@ def test_reconstruct_complete_proof_with_let_and_have_nested(kimina_server_url: 
   trivial"""  # noqa: RUF001
         root_ast = _create_ast_for_sketch(root_sketch, DEFAULT_IMPORTS, kimina_server_url)
         root = DecomposedFormalTheoremState(
+            id=uuid.uuid4().hex,
             parent=None,
-            children=[],
+            children={},
             depth=0,
             formal_theorem=theorem,
             preamble=DEFAULT_IMPORTS,
@@ -559,8 +574,9 @@ def test_reconstruct_complete_proof_with_let_and_have_nested(kimina_server_url: 
   sorry"""
         child_ast = _create_ast_for_sketch(child_sketch, DEFAULT_IMPORTS, kimina_server_url)
         child_decomposed = DecomposedFormalTheoremState(
+            id=uuid.uuid4().hex,
             parent=cast(TreeNode, root),
-            children=[],
+            children={},
             depth=1,
             formal_theorem="theorem helper : True",
             preamble=DEFAULT_IMPORTS,
@@ -576,6 +592,7 @@ def test_reconstruct_complete_proof_with_let_and_have_nested(kimina_server_url: 
 
         # Grandchild proof - simple trivial proof
         grandchild = FormalTheoremProofState(
+            id=uuid.uuid4().hex,
             parent=cast(TreeNode, child_decomposed),
             depth=2,
             formal_theorem="theorem helper : True",
@@ -592,8 +609,8 @@ def test_reconstruct_complete_proof_with_let_and_have_nested(kimina_server_url: 
         )
         _annotate_hole_offsets(grandchild, str(child_decomposed["proof_sketch"]), hole_name="<main body>", anchor=None)
 
-        child_decomposed["children"].append(cast(TreeNode, grandchild))
-        root["children"].append(cast(TreeNode, child_decomposed))
+        child_decomposed["children"][cast(dict, grandchild)["id"]] = cast(TreeNode, grandchild)
+        root["children"][cast(dict, child_decomposed)["id"]] = cast(TreeNode, child_decomposed)
         state.formal_theorem_proof = cast(TreeNode, root)
         manager = GoedelsPoetryStateManager(state)
 
@@ -638,8 +655,9 @@ def test_reconstruct_complete_proof_mixed_bindings_deep_nested(kimina_server_url
   trivial"""  # noqa: RUF001
         root_ast = _create_ast_for_sketch(root_sketch, DEFAULT_IMPORTS, kimina_server_url)
         root = DecomposedFormalTheoremState(
+            id=uuid.uuid4().hex,
             parent=None,
-            children=[],
+            children={},
             depth=0,
             formal_theorem=theorem,
             preamble=DEFAULT_IMPORTS,
@@ -663,8 +681,9 @@ def test_reconstruct_complete_proof_mixed_bindings_deep_nested(kimina_server_url
         holes_detected = level1_ast.get_sorry_holes_by_name()
 
         level1 = DecomposedFormalTheoremState(
+            id=uuid.uuid4().hex,
             parent=cast(TreeNode, root),
-            children=[],
+            children={},
             depth=1,
             formal_theorem="theorem h1 (x : ℕ) : True",  # noqa: RUF001
             preamble=DEFAULT_IMPORTS,
@@ -684,6 +703,7 @@ def test_reconstruct_complete_proof_mixed_bindings_deep_nested(kimina_server_url
             main_body_holes = holes_detected["<main body>"]
             for _i, (_hole_start, _hole_end) in enumerate(main_body_holes):
                 main_body_child = FormalTheoremProofState(
+                    id=uuid.uuid4().hex,
                     parent=cast(TreeNode, level1),
                     depth=2,
                     formal_theorem=f"theorem main_body_{uuid.uuid4().hex} : ∃ y, True",
@@ -710,8 +730,9 @@ def test_reconstruct_complete_proof_mixed_bindings_deep_nested(kimina_server_url
   exact h3"""  # noqa: RUF001
         level2_ast = _create_ast_for_sketch(level2_sketch, DEFAULT_IMPORTS, kimina_server_url)
         level2 = DecomposedFormalTheoremState(
+            id=uuid.uuid4().hex,
             parent=cast(TreeNode, level1),
-            children=[],
+            children={},
             depth=2,
             formal_theorem="theorem h2 (x : ℕ) (y : ℕ) (hy : True) : True",  # noqa: RUF001
             preamble=DEFAULT_IMPORTS,
@@ -727,6 +748,7 @@ def test_reconstruct_complete_proof_mixed_bindings_deep_nested(kimina_server_url
 
         # Level 3: Leaf
         leaf = FormalTheoremProofState(
+            id=uuid.uuid4().hex,
             parent=cast(TreeNode, level2),
             depth=3,
             formal_theorem="theorem h3 (x : ℕ) (y : ℕ) (hy : True) (z : ℕ) : True",  # noqa: RUF001
@@ -743,9 +765,11 @@ def test_reconstruct_complete_proof_mixed_bindings_deep_nested(kimina_server_url
         )
         _annotate_hole_offsets(leaf, str(level2["proof_sketch"]), hole_name="h3", anchor="have h3")
 
-        level2["children"].append(cast(TreeNode, leaf))
-        level1["children"].extend([cast(TreeNode, level2)] + [cast(TreeNode, c) for c in main_body_children])
-        root["children"].append(cast(TreeNode, level1))
+        level2["children"][cast(dict, leaf)["id"]] = cast(TreeNode, leaf)
+        level1["children"][cast(dict, level2)["id"]] = cast(TreeNode, level2)
+        for c in main_body_children:
+            level1["children"][cast(dict, c)["id"]] = cast(TreeNode, c)
+        root["children"][cast(dict, level1)["id"]] = cast(TreeNode, level1)
         state.formal_theorem_proof = cast(TreeNode, root)
         manager = GoedelsPoetryStateManager(state)
 
@@ -809,8 +833,9 @@ def test_reconstruct_complete_proof_non_ascii_with_let_obtain(kimina_server_url:
         holes_detected = sketch_ast.get_sorry_holes_by_name()
 
         decomposed = DecomposedFormalTheoremState(
+            id=uuid.uuid4().hex,
             parent=None,
-            children=[],
+            children={},
             depth=0,
             formal_theorem=theorem,
             preamble=DEFAULT_IMPORTS,
@@ -824,6 +849,7 @@ def test_reconstruct_complete_proof_non_ascii_with_let_obtain(kimina_server_url:
         )
 
         child = FormalTheoremProofState(
+            id=uuid.uuid4().hex,
             parent=cast(TreeNode, decomposed),
             depth=1,
             formal_theorem="theorem γ (α : ℕ) (β : ℕ) (hβ : True) : True",  # noqa: RUF001
@@ -847,6 +873,7 @@ def test_reconstruct_complete_proof_non_ascii_with_let_obtain(kimina_server_url:
             for _i, (_hole_start, _hole_end) in enumerate(main_body_holes):
                 # The <main body> hole is the obtain's sorry, which needs to prove ∃ β, True
                 main_body_child = FormalTheoremProofState(
+                    id=uuid.uuid4().hex,
                     parent=cast(TreeNode, decomposed),
                     depth=1,
                     formal_theorem=f"theorem main_body_{uuid.uuid4().hex} : ∃ β, True",
@@ -867,7 +894,9 @@ def test_reconstruct_complete_proof_non_ascii_with_let_obtain(kimina_server_url:
                 )
                 main_body_children.append(main_body_child)
 
-        decomposed["children"].extend([cast(TreeNode, child)] + [cast(TreeNode, c) for c in main_body_children])
+        decomposed["children"][cast(dict, child)["id"]] = cast(TreeNode, child)
+        for c in main_body_children:
+            decomposed["children"][cast(dict, c)["id"]] = cast(TreeNode, c)
         state.formal_theorem_proof = cast(TreeNode, decomposed)
         manager = GoedelsPoetryStateManager(state)
 
@@ -913,8 +942,9 @@ def test_reconstruct_complete_proof_multiple_children_at_each_level(kimina_serve
   exact h1"""
         root_ast = _create_ast_for_sketch(root_sketch, DEFAULT_IMPORTS, kimina_server_url)
         root = DecomposedFormalTheoremState(
+            id=uuid.uuid4().hex,
             parent=None,
-            children=[],
+            children={},
             depth=0,
             formal_theorem=theorem,
             preamble=DEFAULT_IMPORTS,
@@ -934,8 +964,9 @@ def test_reconstruct_complete_proof_multiple_children_at_each_level(kimina_serve
   exact h1a"""
         child1_ast = _create_ast_for_sketch(child1_sketch, DEFAULT_IMPORTS, kimina_server_url)
         child1_decomposed = DecomposedFormalTheoremState(
+            id=uuid.uuid4().hex,
             parent=cast(TreeNode, root),
-            children=[],
+            children={},
             depth=1,
             formal_theorem="theorem h1 : True",
             preamble=DEFAULT_IMPORTS,
@@ -955,8 +986,9 @@ def test_reconstruct_complete_proof_multiple_children_at_each_level(kimina_serve
   exact h2a"""
         child2_ast = _create_ast_for_sketch(child2_sketch, DEFAULT_IMPORTS, kimina_server_url)
         child2_decomposed = DecomposedFormalTheoremState(
+            id=uuid.uuid4().hex,
             parent=cast(TreeNode, root),
-            children=[],
+            children={},
             depth=1,
             formal_theorem="theorem h2 : True",
             preamble=DEFAULT_IMPORTS,
@@ -972,6 +1004,7 @@ def test_reconstruct_complete_proof_multiple_children_at_each_level(kimina_serve
 
         # Grandchildren for child1
         grandchild1a = FormalTheoremProofState(
+            id=uuid.uuid4().hex,
             parent=cast(TreeNode, child1_decomposed),
             depth=2,
             formal_theorem="theorem h1a : True",
@@ -989,6 +1022,7 @@ def test_reconstruct_complete_proof_multiple_children_at_each_level(kimina_serve
         _annotate_hole_offsets(grandchild1a, str(child1_decomposed["proof_sketch"]), hole_name="h1a", anchor="have h1a")
 
         grandchild1b = FormalTheoremProofState(
+            id=uuid.uuid4().hex,
             parent=cast(TreeNode, child1_decomposed),
             depth=2,
             formal_theorem="theorem h1b : True",
@@ -1007,6 +1041,7 @@ def test_reconstruct_complete_proof_multiple_children_at_each_level(kimina_serve
 
         # Grandchild for child2
         grandchild2a = FormalTheoremProofState(
+            id=uuid.uuid4().hex,
             parent=cast(TreeNode, child2_decomposed),
             depth=2,
             formal_theorem="theorem h2a : True",
@@ -1024,9 +1059,11 @@ def test_reconstruct_complete_proof_multiple_children_at_each_level(kimina_serve
         _annotate_hole_offsets(grandchild2a, str(child2_decomposed["proof_sketch"]), hole_name="h2a", anchor="have h2a")
 
         # Build tree
-        child1_decomposed["children"].extend([cast(TreeNode, grandchild1a), cast(TreeNode, grandchild1b)])
-        child2_decomposed["children"].append(cast(TreeNode, grandchild2a))
-        root["children"].extend([cast(TreeNode, child1_decomposed), cast(TreeNode, child2_decomposed)])
+        child1_decomposed["children"][cast(dict, grandchild1a)["id"]] = cast(TreeNode, grandchild1a)
+        child1_decomposed["children"][cast(dict, grandchild1b)["id"]] = cast(TreeNode, grandchild1b)
+        child2_decomposed["children"][cast(dict, grandchild2a)["id"]] = cast(TreeNode, grandchild2a)
+        root["children"][cast(dict, child1_decomposed)["id"]] = cast(TreeNode, child1_decomposed)
+        root["children"][cast(dict, child2_decomposed)["id"]] = cast(TreeNode, child2_decomposed)
         state.formal_theorem_proof = cast(TreeNode, root)
         manager = GoedelsPoetryStateManager(state)
 
@@ -1073,8 +1110,9 @@ def test_reconstruct_complete_proof_edge_case_empty_children(kimina_server_url: 
         normalized_sketch = get_normalized_sketch(sketch)
         sketch_ast = _create_ast_for_sketch(normalized_sketch, DEFAULT_IMPORTS, kimina_server_url)
         decomposed = DecomposedFormalTheoremState(
+            id=uuid.uuid4().hex,
             parent=None,
-            children=[],
+            children={},
             depth=0,
             formal_theorem=theorem,
             preamble=DEFAULT_IMPORTS,
@@ -1093,6 +1131,7 @@ def test_reconstruct_complete_proof_edge_case_empty_children(kimina_server_url: 
         _annotate_hole_offsets(temp_child, normalized_sketch, hole_name="<main body>", anchor=None)
 
         child = FormalTheoremProofState(
+            id=uuid.uuid4().hex,
             parent=cast(TreeNode, decomposed),
             depth=1,
             formal_theorem=f"theorem proof_{uuid.uuid4().hex} : True",
@@ -1110,7 +1149,7 @@ def test_reconstruct_complete_proof_edge_case_empty_children(kimina_server_url: 
             hole_start=temp_child.get("hole_start"),
             hole_end=temp_child.get("hole_end"),
         )
-        decomposed["children"].append(cast(TreeNode, child))
+        decomposed["children"][cast(dict, child)["id"]] = cast(TreeNode, child)
 
         state.formal_theorem_proof = cast(TreeNode, decomposed)
         manager = GoedelsPoetryStateManager(state)
@@ -1156,8 +1195,9 @@ def test_reconstruct_complete_proof_edge_case_missing_proof(kimina_server_url: s
         sketch_ast = _create_ast_for_sketch(normalized_sketch, DEFAULT_IMPORTS, kimina_server_url)
 
         decomposed = DecomposedFormalTheoremState(
+            id=uuid.uuid4().hex,
             parent=None,
-            children=[],
+            children={},
             depth=0,
             formal_theorem=theorem,
             preamble=DEFAULT_IMPORTS,
@@ -1176,6 +1216,7 @@ def test_reconstruct_complete_proof_edge_case_missing_proof(kimina_server_url: s
         _annotate_hole_offsets(temp_child, normalized_sketch, hole_name="h", anchor="have h")
 
         child = FormalTheoremProofState(
+            id=uuid.uuid4().hex,
             parent=cast(TreeNode, decomposed),
             depth=1,
             formal_theorem="theorem h : True",
@@ -1193,7 +1234,7 @@ def test_reconstruct_complete_proof_edge_case_missing_proof(kimina_server_url: s
             hole_start=temp_child.get("hole_start"),
             hole_end=temp_child.get("hole_end"),
         )
-        decomposed["children"].append(cast(TreeNode, child))
+        decomposed["children"][cast(dict, child)["id"]] = cast(TreeNode, child)
         state.formal_theorem_proof = cast(TreeNode, decomposed)
         manager = GoedelsPoetryStateManager(state)
 
@@ -1233,8 +1274,9 @@ def test_reconstruct_complete_proof_edge_case_nested_missing_proof(kimina_server
   exact h1"""
         root_ast = _create_ast_for_sketch(root_sketch, DEFAULT_IMPORTS, kimina_server_url)
         root = DecomposedFormalTheoremState(
+            id=uuid.uuid4().hex,
             parent=None,
-            children=[],
+            children={},
             depth=0,
             formal_theorem=theorem,
             preamble=DEFAULT_IMPORTS,
@@ -1258,8 +1300,9 @@ def test_reconstruct_complete_proof_edge_case_nested_missing_proof(kimina_server
         _annotate_hole_offsets(temp_child_decomposed, normalized_root_sketch, hole_name="h1", anchor="have h1")
 
         child_decomposed = DecomposedFormalTheoremState(
+            id=uuid.uuid4().hex,
             parent=cast(TreeNode, root),
-            children=[],
+            children={},
             depth=1,
             formal_theorem="theorem h1 : True",
             preamble=DEFAULT_IMPORTS,
@@ -1283,6 +1326,7 @@ def test_reconstruct_complete_proof_edge_case_nested_missing_proof(kimina_server
         _annotate_hole_offsets(temp_grandchild, normalized_child_sketch, hole_name="h2", anchor="have h2")
 
         grandchild = FormalTheoremProofState(
+            id=uuid.uuid4().hex,
             parent=cast(TreeNode, child_decomposed),
             depth=2,
             formal_theorem="theorem h2 : True",
@@ -1300,8 +1344,8 @@ def test_reconstruct_complete_proof_edge_case_nested_missing_proof(kimina_server
             hole_start=temp_grandchild.get("hole_start"),
             hole_end=temp_grandchild.get("hole_end"),
         )
-        child_decomposed["children"].append(cast(TreeNode, grandchild))
-        root["children"].append(cast(TreeNode, child_decomposed))
+        child_decomposed["children"][cast(dict, grandchild)["id"]] = cast(TreeNode, grandchild)
+        root["children"][cast(dict, child_decomposed)["id"]] = cast(TreeNode, child_decomposed)
         state.formal_theorem_proof = cast(TreeNode, root)
         manager = GoedelsPoetryStateManager(state)
 
@@ -1355,8 +1399,9 @@ def test_reconstruct_complete_proof_edge_case_no_sketch(kimina_server_url: str) 
   sorry"""
         sketch_ast = _create_ast_for_sketch(sketch, DEFAULT_IMPORTS, kimina_server_url)
         decomposed = DecomposedFormalTheoremState(
+            id=uuid.uuid4().hex,
             parent=None,
-            children=[],
+            children={},
             depth=0,
             formal_theorem=theorem,
             preamble=DEFAULT_IMPORTS,
@@ -1420,8 +1465,9 @@ def test_reconstruct_complete_proof_edge_case_very_deep_nesting(kimina_server_ur
             )
             level_ast = _create_ast_for_sketch(normalized_level_sketch, DEFAULT_IMPORTS, kimina_server_url)
             level = DecomposedFormalTheoremState(
+                id=uuid.uuid4().hex,
                 parent=cast(TreeNode, parent) if parent else None,
-                children=[],
+                children={},
                 depth=i,
                 formal_theorem=f"theorem level{i} : True" if i > 0 else theorem,
                 preamble=DEFAULT_IMPORTS,
@@ -1435,7 +1481,7 @@ def test_reconstruct_complete_proof_edge_case_very_deep_nesting(kimina_server_ur
             )
             levels.append(level)
             if parent:
-                parent["children"].append(cast(TreeNode, level))
+                parent["children"][cast(dict, level)["id"]] = cast(TreeNode, level)
                 # Use normalized sketch for annotation
                 _annotate_hole_offsets(
                     level,
@@ -1446,6 +1492,7 @@ def test_reconstruct_complete_proof_edge_case_very_deep_nesting(kimina_server_ur
 
         # Add leaf
         leaf = FormalTheoremProofState(
+            id=uuid.uuid4().hex,
             parent=cast(TreeNode, levels[-1]),
             depth=5,
             formal_theorem="theorem level5 : True",
@@ -1461,7 +1508,7 @@ def test_reconstruct_complete_proof_edge_case_very_deep_nesting(kimina_server_ur
             pass_attempts=0,
         )
         _annotate_hole_offsets(leaf, str(levels[-1]["proof_sketch"]), hole_name="<main body>", anchor=None)
-        levels[-1]["children"].append(cast(TreeNode, leaf))
+        levels[-1]["children"][cast(dict, leaf)["id"]] = cast(TreeNode, leaf)
 
         state.formal_theorem_proof = cast(TreeNode, levels[0])
         manager = GoedelsPoetryStateManager(state)

@@ -41,6 +41,8 @@ class FormalTheoremProofState(TypedDict):
 
     Attributes
     ----------
+    id: Required[str]
+        Unique id associated with this tree node
     parent: Required[TreeNode | None]
         The parent in the proof tree
     depth: Required[int]
@@ -94,6 +96,7 @@ class FormalTheoremProofState(TypedDict):
         `formal_proof` contains only the extracted proof body (tactics).
     """
 
+    id: Required[str]
     parent: Required[TreeNode | None]
     depth: Required[int]
     formal_theorem: Required[str]
@@ -165,10 +168,12 @@ class DecomposedFormalTheoremState(TypedDict):
 
     Attributes
     ----------
+    id: Required[str]
+        Unique id associated with this tree node
     parent: Required[TreeNode | None]
         The parent in the proof tree
-    children: Required[list[TreeNode]]
-        The children of this node in the proof tree
+    children: Required[dict[str, TreeNode]]
+        The children of this node in the proof tree, keyed by each child's id.
     depth: Required[int]
         The depth of this node in the proof tree
     formal_theorem: Required[str]
@@ -223,8 +228,9 @@ class DecomposedFormalTheoremState(TypedDict):
     """
 
     # InternalTreeNode specific properties
+    id: Required[str]
     parent: Required[TreeNode | None]
-    children: Required[list[TreeNode]]
+    children: Required[dict[str, TreeNode]]
     depth: Required[int]
     # FormalTheorem specific properties
     formal_theorem: Required[str]

@@ -330,7 +330,7 @@ if IMPORTS_AVAILABLE:
             DecomposedFormalTheoremState,
             {
                 "parent": None,
-                "children": [],
+                "children": {},
                 "depth": 0,
                 "formal_theorem": case.parent_body,
                 "preamble": DEFAULT_IMPORTS,
@@ -359,7 +359,7 @@ if IMPORTS_AVAILABLE:
         decomposed = out_states["outputs"][0]
 
         # Fill child proofs based on hole_name.
-        for child in decomposed["children"]:
+        for child in decomposed["children"].values():
             child_dict = cast(dict[str, Any], child)
             hole_name = cast(str | None, child_dict.get("hole_name"))
             assert hole_name is not None

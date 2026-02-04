@@ -114,11 +114,17 @@ def _check_syntax(
         A FormalTheoremProofStates with the FormalTheoremProofState with the syntax checked added
         to the FormalTheoremProofStates "outputs" member.
     """
+    # Copy state to prevent issues with LangGraph's mapreduce implementation
+    new_state = {
+        **state,  # shallow copy is OK if you also copy mutables
+        "proof_history": list(state["proof_history"]),
+    }
+
     # Create a client to access the Kimina Server
     kimina_client = KiminaClient(api_url=server_url, http_timeout=server_timeout, n_retries=server_max_retries)
 
-    # Check syntax of state["formal_theorem"] with the stored preamble prefix
-    code_with_imports = combine_preamble_and_body(state["preamble"], str(state["formal_theorem"]))
+    # Check syntax of new_state["formal_theorem"] with the stored preamble prefix
+    code_with_imports = combine_preamble_and_body(str(new_state["preamble"]), str(new_state["formal_theorem"]))
     check_response = kimina_client.check(code_with_imports, timeout=server_timeout)
 
     # Parse check_response
@@ -131,7 +137,7 @@ def _check_syntax(
     syntactic = parsed_response["pass"]
 
     # Update the state with the syntax check result
-    state["syntactic"] = syntactic
+    new_state["syntactic"] = syntactic
 
     # Return a FormalTheoremProofStates with state added to its outputs
-    return {"outputs": [state]}  # type: ignore[typeddict-item]
+    return {"outputs": [new_state]}  # type: ignore[typeddict-item]

@@ -1,4 +1,5 @@
 import bisect
+import uuid
 from functools import partial
 from typing import cast
 
@@ -18,7 +19,7 @@ from goedels_poetry.parsers.ast import AST
 from goedels_poetry.parsers.util.high_level.subgoal_extraction_v2 import (
     extract_subgoal_with_check_responses,
 )
-from goedels_poetry.util.tree import TreeNode
+from goedels_poetry.util.tree import InternalTreeNode, TreeNode, add_child
 
 
 class SketchDecompositionAgentFactory:
@@ -333,7 +334,14 @@ def _sketch_decomposer(
     ValueError
         If source_text is None (should always be set by sketch_parser_agent.py)
     """
-    ast = cast(AST, state["ast"])
+    # Copy state to prevent issues with LangGraph's mapreduce implementation
+    new_state: DecomposedFormalTheoremState = {
+        **state,  # shallow copy is OK if you also copy mutables
+        "children": dict(state["children"]),
+        "decomposition_history": list(state["decomposition_history"]),
+    }
+
+    ast = cast(AST, new_state["ast"])
 
     # Get source text - should always be available
     source_text = ast.get_source_text()
@@ -396,21 +404,20 @@ def _sketch_decomposer(
         hole_end = hole_span[1] if hole_span is not None else None
 
         # Create FormalTheoremProofState with the extracted standalone lemma code
-        state["children"].append(
-            cast(
-                TreeNode,
-                _create_formal_theorem_proof_state(
-                    standalone_lemma_code,
-                    state,
-                    hole_name=base_name,
-                    hole_start=hole_start,
-                    hole_end=hole_end,
-                ),
-            )
+        new_child = cast(
+            TreeNode,
+            _create_formal_theorem_proof_state(
+                standalone_lemma_code,
+                state,
+                hole_name=base_name,
+                hole_start=hole_start,
+                hole_end=hole_end,
+            ),
         )
+        add_child(cast(InternalTreeNode, new_state), new_child)
 
     # Return a DecomposedFormalTheoremStates with state added to its outputs
-    return {"outputs": [state]}  # type: ignore[typeddict-item]
+    return {"outputs": [new_state]}  # type: ignore[typeddict-item]
 
 
 def _create_formal_theorem_proof_state(
@@ -432,6 +439,7 @@ def _create_formal_theorem_proof_state(
         The parent of the returned FormalTheoremProofState
     """
     return FormalTheoremProofState(
+        id=uuid.uuid4().hex,
         parent=cast(TreeNode | None, state),
         depth=(state["depth"] + 1),
         formal_theorem=formal_theorem,

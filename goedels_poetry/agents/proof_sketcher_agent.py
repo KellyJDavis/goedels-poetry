@@ -1,6 +1,7 @@
 import re
 from functools import partial
 from typing import cast
+from uuid import uuid4
 
 from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.messages import AIMessage, HumanMessage
@@ -148,13 +149,24 @@ def _proof_sketcher(llm: BaseChatModel, state: DecomposedFormalTheoremState) -> 
         A DecomposedFormalTheoremStates with the DecomposedFormalTheoremState with the formal proof
         sketch added to the DecomposedFormalTheoremStates "outputs" member.
     """
+    # Create transaction id
+    transaction_id = uuid4().hex
+
+    # Copy state to prevent issues with LangGraph's mapreduce implementation
+    new_state: DecomposedFormalTheoremState = {
+        **state,  # shallow copy is OK if you also copy mutables
+        "decomposition_history": list(state["decomposition_history"]),
+    }
+
     # Check if errors is None
-    if state["errors"] is None:
+    if new_state["errors"] is None:
         # If it is, load the prompt used when not correcting a previous proof sketch
         # Combine the stored preamble with the formal theorem for the prompt
-        formal_theorem_with_imports = combine_preamble_and_body(state["preamble"], state["formal_theorem"])
+        formal_theorem_with_imports = combine_preamble_and_body(
+            str(new_state["preamble"]), str(new_state["formal_theorem"])
+        )
         # Format theorem hints section from search results
-        theorem_hints_section = _format_theorem_hints_section(state["search_results"])
+        theorem_hints_section = _format_theorem_hints_section(new_state["search_results"])
         prompt = load_prompt(
             "decomposer-initial",
             formal_theorem=formal_theorem_with_imports,
@@ -163,51 +175,51 @@ def _proof_sketcher(llm: BaseChatModel, state: DecomposedFormalTheoremState) -> 
 
         # Log debug prompt
         log_llm_prompt(
-            "PROOF_SKETCHER_AGENT",
+            f"PROOF_SKETCHER_AGENT ({transaction_id})",
             prompt,
             "decomposer-initial",
-            attempt_num=state["self_correction_attempts"],
+            attempt_num=new_state["self_correction_attempts"],
         )
 
         # Put the prompt in the final message
-        state["decomposition_history"] += [HumanMessage(content=prompt)]
+        new_state["decomposition_history"] += [HumanMessage(content=prompt)]
 
     # Sketch the proof of the formal theorem
-    response_content = llm.invoke(state["decomposition_history"]).content
+    response_content = llm.invoke(new_state["decomposition_history"]).content
 
     # Extract text content from Responses API format (list of dicts) or use string as-is
     normalized_content = _extract_responses_api_content(response_content)
 
     # Log debug response
     log_llm_response(
-        "DECOMPOSER_AGENT_LLM",
+        f"PROOF_SKETCHER_AGENT ({transaction_id})",
         normalized_content,
-        attempt_num=state["self_correction_attempts"],
+        attempt_num=new_state["self_correction_attempts"],
     )
 
     # Parse sketcher response
     try:
-        raw_code = _parse_proof_sketcher_response(normalized_content, state["preamble"])
+        raw_code = _parse_proof_sketcher_response(normalized_content, new_state["preamble"])
 
         # Store the raw LLM output in the new field
-        state["llm_lean_output"] = raw_code
+        new_state["llm_lean_output"] = raw_code
 
         # Clear proof_sketch initially - it will be populated by the sketch_parser_agent
-        state["proof_sketch"] = None
+        new_state["proof_sketch"] = None
 
         # Add the raw code to the state's decomposition_history
-        state["decomposition_history"] += [AIMessage(content=raw_code)]
+        new_state["decomposition_history"] += [AIMessage(content=raw_code)]
     except LLMParsingError:
         # Set parse failure markers - state manager will handle requeueing and attempt increments
-        state["proof_sketch"] = None
-        state["errors"] = (
+        new_state["proof_sketch"] = None
+        new_state["errors"] = (
             "Malformed LLM response: unable to parse proof sketch from LLM output. "
             "The response did not contain a valid Lean4 code block or the code block could not be extracted."
         )
         # Do not add to decomposition_history on parse failure
 
     # Return a DecomposedFormalTheoremStates with state added to its outputs
-    return {"outputs": [state]}  # type: ignore[typeddict-item]
+    return {"outputs": [new_state]}  # type: ignore[typeddict-item]
 
 
 def _parse_proof_sketcher_response(response: str, expected_preamble: str) -> str:

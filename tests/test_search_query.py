@@ -59,8 +59,9 @@ def test_get_theorems_for_search_query_generation_with_items(temp_state: Goedels
 
     # Create a decomposed state and add it to the search queue
     decomposed_state = DecomposedFormalTheoremState(
+        id=uuid.uuid4().hex,
         parent=None,
-        children=[],
+        children={},
         depth=0,
         formal_theorem="theorem test : True := by sorry",
         preamble=TEST_PREAMBLE,
@@ -89,8 +90,9 @@ def test_set_theorems_with_search_queries_generated(temp_state: GoedelsPoetrySta
     states = []
     for i in range(3):
         state = DecomposedFormalTheoremState(
+            id=uuid.uuid4().hex,
             parent=None,
-            children=[],
+            children={},
             depth=i,
             formal_theorem=f"theorem test{i} : True := by sorry",
             preamble=TEST_PREAMBLE,
@@ -130,6 +132,7 @@ def test_queue_proofs_for_decomposition_adds_to_search_queue(temp_state: Goedels
 
     # Create a proof state that's too difficult
     proof_state = FormalTheoremProofState(
+        id=uuid.uuid4().hex,
         parent=None,
         depth=0,
         formal_theorem="theorem test : True := by sorry",
@@ -165,8 +168,9 @@ def test_prepare_node_for_resketching_clears_search_queries(temp_state: GoedelsP
 
     # Create a node with search queries
     node = DecomposedFormalTheoremState(
+        id=uuid.uuid4().hex,
         parent=None,
-        children=[],
+        children={},
         depth=0,
         formal_theorem="theorem test : True := by sorry",
         preamble=TEST_PREAMBLE,
@@ -186,7 +190,7 @@ def test_prepare_node_for_resketching_clears_search_queries(temp_state: GoedelsP
     assert node["syntactic"] is False
     assert node["errors"] is None
     assert node["ast"] is None
-    assert node["children"] == []
+    assert node["children"] == {}
 
 
 def test_set_backtracked_sketches_routes_to_search_queue(temp_state: GoedelsPoetryState) -> None:
@@ -197,8 +201,9 @@ def test_set_backtracked_sketches_routes_to_search_queue(temp_state: GoedelsPoet
     states = []
     for i in range(2):
         state = DecomposedFormalTheoremState(
+            id=uuid.uuid4().hex,
             parent=None,
-            children=[],
+            children={},
             depth=i,
             formal_theorem=f"theorem test{i} : True := by sorry",
             preamble=TEST_PREAMBLE,
@@ -236,8 +241,9 @@ def test_remove_decomposition_node_from_queues_includes_search_queue(temp_state:
 
     # Create a node
     node = DecomposedFormalTheoremState(
+        id=uuid.uuid4().hex,
         parent=None,
-        children=[],
+        children={},
         depth=0,
         formal_theorem="theorem test : True := by sorry",
         preamble=TEST_PREAMBLE,
@@ -365,8 +371,9 @@ def test_is_backtracking_detects_backtrack() -> None:
     backtrack_prompt = load_prompt("decomposer-backtrack", prev_round_num="1")
 
     state = DecomposedFormalTheoremState(
+        id=uuid.uuid4().hex,
         parent=None,
-        children=[],
+        children={},
         depth=0,
         formal_theorem="theorem test : True := by sorry",
         preamble=TEST_PREAMBLE,
@@ -389,8 +396,9 @@ def test_is_backtracking_no_backtrack() -> None:
     from langchain_core.messages import HumanMessage
 
     state = DecomposedFormalTheoremState(
+        id=uuid.uuid4().hex,
         parent=None,
-        children=[],
+        children={},
         depth=0,
         formal_theorem="theorem test : True := by sorry",
         preamble=TEST_PREAMBLE,
@@ -428,8 +436,9 @@ def test_search_query_generation_integration(temp_state: GoedelsPoetryState) -> 
 
     # Create a state needing queries
     state = DecomposedFormalTheoremState(
+        id=uuid.uuid4().hex,
         parent=None,
-        children=[],
+        children={},
         depth=0,
         formal_theorem="theorem test : True := by sorry",
         preamble=TEST_PREAMBLE,

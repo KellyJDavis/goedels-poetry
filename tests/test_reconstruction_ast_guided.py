@@ -1,6 +1,7 @@
 # ruff: noqa: RUF001
 from __future__ import annotations
 
+import uuid
 from typing import cast
 
 import pytest
@@ -66,6 +67,7 @@ def _mk_leaf(
 ) -> FormalTheoremProofState:
     # Minimal leaf FormalTheoremProofState for reconstruction tests.
     return FormalTheoremProofState(
+        id=uuid.uuid4().hex,
         parent=parent,
         depth=1,
         formal_theorem=f"lemma {hole_name} : True := by sorry",
@@ -132,8 +134,9 @@ def test_reconstruction_fills_named_have_holes_by_offsets(kimina_server_url: str
 
     root_ast = _create_ast_for_sketch(parent_sketch, DEFAULT_IMPORTS, kimina_server_url)
     root: DecomposedFormalTheoremState = DecomposedFormalTheoremState(
+        id=uuid.uuid4().hex,
         parent=None,
-        children=[],
+        children={},
         depth=0,
         formal_theorem="theorem mathd_algebra_478 ...",  # not used by reconstruction here
         preamble=DEFAULT_IMPORTS,
@@ -148,30 +151,28 @@ def test_reconstruction_fills_named_have_holes_by_offsets(kimina_server_url: str
         llm_lean_output=None,
     )
 
-    root["children"].append(
-        cast(
-            TreeNode,
-            _mk_leaf(
-                cast(TreeNode, root),
-                hole_name="hv'",
-                hole_start=hv_sorry_start,
-                hole_end=hv_sorry_end,
-                proof_body=hv_proof,
-            ),
-        )
+    leaf_hv = cast(
+        TreeNode,
+        _mk_leaf(
+            cast(TreeNode, root),
+            hole_name="hv'",
+            hole_start=hv_sorry_start,
+            hole_end=hv_sorry_end,
+            proof_body=hv_proof,
+        ),
     )
-    root["children"].append(
-        cast(
-            TreeNode,
-            _mk_leaf(
-                cast(TreeNode, root),
-                hole_name="hcalc",
-                hole_start=hcalc_sorry_start,
-                hole_end=hcalc_sorry_end,
-                proof_body=hcalc_proof,
-            ),
-        )
+    root["children"][cast(dict, leaf_hv)["id"]] = leaf_hv
+    leaf_hcalc = cast(
+        TreeNode,
+        _mk_leaf(
+            cast(TreeNode, root),
+            hole_name="hcalc",
+            hole_start=hcalc_sorry_start,
+            hole_end=hcalc_sorry_end,
+            proof_body=hcalc_proof,
+        ),
     )
+    root["children"][cast(dict, leaf_hcalc)["id"]] = leaf_hcalc
 
     st.formal_theorem_proof = cast(TreeNode, root)
 

@@ -106,8 +106,9 @@ def test_kimina_guided_reconstruction_recovers_from_baseline_failure(kimina_serv
         sketch_ast = _create_ast_for_sketch(sketch, DEFAULT_IMPORTS, kimina_server_url)
 
         root = DecomposedFormalTheoremState(
+            id=uuid.uuid4().hex,
             parent=None,
-            children=[],
+            children={},
             depth=0,
             formal_theorem=theorem,
             preamble=DEFAULT_IMPORTS,
@@ -132,6 +133,7 @@ def test_kimina_guided_reconstruction_recovers_from_baseline_failure(kimina_serv
         child_proof = """trivial"""
 
         child = FormalTheoremProofState(
+            id=uuid.uuid4().hex,
             parent=cast(TreeNode, root),
             depth=1,
             formal_theorem="lemma h_goal : True",
@@ -150,7 +152,7 @@ def test_kimina_guided_reconstruction_recovers_from_baseline_failure(kimina_serv
             llm_lean_output=None,
         )
 
-        root["children"].append(cast(TreeNode, child))
+        root["children"][cast(dict, child)["id"]] = cast(TreeNode, child)
         state.formal_theorem_proof = cast(TreeNode, root)
 
         manager = GoedelsPoetryStateManager(state)

@@ -324,7 +324,7 @@ class TestProofSketcherParseFailure:
         # Create input state
         input_state: DecomposedFormalTheoremState = {
             "parent": None,
-            "children": [],
+            "children": {},
             "depth": 0,
             "formal_theorem": "theorem test : True := by sorry",
             "preamble": DEFAULT_IMPORTS,
@@ -366,7 +366,7 @@ class TestProofSketcherParseFailure:
             # Manually create a decomposed state in the sketch queue
             decomposed_state: DecomposedFormalTheoremState = {
                 "parent": None,
-                "children": [],
+                "children": {},
                 "depth": 0,
                 "formal_theorem": "theorem test : True := by sorry",
                 "preamble": DEFAULT_IMPORTS,
@@ -437,7 +437,7 @@ class TestProofSketcherParseFailure:
             # Manually create a decomposed state in the sketch queue
             decomposed_state: DecomposedFormalTheoremState = {
                 "parent": None,
-                "children": [],
+                "children": {},
                 "depth": 0,
                 "formal_theorem": "theorem test : True := by sorry",
                 "preamble": DEFAULT_IMPORTS,

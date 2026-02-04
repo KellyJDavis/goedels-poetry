@@ -148,8 +148,9 @@ def test_reconstruct_complete_proof_deep_nested_decomposition_4_levels(kimina_se
   trivial"""
         root_ast = _create_ast_for_sketch(root_sketch, DEFAULT_IMPORTS, kimina_server_url)
         root = DecomposedFormalTheoremState(
+            id=uuid.uuid4().hex,
             parent=None,
-            children=[],
+            children={},
             depth=0,
             formal_theorem=theorem,
             preamble=DEFAULT_IMPORTS,
@@ -168,8 +169,9 @@ def test_reconstruct_complete_proof_deep_nested_decomposition_4_levels(kimina_se
   exact b"""
         level1_ast = _create_ast_for_sketch(level1_sketch, DEFAULT_IMPORTS, kimina_server_url)
         level1 = DecomposedFormalTheoremState(
+            id=uuid.uuid4().hex,
             parent=cast(TreeNode, root),
-            children=[],
+            children={},
             depth=1,
             formal_theorem="theorem a : True",
             preamble=DEFAULT_IMPORTS,
@@ -189,8 +191,9 @@ def test_reconstruct_complete_proof_deep_nested_decomposition_4_levels(kimina_se
   exact c"""
         level2_ast = _create_ast_for_sketch(level2_sketch, DEFAULT_IMPORTS, kimina_server_url)
         level2 = DecomposedFormalTheoremState(
+            id=uuid.uuid4().hex,
             parent=cast(TreeNode, level1),
-            children=[],
+            children={},
             depth=2,
             formal_theorem="theorem b : True",
             preamble=DEFAULT_IMPORTS,
@@ -210,8 +213,9 @@ def test_reconstruct_complete_proof_deep_nested_decomposition_4_levels(kimina_se
   exact d"""
         level3_ast = _create_ast_for_sketch(level3_sketch, DEFAULT_IMPORTS, kimina_server_url)
         level3 = DecomposedFormalTheoremState(
+            id=uuid.uuid4().hex,
             parent=cast(TreeNode, level2),
-            children=[],
+            children={},
             depth=3,
             formal_theorem="theorem c : True",
             preamble=DEFAULT_IMPORTS,
@@ -227,6 +231,7 @@ def test_reconstruct_complete_proof_deep_nested_decomposition_4_levels(kimina_se
 
         # Level 4: Leaf
         leaf = FormalTheoremProofState(
+            id=uuid.uuid4().hex,
             parent=cast(TreeNode, level3),
             depth=4,
             formal_theorem="theorem d : True",
@@ -244,10 +249,10 @@ def test_reconstruct_complete_proof_deep_nested_decomposition_4_levels(kimina_se
         _annotate_hole_offsets(leaf, str(level3["proof_sketch"]), hole_name="d", anchor="have d")
 
         # Build tree
-        level3["children"].append(cast(TreeNode, leaf))
-        level2["children"].append(cast(TreeNode, level3))
-        level1["children"].append(cast(TreeNode, level2))
-        root["children"].append(cast(TreeNode, level1))
+        level3["children"][cast(dict, leaf)["id"]] = cast(TreeNode, leaf)
+        level2["children"][cast(dict, level3)["id"]] = cast(TreeNode, level3)
+        level1["children"][cast(dict, level2)["id"]] = cast(TreeNode, level2)
+        root["children"][cast(dict, level1)["id"]] = cast(TreeNode, level1)
         state.formal_theorem_proof = cast(TreeNode, root)
         manager = GoedelsPoetryStateManager(state)
 

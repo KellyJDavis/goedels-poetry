@@ -253,7 +253,7 @@ def test_sketch_parser_passes_goal_context(monkeypatch: pytest.MonkeyPatch) -> N
 
     state = {
         "parent": None,
-        "children": [],
+        "children": {},
         "depth": 0,
         "formal_theorem": "theorem A303656 : True",
         "preamble": DEFAULT_IMPORTS,
@@ -335,7 +335,7 @@ def test_quantified_header_reconstructs_binders_from_sorries(monkeypatch: pytest
 
     state = {
         "parent": None,
-        "children": [],
+        "children": {},
         "depth": 0,
         "formal_theorem": "theorem A_quant : ∀ n : Int, n > 1 → True",
         "preamble": DEFAULT_IMPORTS,
@@ -389,7 +389,7 @@ def test_existential_header_preserves_goal_context_binders(monkeypatch: pytest.M
 
     state = {
         "parent": None,
-        "children": [],
+        "children": {},
         "depth": 0,
         "formal_theorem": "theorem A_exist : ∃ q : Nat, q > 5 ∧ True",
         "preamble": DEFAULT_IMPORTS,

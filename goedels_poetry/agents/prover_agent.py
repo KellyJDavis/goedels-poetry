@@ -1,6 +1,7 @@
 import re
 from functools import partial
 from typing import cast
+from uuid import uuid4
 
 from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.messages import AIMessage, HumanMessage
@@ -106,34 +107,45 @@ def _prover(llm: BaseChatModel, state: FormalTheoremProofState) -> FormalTheorem
         A FormalTheoremProofStates with the FormalTheoremProofState with the formal proof added
         to the FormalTheoremProofStates "outputs" member.
     """
+    # Create transaction id
+    transaction_id = uuid4().hex
+
+    # Copy state to prevent issues with LangGraph's mapreduce implementation
+    new_state: FormalTheoremProofState = {
+        **state,  # shallow copy is OK if you also copy mutables
+        "proof_history": list(state["proof_history"]),
+    }
+
     # Check if errors is None
-    if state["errors"] is None:
+    if new_state["errors"] is None:
         # If it is, load the prompt in use when not correcting a previous proof
         # Combine the stored preamble with the formal theorem for the prompt
-        formal_statement_with_imports = combine_preamble_and_body(state["preamble"], state["formal_theorem"])
+        formal_statement_with_imports = combine_preamble_and_body(
+            str(new_state["preamble"]), str(new_state["formal_theorem"])
+        )
         prompt = load_prompt("goedel-prover-v2-initial", formal_statement=formal_statement_with_imports)
 
         # Log debug prompt
         log_llm_prompt(
-            "PROVER_AGENT",
+            f"PROVER_AGENT ({transaction_id})",
             prompt,
             "goedel-prover-v2-initial",
-            attempt_num=state["self_correction_attempts"],
-            pass_num=state["pass_attempts"],
+            attempt_num=new_state["self_correction_attempts"],
+            pass_num=new_state["pass_attempts"],
         )
 
         # Put the prompt in the final message
-        state["proof_history"] += [HumanMessage(content=prompt)]
+        new_state["proof_history"] += [HumanMessage(content=prompt)]
 
     # Prove the formal statement
-    response_content = llm.invoke(state["proof_history"]).content
+    response_content = llm.invoke(new_state["proof_history"]).content
 
     # Log debug response
     log_llm_response(
-        "PROVER_AGENT_LLM",
+        f"PROVER_AGENT ({transaction_id})",
         str(response_content),
-        attempt_num=state["self_correction_attempts"],
-        pass_num=state["pass_attempts"],
+        attempt_num=new_state["self_correction_attempts"],
+        pass_num=new_state["pass_attempts"],
     )
 
     # Parse prover response
@@ -141,24 +153,24 @@ def _prover(llm: BaseChatModel, state: FormalTheoremProofState) -> FormalTheorem
         raw_code = _extract_code_block(str(response_content))
 
         # Store the raw LLM output in the new field
-        state["llm_lean_output"] = raw_code
+        new_state["llm_lean_output"] = raw_code
 
         # Clear formal_proof initially - it will be populated by the proof_parser_agent
-        state["formal_proof"] = None
+        new_state["formal_proof"] = None
 
         # Add the raw code to the state's proof_history
-        state["proof_history"] += [AIMessage(content=raw_code)]
+        new_state["proof_history"] += [AIMessage(content=raw_code)]
     except LLMParsingError:
         # Set parse failure markers - state manager will handle requeueing and attempt increments
-        state["formal_proof"] = None
-        state["errors"] = (
+        new_state["formal_proof"] = None
+        new_state["errors"] = (
             "Malformed LLM response: unable to parse proof body from LLM output. "
             "The response did not contain a valid Lean4 code block or the code block could not be extracted."
         )
         # Do not add to proof_history on parse failure
 
     # Return a FormalTheoremProofStates with state added to its outputs
-    return {"outputs": [state]}  # type: ignore[typeddict-item]
+    return {"outputs": [new_state]}  # type: ignore[typeddict-item]
 
 
 def _extract_code_block_fallback(response: str) -> str:

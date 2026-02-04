@@ -79,8 +79,9 @@ def test_get_theorems_with_search_queries_for_vectordb_with_items(temp_state: Go
 
     # Create a decomposed state with search queries and add it to the query queue
     decomposed_state = DecomposedFormalTheoremState(
+        id=uuid.uuid4().hex,
         parent=None,
-        children=[],
+        children={},
         depth=0,
         formal_theorem="theorem test : True := by sorry",
         preamble=TEST_PREAMBLE,
@@ -119,8 +120,9 @@ def test_set_theorems_with_vectordb_results(temp_state: GoedelsPoetryState) -> N
             "processing_time_ms": 100,
         }
         state = DecomposedFormalTheoremState(
+            id=uuid.uuid4().hex,
             parent=None,
-            children=[],
+            children={},
             depth=i,
             formal_theorem=f"theorem test{i} : True := by sorry",
             preamble=TEST_PREAMBLE,
@@ -158,8 +160,9 @@ def test_set_theorems_with_search_queries_generated_routes_to_query_queue(temp_s
     states = []
     for i in range(2):
         state = DecomposedFormalTheoremState(
+            id=uuid.uuid4().hex,
             parent=None,
-            children=[],
+            children={},
             depth=i,
             formal_theorem=f"theorem test{i} : True := by sorry",
             preamble=TEST_PREAMBLE,
@@ -196,8 +199,9 @@ def test_remove_decomposition_node_from_queues_includes_query_queue(temp_state: 
 
     # Create a node
     node = DecomposedFormalTheoremState(
+        id=uuid.uuid4().hex,
         parent=None,
-        children=[],
+        children={},
         depth=0,
         formal_theorem="theorem test : True := by sorry",
         preamble=TEST_PREAMBLE,
@@ -235,8 +239,9 @@ def test_prepare_node_for_resketching_clears_search_results(temp_state: GoedelsP
         "processing_time_ms": 100,
     }
     node = DecomposedFormalTheoremState(
+        id=uuid.uuid4().hex,
         parent=None,
-        children=[],
+        children={},
         depth=0,
         formal_theorem="theorem test : True := by sorry",
         preamble=TEST_PREAMBLE,
@@ -258,14 +263,15 @@ def test_prepare_node_for_resketching_clears_search_results(temp_state: GoedelsP
     assert node["syntactic"] is False
     assert node["errors"] is None
     assert node["ast"] is None
-    assert node["children"] == []
+    assert node["children"] == {}
 
 
 def test_query_vectordb_with_none_search_queries() -> None:
     """Test _query_vectordb handles None search_queries."""
     state = DecomposedFormalTheoremState(
+        id=uuid.uuid4().hex,
         parent=None,
-        children=[],
+        children={},
         depth=0,
         formal_theorem="theorem test : True := by sorry",
         preamble=TEST_PREAMBLE,
@@ -289,8 +295,9 @@ def test_query_vectordb_with_none_search_queries() -> None:
 def test_query_vectordb_with_empty_search_queries() -> None:
     """Test _query_vectordb handles empty search_queries."""
     state = DecomposedFormalTheoremState(
+        id=uuid.uuid4().hex,
         parent=None,
-        children=[],
+        children={},
         depth=0,
         formal_theorem="theorem test : True := by sorry",
         preamble=TEST_PREAMBLE,
@@ -337,8 +344,9 @@ def test_query_vectordb_with_single_query(mock_asyncio_run: MagicMock, mock_clie
     mock_client_class.return_value = mock_client
 
     state = DecomposedFormalTheoremState(
+        id=uuid.uuid4().hex,
         parent=None,
-        children=[],
+        children={},
         depth=0,
         formal_theorem="theorem test : True := by sorry",
         preamble=TEST_PREAMBLE,
@@ -395,8 +403,9 @@ def test_query_vectordb_with_multiple_queries(mock_asyncio_run: MagicMock, mock_
     mock_client_class.return_value = mock_client
 
     state = DecomposedFormalTheoremState(
+        id=uuid.uuid4().hex,
         parent=None,
-        children=[],
+        children={},
         depth=0,
         formal_theorem="theorem test : True := by sorry",
         preamble=TEST_PREAMBLE,
@@ -444,8 +453,9 @@ def test_query_vectordb_propagates_exceptions(mock_asyncio_run: MagicMock, mock_
     mock_client_class.return_value = mock_client
 
     state = DecomposedFormalTheoremState(
+        id=uuid.uuid4().hex,
         parent=None,
-        children=[],
+        children={},
         depth=0,
         formal_theorem="theorem test : True := by sorry",
         preamble=TEST_PREAMBLE,
@@ -477,8 +487,9 @@ def test_vector_db_agent_factory() -> None:
 def test_decomposed_formal_theorem_state_initialization_with_search_results() -> None:
     """Test that DecomposedFormalTheoremState can be initialized with search_results=None."""
     state = DecomposedFormalTheoremState(
+        id=uuid.uuid4().hex,
         parent=None,
-        children=[],
+        children={},
         depth=0,
         formal_theorem="theorem test : True := by sorry",
         preamble=TEST_PREAMBLE,
@@ -509,8 +520,9 @@ def test_decomposed_formal_theorem_state_with_search_results() -> None:
     }
 
     state = DecomposedFormalTheoremState(
+        id=uuid.uuid4().hex,
         parent=None,
-        children=[],
+        children={},
         depth=0,
         formal_theorem="theorem test : True := by sorry",
         preamble=TEST_PREAMBLE,
@@ -542,8 +554,9 @@ def test_backtracking_removes_node_from_query_queue(temp_state: GoedelsPoetrySta
 
     # Create a parent node that will be the backtrack target
     parent = DecomposedFormalTheoremState(
+        id=uuid.uuid4().hex,
         parent=None,
-        children=[],
+        children={},
         depth=0,
         formal_theorem="theorem parent : True := by sorry",
         preamble=TEST_PREAMBLE,
@@ -559,8 +572,9 @@ def test_backtracking_removes_node_from_query_queue(temp_state: GoedelsPoetrySta
 
     # Create a failed child that will trigger backtracking
     failed_child = DecomposedFormalTheoremState(
+        id=uuid.uuid4().hex,
         parent=cast(TreeNode, parent),
-        children=[],
+        children={},
         depth=1,
         formal_theorem="theorem failed : True := by sorry",
         preamble=TEST_PREAMBLE,
@@ -575,7 +589,7 @@ def test_backtracking_removes_node_from_query_queue(temp_state: GoedelsPoetrySta
         llm_lean_output=None,
     )
 
-    parent["children"] = [cast(TreeNode, failed_child)]
+    parent["children"] = {cast(dict, failed_child)["id"]: cast(TreeNode, failed_child)}
     temp_state.formal_theorem_proof = cast(TreeNode, parent)
 
     # Add parent to query queue (simulating it waiting for vector DB queries)
@@ -583,6 +597,7 @@ def test_backtracking_removes_node_from_query_queue(temp_state: GoedelsPoetrySta
 
     # Create a proof state that will fail validation and trigger backtracking
     proof_state = FormalTheoremProofState(
+        id=uuid.uuid4().hex,
         parent=cast(TreeNode, failed_child),
         depth=2,
         formal_theorem="theorem proof : True := by sorry",
@@ -597,7 +612,7 @@ def test_backtracking_removes_node_from_query_queue(temp_state: GoedelsPoetrySta
         pass_attempts=0,
         llm_lean_output=None,
     )
-    failed_child["children"] = [cast(TreeNode, proof_state)]
+    failed_child["children"] = {cast(dict, proof_state)["id"]: cast(TreeNode, proof_state)}
 
     # Simulate validation that triggers backtracking
     from goedels_poetry.agents.state import DecomposedFormalTheoremStates

@@ -117,15 +117,21 @@ def _check_proof(
         A FormalTheoremProofStates with the FormalTheoremProofState with the proof checked added
         to the FormalTheoremProofStates "outputs" member.
     """
+    # Copy state to prevent issues with LangGraph's mapreduce implementation
+    new_state = {
+        **state,  # shallow copy is OK if you also copy mutables
+        "proof_history": list(state["proof_history"]),
+    }
+
     # Create a client to access the Kimina Server
     kimina_client = KiminaClient(api_url=server_url, http_timeout=server_timeout, n_retries=server_max_retries)
 
     # Use the raw LLM output directly for validation
-    # state["llm_lean_output"] contains the complete declaration from the LLM
-    raw_output = str(state["llm_lean_output"]) if state["llm_lean_output"] else ""
+    # new_state["llm_lean_output"] contains the complete declaration from the LLM
+    raw_output = str(new_state["llm_lean_output"]) if new_state["llm_lean_output"] else ""
 
     # Check the formal proof with the stored preamble prefix
-    proof_with_imports = combine_preamble_and_body(state["preamble"], raw_output)
+    proof_with_imports = combine_preamble_and_body(str(new_state["preamble"]), raw_output)
     check_response = kimina_client.check(proof_with_imports, timeout=server_timeout)
 
     # Parse check_response
@@ -136,14 +142,14 @@ def _check_proof(
 
     # Update the state with the proof check result
     # Note: We use "complete" instead of "pass" to ensure proofs with sorries are marked as unsuccessful
-    state["proved"] = parsed_response["complete"]
+    new_state["proved"] = parsed_response["complete"]
 
     # Update the state with the error string formatted for Goedel-Prover-V2 use
     # Note: get_error_str expects the code with DEFAULT_IMPORTS for proper line number handling
-    state["errors"] = get_error_str(proof_with_imports, parsed_response.get("errors", []), False)
+    new_state["errors"] = get_error_str(proof_with_imports, parsed_response.get("errors", []), False)
 
     # Return a FormalTheoremProofStates with state added to its outputs
-    return {"outputs": [state]}  # type: ignore[typeddict-item]
+    return {"outputs": [new_state]}  # type: ignore[typeddict-item]
 
 
 def check_complete_proof(

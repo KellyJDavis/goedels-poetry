@@ -108,7 +108,7 @@ if IMPORTS_AVAILABLE:
         """Create a DecomposedFormalTheoremState with sensible defaults for tests."""
         base: dict[str, Any] = {
             "parent": None,
-            "children": [],
+            "children": {},
             "depth": 0,
             "formal_theorem": formal_theorem,
             "preamble": DEFAULT_IMPORTS,
