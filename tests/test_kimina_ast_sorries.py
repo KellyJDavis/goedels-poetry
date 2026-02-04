@@ -3,6 +3,7 @@ from __future__ import annotations
 import importlib
 import sys
 import types
+import uuid
 from typing import Any
 
 import pytest
@@ -252,6 +253,7 @@ def test_sketch_parser_passes_goal_context(monkeypatch: pytest.MonkeyPatch) -> N
     sketch_parser_agent = importlib.import_module("goedels_poetry.agents.sketch_parser_agent")
 
     state = {
+        "id": uuid.uuid4().hex,
         "parent": None,
         "children": {},
         "depth": 0,
@@ -283,6 +285,7 @@ def test_proof_parser_passes_goal_context(monkeypatch: pytest.MonkeyPatch) -> No
     proof_parser_agent = importlib.import_module("goedels_poetry.agents.proof_parser_agent")
 
     state = {
+        "id": uuid.uuid4().hex,
         "parent": None,
         "depth": 0,
         "formal_theorem": "theorem A303656 : True",
@@ -334,6 +337,7 @@ def test_quantified_header_reconstructs_binders_from_sorries(monkeypatch: pytest
     sketch_parser_agent = importlib.import_module("goedels_poetry.agents.sketch_parser_agent")
 
     state = {
+        "id": uuid.uuid4().hex,
         "parent": None,
         "children": {},
         "depth": 0,
@@ -388,6 +392,7 @@ def test_existential_header_preserves_goal_context_binders(monkeypatch: pytest.M
     sketch_parser_agent = importlib.import_module("goedels_poetry.agents.sketch_parser_agent")
 
     state = {
+        "id": uuid.uuid4().hex,
         "parent": None,
         "children": {},
         "depth": 0,
@@ -422,6 +427,7 @@ def test_quantified_header_reconstructs_binders_proof_parser(monkeypatch: pytest
     proof_parser_agent = importlib.import_module("goedels_poetry.agents.proof_parser_agent")
 
     state = {
+        "id": uuid.uuid4().hex,
         "parent": None,
         "depth": 0,
         "formal_theorem": "theorem A_quant : ∀ n : Int, n > 1 → True",
@@ -456,6 +462,7 @@ def test_existential_header_preserves_goal_context_binders_proof_parser(
     proof_parser_agent = importlib.import_module("goedels_poetry.agents.proof_parser_agent")
 
     state = {
+        "id": uuid.uuid4().hex,
         "parent": None,
         "depth": 0,
         "formal_theorem": "theorem A_exist : ∃ q : Nat, q > 5 ∧ True",

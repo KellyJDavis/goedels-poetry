@@ -5,6 +5,7 @@ from __future__ import annotations
 import importlib
 import sys
 import types
+import uuid
 from typing import Any
 
 import pytest
@@ -130,6 +131,7 @@ class _OptionBKiminaClient:
 
 def _base_state(*, formal_theorem: str, llm_lean_output: str) -> dict:
     return {
+        "id": uuid.uuid4().hex,
         "parent": None,
         "depth": 0,
         "formal_theorem": formal_theorem,

@@ -6,6 +6,7 @@ with appropriate requeueing and attempt tracking in the state manager.
 
 from __future__ import annotations
 
+import uuid
 from contextlib import suppress
 from unittest.mock import MagicMock
 
@@ -143,6 +144,7 @@ class TestProverParseFailure:
 
         # Create input state
         input_state: FormalTheoremProofState = {
+            "id": uuid.uuid4().hex,
             "parent": None,
             "depth": 0,
             "formal_theorem": "theorem test : True := by sorry",
@@ -205,6 +207,7 @@ class TestProverParseFailure:
                 "The response did not contain a valid Lean4 code block or the code block could not be extracted."
             )
             parse_failure_state: FormalTheoremProofState = {
+                "id": initial_state["id"],
                 "parent": initial_state["parent"],
                 "depth": initial_state["depth"],
                 "formal_theorem": initial_state["formal_theorem"],
@@ -268,6 +271,7 @@ class TestProverParseFailure:
                 "The response did not contain a valid Lean4 code block or the code block could not be extracted."
             )
             max_attempts_state: FormalTheoremProofState = {
+                "id": initial_state["id"],
                 "parent": initial_state["parent"],
                 "depth": initial_state["depth"],
                 "formal_theorem": initial_state["formal_theorem"],
@@ -323,6 +327,7 @@ class TestProofSketcherParseFailure:
 
         # Create input state
         input_state: DecomposedFormalTheoremState = {
+            "id": uuid.uuid4().hex,
             "parent": None,
             "children": {},
             "depth": 0,
@@ -365,6 +370,7 @@ class TestProofSketcherParseFailure:
 
             # Manually create a decomposed state in the sketch queue
             decomposed_state: DecomposedFormalTheoremState = {
+                "id": uuid.uuid4().hex,
                 "parent": None,
                 "children": {},
                 "depth": 0,
@@ -392,6 +398,7 @@ class TestProofSketcherParseFailure:
                 "The response did not contain a valid Lean4 code block or the code block could not be extracted."
             )
             parse_failure_state: DecomposedFormalTheoremState = {
+                "id": initial_state["id"],
                 "parent": initial_state["parent"],
                 "children": initial_state["children"],
                 "depth": initial_state["depth"],
@@ -436,6 +443,7 @@ class TestProofSketcherParseFailure:
 
             # Manually create a decomposed state in the sketch queue
             decomposed_state: DecomposedFormalTheoremState = {
+                "id": uuid.uuid4().hex,
                 "parent": None,
                 "children": {},
                 "depth": 0,
@@ -462,6 +470,7 @@ class TestProofSketcherParseFailure:
                 "The response did not contain a valid Lean4 code block or the code block could not be extracted."
             )
             max_attempts_state: DecomposedFormalTheoremState = {
+                "id": initial_state["id"],
                 "parent": initial_state["parent"],
                 "children": initial_state["children"],
                 "depth": initial_state["depth"],

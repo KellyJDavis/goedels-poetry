@@ -12,6 +12,7 @@ They test the 6 agent factories that use KiminaClient but not BaseChatModel:
 
 from __future__ import annotations
 
+import uuid
 from typing import Any, cast
 
 import pytest
@@ -81,6 +82,7 @@ if IMPORTS_AVAILABLE:
     ) -> FormalTheoremProofState:
         """Create a FormalTheoremProofState with sensible defaults for tests."""
         base: dict[str, Any] = {
+            "id": uuid.uuid4().hex,
             "parent": None,
             "depth": 0,
             "formal_theorem": formal_theorem,
@@ -107,6 +109,7 @@ if IMPORTS_AVAILABLE:
     ) -> DecomposedFormalTheoremState:
         """Create a DecomposedFormalTheoremState with sensible defaults for tests."""
         base: dict[str, Any] = {
+            "id": uuid.uuid4().hex,
             "parent": None,
             "children": {},
             "depth": 0,

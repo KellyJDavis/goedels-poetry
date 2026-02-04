@@ -1725,6 +1725,7 @@ def test_reconstruct_complete_proof_normalizes_misindented_trailing_apply(kimina
         sketch_ast = _create_ast_for_sketch(sketch, DEFAULT_IMPORTS, kimina_server_url)
 
         parent: DecomposedFormalTheoremState = {
+            "id": uuid.uuid4().hex,
             "parent": None,
             "children": {},
             "depth": 0,

@@ -578,6 +578,7 @@ class TestAnalyzeProofStructure:
 
         # Create child node
         child: FormalTheoremProofState = {
+            "id": uuid.uuid4().hex,
             "hole_name": "hno",
             "hole_start": 0,
             "hole_end": 0,
@@ -636,6 +637,7 @@ class TestAnalyzeProofStructure:
 
         # Create child node
         child: FormalTheoremProofState = {
+            "id": uuid.uuid4().hex,
             "hole_name": "hno",
             "hole_start": 0,
             "hole_end": 0,
@@ -694,6 +696,7 @@ class TestAnalyzeProofStructure:
 
         # Create child node
         child: FormalTheoremProofState = {
+            "id": uuid.uuid4().hex,
             "hole_name": "hx",
             "hole_start": 0,
             "hole_end": 0,
@@ -749,6 +752,7 @@ class TestAnalyzeProofStructure:
 
         # Create child node
         child: FormalTheoremProofState = {
+            "id": uuid.uuid4().hex,
             "hole_name": "hno",
             "hole_start": 0,
             "hole_end": 0,
@@ -808,6 +812,7 @@ class TestAnalyzeProofStructure:
 
         # Create child node
         child: FormalTheoremProofState = {
+            "id": uuid.uuid4().hex,
             "hole_name": "hno",
             "hole_start": 0,
             "hole_end": 0,
@@ -1048,6 +1053,7 @@ class TestRealWorldScenarios:
 
         # Create child node
         child: FormalTheoremProofState = {
+            "id": uuid.uuid4().hex,
             "hole_name": "hno",
             "hole_start": 0,
             "hole_end": 0,
@@ -1104,6 +1110,7 @@ class TestRealWorldScenarios:
         child_ast = _create_ast_for_sketch(child_proof, server_url=kimina_server_url)
 
         child: FormalTheoremProofState = {
+            "id": uuid.uuid4().hex,
             "hole_name": "f",
             "hole_start": 0,
             "hole_end": 0,
@@ -1156,6 +1163,7 @@ class TestRealWorldScenarios:
         child_ast = _create_ast_for_sketch(child_proof, server_url=kimina_server_url)
 
         child: FormalTheoremProofState = {
+            "id": uuid.uuid4().hex,
             "hole_name": "f",
             "hole_start": 0,
             "hole_end": 0,
@@ -1251,6 +1259,7 @@ class TestStressScenarios:
 """
         child_f_ast = _create_ast_for_sketch(child_f_proof, server_url=kimina_server_url)
         child_f: FormalTheoremProofState = {
+            "id": uuid.uuid4().hex,
             "hole_name": "f",
             "hole_start": 0,
             "hole_end": 0,
@@ -1278,6 +1287,7 @@ class TestStressScenarios:
 """
         child_h_ast = _create_ast_for_sketch(child_h_proof, server_url=kimina_server_url)
         child_h: FormalTheoremProofState = {
+            "id": uuid.uuid4().hex,
             "hole_name": "h",
             "hole_start": 0,
             "hole_end": 0,

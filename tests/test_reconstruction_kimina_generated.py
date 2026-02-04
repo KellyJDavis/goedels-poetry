@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import os
 import random
+import uuid
 from dataclasses import dataclass
 from typing import Any, cast
 
@@ -329,6 +330,7 @@ if IMPORTS_AVAILABLE:
         root: DecomposedFormalTheoremState = cast(
             DecomposedFormalTheoremState,
             {
+                "id": uuid.uuid4().hex,
                 "parent": None,
                 "children": {},
                 "depth": 0,
