@@ -297,14 +297,14 @@ def _map_edge(states: DecomposedFormalTheoremStates) -> list[Send]:
     list[Send]
         List of Send objects each indicating the their target node and its input, singular.
     """
-    return [Send("sketch_decomposition_agent", state) for state in states["inputs"]]
+    return [Send("sketch_decomposition_agent", {"item": state}) for state in states["inputs"]]
 
 
 def _sketch_decomposer(
     server_url: str,
     server_max_retries: int,
     server_timeout: int,
-    state: DecomposedFormalTheoremState,
+    state: DecomposedFormalTheoremStates,
 ) -> DecomposedFormalTheoremStates:
     """
     Queries the AST of the passed DecomposedFormalTheoremState for all unproved subgoals. For
@@ -334,14 +334,9 @@ def _sketch_decomposer(
     ValueError
         If source_text is None (should always be set by sketch_parser_agent.py)
     """
-    # Copy state to prevent issues with LangGraph's mapreduce implementation
-    new_state: DecomposedFormalTheoremState = {
-        **state,  # shallow copy is OK if you also copy mutables
-        "children": dict(state["children"]),
-        "decomposition_history": list(state["decomposition_history"]),
-    }
+    theorem_state = cast(DecomposedFormalTheoremState, state["item"])
 
-    ast = cast(AST, new_state["ast"])
+    ast = cast(AST, theorem_state["ast"])
 
     # Get source text - should always be available
     source_text = ast.get_source_text()
@@ -408,16 +403,16 @@ def _sketch_decomposer(
             TreeNode,
             _create_formal_theorem_proof_state(
                 standalone_lemma_code,
-                state,
+                theorem_state,
                 hole_name=base_name,
                 hole_start=hole_start,
                 hole_end=hole_end,
             ),
         )
-        add_child(cast(InternalTreeNode, new_state), new_child)
+        add_child(cast(InternalTreeNode, theorem_state), new_child)
 
     # Return a DecomposedFormalTheoremStates with state added to its outputs
-    return {"outputs": [new_state]}  # type: ignore[typeddict-item]
+    return {"outputs": [theorem_state]}  # type: ignore[typeddict-item]
 
 
 def _create_formal_theorem_proof_state(

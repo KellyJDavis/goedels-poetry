@@ -1,4 +1,5 @@
 from functools import partial
+from typing import cast
 from uuid import uuid4
 
 from kimina_client import KiminaClient
@@ -98,7 +99,7 @@ def _map_edge(states: FormalTheoremProofStates) -> list[Send]:
     list[Send]
         List of Send objects each indicating the their target node and its input, singular.
     """
-    return [Send("parser_agent", state) for state in states["inputs"]]
+    return [Send("parser_agent", {"item": state}) for state in states["inputs"]]
 
 
 def _actionable_suffix(parsed: dict, code_preview: str) -> str:
@@ -110,7 +111,7 @@ def _actionable_suffix(parsed: dict, code_preview: str) -> str:
 
 
 def _parse_proof(
-    server_url: str, server_max_retries: int, server_timeout: int, state: FormalTheoremProofState
+    server_url: str, server_max_retries: int, server_timeout: int, state: FormalTheoremProofStates
 ) -> FormalTheoremProofStates:
     """
     Parses the proof of the formal proof in the passed FormalTheoremProofState.
@@ -135,15 +136,11 @@ def _parse_proof(
     # Create transaction id
     transaction_id = uuid4().hex
 
-    # Copy state to prevent issues with LangGraph's mapreduce implementation
-    new_state: FormalTheoremProofState = {
-        **state,  # shallow copy is OK if you also copy mutables
-        "proof_history": list(state["proof_history"]),
-    }
+    proof_state = cast(FormalTheoremProofState, state["item"])
 
     kimina_client = KiminaClient(api_url=server_url, http_timeout=server_timeout, n_retries=server_max_retries)
-    normalized_preamble = new_state["preamble"].strip()
-    normalized_formal = str(new_state["formal_theorem"]).strip()
+    normalized_preamble = proof_state["preamble"].strip()
+    normalized_formal = str(proof_state["formal_theorem"]).strip()
     formal_with_preamble = combine_preamble_and_body(normalized_preamble, normalized_formal)
 
     if normalized_preamble and normalized_formal:
@@ -174,7 +171,7 @@ def _parse_proof(
             + _actionable_suffix(parsed_formal, formal_with_preamble)
         )
 
-    raw_output = str(new_state["llm_lean_output"]) if new_state["llm_lean_output"] else ""
+    raw_output = str(proof_state["llm_lean_output"]) if proof_state["llm_lean_output"] else ""
     normalized_body = raw_output.strip()
     proof_with_imports = combine_preamble_and_body(normalized_preamble, normalized_body)
     if normalized_preamble and normalized_body:
@@ -202,7 +199,7 @@ def _parse_proof(
         msg = f"Structural extraction failed for target signature: {target_sig}; preview: {proof_with_imports[:200]!r}"
         raise ValueError(msg)
 
-    new_state["formal_proof"] = extracted_proof
+    proof_state["formal_proof"] = extracted_proof
 
     ast_with_imports = AST(
         parsed_response["ast"],
@@ -212,13 +209,13 @@ def _parse_proof(
     )
     extracted_preamble = extract_preamble_from_ast(ast_with_imports)
     if extracted_preamble:
-        new_state["preamble"] = extracted_preamble
+        proof_state["preamble"] = extracted_preamble
 
-    ast_without_imports = remove_default_imports_from_ast(parsed_response["ast"], preamble=new_state["preamble"])
-    new_state["ast"] = AST(
+    ast_without_imports = remove_default_imports_from_ast(parsed_response["ast"], preamble=proof_state["preamble"])
+    proof_state["ast"] = AST(
         ast_without_imports,
         sorries=parsed_response.get("sorries"),
         source_text=proof_with_imports,
         body_start=body_start,
     )
-    return {"outputs": [new_state]}  # type: ignore[typeddict-item]
+    return {"outputs": [proof_state]}  # type: ignore[typeddict-item]

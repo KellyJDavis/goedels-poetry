@@ -273,7 +273,9 @@ def test_sketch_parser_passes_goal_context(monkeypatch: pytest.MonkeyPatch) -> N
         "hole_end": None,
     }
 
-    result = sketch_parser_agent._parse_sketch("url", 0, 0, state)  # type: ignore[arg-type]
+    result = sketch_parser_agent._parse_sketch(  # type: ignore[arg-type]
+        "url", 0, 0, {"inputs": [], "outputs": [], "item": state}
+    )
     assert result["outputs"][0]["ast"] is not None
 
     code_hn = result["outputs"][0]["ast"].get_named_subgoal_code("hn_nonneg")
@@ -304,7 +306,9 @@ def test_proof_parser_passes_goal_context(monkeypatch: pytest.MonkeyPatch) -> No
         "hole_end": None,
     }
 
-    result = proof_parser_agent._parse_proof("url", 0, 0, state)  # type: ignore[arg-type]
+    result = proof_parser_agent._parse_proof(  # type: ignore[arg-type]
+        "url", 0, 0, {"inputs": [], "outputs": [], "item": state}
+    )
     assert result["outputs"][0]["ast"] is not None
 
     code_hn = result["outputs"][0]["ast"].get_named_subgoal_code("hn_nonneg")
@@ -357,7 +361,9 @@ def test_quantified_header_reconstructs_binders_from_sorries(monkeypatch: pytest
         "hole_end": None,
     }
 
-    result = sketch_parser_agent._parse_sketch("url", 0, 0, state)  # type: ignore[arg-type]
+    result = sketch_parser_agent._parse_sketch(  # type: ignore[arg-type]
+        "url", 0, 0, {"inputs": [], "outputs": [], "item": state}
+    )
     ast = result["outputs"][0]["ast"]
     assert ast is not None
 
@@ -412,7 +418,9 @@ def test_existential_header_preserves_goal_context_binders(monkeypatch: pytest.M
         "hole_end": None,
     }
 
-    result = sketch_parser_agent._parse_sketch("url", 0, 0, state)  # type: ignore[arg-type]
+    result = sketch_parser_agent._parse_sketch(  # type: ignore[arg-type]
+        "url", 0, 0, {"inputs": [], "outputs": [], "item": state}
+    )
     ast = result["outputs"][0]["ast"]
     assert ast is not None
 
@@ -446,7 +454,9 @@ def test_quantified_header_reconstructs_binders_proof_parser(monkeypatch: pytest
         "hole_end": None,
     }
 
-    result = proof_parser_agent._parse_proof("url", 0, 0, state)  # type: ignore[arg-type]
+    result = proof_parser_agent._parse_proof(  # type: ignore[arg-type]
+        "url", 0, 0, {"inputs": [], "outputs": [], "item": state}
+    )
     ast = result["outputs"][0]["ast"]
     assert ast is not None
 
@@ -481,7 +491,9 @@ def test_existential_header_preserves_goal_context_binders_proof_parser(
         "hole_end": None,
     }
 
-    result = proof_parser_agent._parse_proof("url", 0, 0, state)  # type: ignore[arg-type]
+    result = proof_parser_agent._parse_proof(  # type: ignore[arg-type]
+        "url", 0, 0, {"inputs": [], "outputs": [], "item": state}
+    )
     ast = result["outputs"][0]["ast"]
     assert ast is not None
 

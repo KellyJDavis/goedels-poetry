@@ -3,7 +3,7 @@ from langgraph.graph import END, START, StateGraph
 from langgraph.graph.state import CompiledStateGraph
 from langgraph.types import Send
 
-from goedels_poetry.agents.state import FormalTheoremProofState, FormalTheoremProofStates
+from goedels_poetry.agents.state import FormalTheoremProofStates
 from goedels_poetry.agents.util.common import load_prompt
 from goedels_poetry.agents.util.debug import log_llm_prompt
 
@@ -64,10 +64,10 @@ def _map_edge(states: FormalTheoremProofStates) -> list[Send]:
     list[Send]
         List of Send objects each indicating the their target node and its input, singular.
     """
-    return [Send("corrector_agent", state) for state in states["inputs"]]
+    return [Send("corrector_agent", {"item": state}) for state in states["inputs"]]
 
 
-def _corrector(state: FormalTheoremProofState) -> FormalTheoremProofStates:
+def _corrector(state: FormalTheoremProofStates) -> FormalTheoremProofStates:
     """
     Adds a HumanMessage to the proof_history of the passed FormalTheoremProofState indicating
     a request for a correction of the previous formal proof and indicating the errors in the
@@ -85,17 +85,13 @@ def _corrector(state: FormalTheoremProofState) -> FormalTheoremProofStates:
     FormalTheoremProofStates
         A FormalTheoremProofStates containing in its outputs the modified FormalTheoremProofState
     """
-    # Copy state to prevent issues with LangGraph's mapreduce implementation
-    new_state: FormalTheoremProofState = {
-        **state,  # shallow copy is OK if you also copy mutables
-        "proof_history": list(state["proof_history"]),
-    }
+    proof_state = state["item"]
 
     # Construct the prompt
     prompt = load_prompt(
         "goedel-prover-v2-subsequent",
-        prev_round_num=str(new_state["self_correction_attempts"] - 1),
-        error_message_for_prev_round=str(new_state["errors"]),
+        prev_round_num=str(proof_state["self_correction_attempts"] - 1),
+        error_message_for_prev_round=str(proof_state["errors"]),
     )
 
     # Log debug prompt
@@ -103,15 +99,15 @@ def _corrector(state: FormalTheoremProofState) -> FormalTheoremProofStates:
         "PROOF_CORRECTOR_AGENT",
         prompt,
         "goedel-prover-v2-subsequent",
-        attempt_num=new_state["self_correction_attempts"],
-        pass_num=new_state["pass_attempts"],
+        attempt_num=proof_state["self_correction_attempts"],
+        pass_num=proof_state["pass_attempts"],
     )
 
     # Add correction request to the state's proof_history
-    new_state["proof_history"] += [HumanMessage(content=prompt)]
+    proof_state["proof_history"] += [HumanMessage(content=prompt)]
 
     # Reset llm_lean_output as it is now invalid for this new round
-    new_state["llm_lean_output"] = None
+    proof_state["llm_lean_output"] = None
 
     # Return a FormalTheoremProofStates with state added to its outputs
-    return {"outputs": [new_state]}  # type: ignore[typeddict-item]
+    return {"outputs": [proof_state]}  # type: ignore[typeddict-item]

@@ -1,3 +1,5 @@
+from typing import cast
+
 from langchain_core.messages import HumanMessage
 from langgraph.graph import END, START, StateGraph
 from langgraph.graph.state import CompiledStateGraph
@@ -64,10 +66,10 @@ def _map_edge(states: DecomposedFormalTheoremStates) -> list[Send]:
     list[Send]
         List of Send objects each indicating the their target node and its input, singular.
     """
-    return [Send("corrector_agent", state) for state in states["inputs"]]
+    return [Send("corrector_agent", {"item": state}) for state in states["inputs"]]
 
 
-def _corrector(state: DecomposedFormalTheoremState) -> DecomposedFormalTheoremStates:
+def _corrector(state: DecomposedFormalTheoremStates) -> DecomposedFormalTheoremStates:
     """
     Adds a HumanMessage to the decomposition_history of the passed DecomposedFormalTheoremState
     indicating a request for a correction of the previous formal sketch and indicating the errors
@@ -86,17 +88,13 @@ def _corrector(state: DecomposedFormalTheoremState) -> DecomposedFormalTheoremSt
         A DecomposedFormalTheoremStates containing in its outputs the modified
         DecomposedFormalTheoremState
     """
-    # Copy state to prevent issues with LangGraph's mapreduce implementation
-    new_state: DecomposedFormalTheoremState = {
-        **state,  # shallow copy is OK if you also copy mutables
-        "decomposition_history": list(state["decomposition_history"]),
-    }
+    theorem_state = cast(DecomposedFormalTheoremState, state["item"])
 
     # Construct the prompt
     prompt = load_prompt(
         "decomposer-subsequent",
-        prev_round_num=str(new_state["self_correction_attempts"] - 1),
-        error_message_for_prev_round=str(new_state["errors"]),
+        prev_round_num=str(theorem_state["self_correction_attempts"] - 1),
+        error_message_for_prev_round=str(theorem_state["errors"]),
     )
 
     # Log debug prompt
@@ -104,14 +102,14 @@ def _corrector(state: DecomposedFormalTheoremState) -> DecomposedFormalTheoremSt
         "SKETCH_CORRECTOR_AGENT",
         prompt,
         "decomposer-subsequent",
-        attempt_num=new_state["self_correction_attempts"],
+        attempt_num=theorem_state["self_correction_attempts"],
     )
 
     # Add correction request to the state's decomposition_history
-    new_state["decomposition_history"] += [HumanMessage(content=prompt)]
+    theorem_state["decomposition_history"] += [HumanMessage(content=prompt)]
 
     # Reset llm_lean_output as it is now invalid for this new round
-    new_state["llm_lean_output"] = None
+    theorem_state["llm_lean_output"] = None
 
     # Return a DecomposedFormalTheoremStates with state added to its outputs
-    return {"outputs": [new_state]}  # type: ignore[typeddict-item]
+    return {"outputs": [theorem_state]}  # type: ignore[typeddict-item]
