@@ -276,9 +276,20 @@ def test_sketch_parser_passes_goal_context(monkeypatch: pytest.MonkeyPatch) -> N
     result = sketch_parser_agent._parse_sketch(  # type: ignore[arg-type]
         "url", 0, 0, {"inputs": [], "outputs": [], "item": state}
     )
-    assert result["outputs"][0]["ast"] is not None
+    out_state = result["outputs"][0]
+    assert out_state["ast"] is not None
 
-    code_hn = result["outputs"][0]["ast"].get_named_subgoal_code("hn_nonneg")
+    # Regression guard: `proof_sketch` must store the full declaration body (no preamble),
+    # aligned with the AST's body slice, not tactics-only.
+    assert out_state["proof_sketch"] == str(out_state["llm_lean_output"]).strip()
+    ast = out_state["ast"]
+    assert ast.get_source_text() is not None
+    expected_body = ast.get_source_text()[ast.get_body_start() :]
+    normalized_sketch = str(out_state["proof_sketch"]).strip()
+    normalized_sketch = normalized_sketch if normalized_sketch.endswith("\n") else normalized_sketch + "\n"
+    assert normalized_sketch == expected_body
+
+    code_hn = out_state["ast"].get_named_subgoal_code("hn_nonneg")
     _assert_binders_present(code_hn)
 
 
