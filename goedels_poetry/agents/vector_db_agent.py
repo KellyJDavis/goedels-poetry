@@ -1,6 +1,6 @@
 import asyncio
 from functools import partial
-from typing import Any
+from typing import Any, cast
 
 from langgraph.graph import END, START, StateGraph
 from langgraph.graph.state import CompiledStateGraph
@@ -106,11 +106,11 @@ def _map_edge(states: DecomposedFormalTheoremStates) -> list[Send]:
     list[Send]
         List of Send objects each indicating their target node and its input, singular.
     """
-    return [Send("vector_db_agent", state) for state in states["inputs"]]
+    return [Send("vector_db_agent", {"item": state}) for state in states["inputs"]]
 
 
 def _query_vectordb(
-    server_url: str, package_filters: list[str], state: DecomposedFormalTheoremState
+    server_url: str, package_filters: list[str], state: DecomposedFormalTheoremStates
 ) -> DecomposedFormalTheoremStates:
     """
     Queries the vector database for each search query in the passed DecomposedFormalTheoremState.
@@ -130,20 +130,16 @@ def _query_vectordb(
         A DecomposedFormalTheoremStates with the DecomposedFormalTheoremState with search_results
         added to the DecomposedFormalTheoremStates "outputs" member.
     """
-    # Copy state to prevent issues with LangGraph's mapreduce implementation
-    new_state: DecomposedFormalTheoremState = {
-        **state,  # shallow copy is OK if you also copy mutables
-        "decomposition_history": list(state["decomposition_history"]),
-    }
+    theorem_state = cast(DecomposedFormalTheoremState, state["item"])
 
     # Handle None or empty search_queries
-    if new_state["search_queries"] is None:
-        new_state["search_results"] = None
-        return {"outputs": [new_state]}  # type: ignore[typeddict-item]
+    if theorem_state["search_queries"] is None:
+        theorem_state["search_results"] = None
+        return {"outputs": [theorem_state]}  # type: ignore[typeddict-item]
 
-    if not new_state["search_queries"]:
-        new_state["search_results"] = []
-        return {"outputs": [new_state]}  # type: ignore[typeddict-item]
+    if not theorem_state["search_queries"]:
+        theorem_state["search_results"] = []
+        return {"outputs": [theorem_state]}  # type: ignore[typeddict-item]
 
     if Client is None:
         raise LeanExploreDependencyMissing()
@@ -153,7 +149,7 @@ def _query_vectordb(
 
     # Query the vector database for each search query sequentially
     search_results: list[APISearchResponseTypedDict] = []
-    for search_query in new_state["search_queries"]:
+    for search_query in theorem_state["search_queries"]:
         # Use asyncio.run() to wrap the async client.search() call
         # Exceptions are allowed to propagate (as per specification, similar to KiminaClient)
         api_response = asyncio.run(client.search(search_query, package_filters=package_filters))
@@ -213,7 +209,7 @@ def _query_vectordb(
     log_vectordb_response("search", search_results)
 
     # Update the state with the search results
-    new_state["search_results"] = search_results
+    theorem_state["search_results"] = search_results
 
     # Return a DecomposedFormalTheoremStates with state added to its outputs
-    return {"outputs": [new_state]}  # type: ignore[typeddict-item]
+    return {"outputs": [theorem_state]}  # type: ignore[typeddict-item]

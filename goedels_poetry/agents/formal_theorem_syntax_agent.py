@@ -1,4 +1,5 @@
 from functools import partial
+from typing import cast
 
 from kimina_client import KiminaClient
 from langgraph.graph import END, START, StateGraph
@@ -88,11 +89,11 @@ def _map_edge(states: FormalTheoremProofStates) -> list[Send]:
     list[Send]
         List of Send objects each indicating the their target node and its input, singular.
     """
-    return [Send("syntax_agent", state) for state in states["inputs"]]
+    return [Send("syntax_agent", {"item": state}) for state in states["inputs"]]
 
 
 def _check_syntax(
-    server_url: str, server_max_retries: int, server_timeout: int, state: FormalTheoremProofState
+    server_url: str, server_max_retries: int, server_timeout: int, state: FormalTheoremProofStates
 ) -> FormalTheoremProofStates:
     """
     Checks syntax of the formal theorem in the passed FormalTheoremProofState.
@@ -114,17 +115,13 @@ def _check_syntax(
         A FormalTheoremProofStates with the FormalTheoremProofState with the syntax checked added
         to the FormalTheoremProofStates "outputs" member.
     """
-    # Copy state to prevent issues with LangGraph's mapreduce implementation
-    new_state = {
-        **state,  # shallow copy is OK if you also copy mutables
-        "proof_history": list(state["proof_history"]),
-    }
+    proof_state = cast(FormalTheoremProofState, state["item"])
 
     # Create a client to access the Kimina Server
     kimina_client = KiminaClient(api_url=server_url, http_timeout=server_timeout, n_retries=server_max_retries)
 
-    # Check syntax of new_state["formal_theorem"] with the stored preamble prefix
-    code_with_imports = combine_preamble_and_body(str(new_state["preamble"]), str(new_state["formal_theorem"]))
+    # Check syntax of proof_state["formal_theorem"] with the stored preamble prefix
+    code_with_imports = combine_preamble_and_body(str(proof_state["preamble"]), str(proof_state["formal_theorem"]))
     check_response = kimina_client.check(code_with_imports, timeout=server_timeout)
 
     # Parse check_response
@@ -137,7 +134,7 @@ def _check_syntax(
     syntactic = parsed_response["pass"]
 
     # Update the state with the syntax check result
-    new_state["syntactic"] = syntactic
+    proof_state["syntactic"] = syntactic
 
     # Return a FormalTheoremProofStates with state added to its outputs
-    return {"outputs": [new_state]}  # type: ignore[typeddict-item]
+    return {"outputs": [proof_state]}  # type: ignore[typeddict-item]

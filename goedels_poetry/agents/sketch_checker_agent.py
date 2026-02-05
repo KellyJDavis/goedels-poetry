@@ -1,4 +1,5 @@
 from functools import partial
+from typing import cast
 
 from kimina_client import KiminaClient
 from langgraph.graph import END, START, StateGraph
@@ -88,11 +89,11 @@ def _map_edge(states: DecomposedFormalTheoremStates) -> list[Send]:
     list[Send]
         List of Send objects each indicating the their target node and its input, singular.
     """
-    return [Send("check_sketch_agent", state) for state in states["inputs"]]
+    return [Send("check_sketch_agent", {"item": state}) for state in states["inputs"]]
 
 
 def _check_sketch(
-    server_url: str, server_max_retries: int, server_timeout: int, state: DecomposedFormalTheoremState
+    server_url: str, server_max_retries: int, server_timeout: int, state: DecomposedFormalTheoremStates
 ) -> DecomposedFormalTheoremStates:
     """
     Checks syntax of the proof sketch in the passed DecomposedFormalTheoremState.
@@ -114,21 +115,17 @@ def _check_sketch(
         A DecomposedFormalTheoremStates with the DecomposedFormalTheoremState with the sketch
         checked added to the DecomposedFormalTheoremStates "outputs" member.
     """
-    # Copy state to prevent issues with LangGraph's mapreduce implementation
-    new_state = {
-        **state,  # shallow copy is OK if you also copy mutables
-        "decomposition_history": list(state["decomposition_history"]),
-    }
+    theorem_state = cast(DecomposedFormalTheoremState, state["item"])
 
     # Create a client to access the Kimina Server
     kimina_client = KiminaClient(api_url=server_url, http_timeout=server_timeout, n_retries=server_max_retries)
 
     # Use the raw LLM output directly for validation
     # new_state["llm_lean_output"] contains the complete declaration from the LLM
-    raw_output = str(new_state["llm_lean_output"]) if new_state["llm_lean_output"] else ""
+    raw_output = str(theorem_state["llm_lean_output"]) if theorem_state["llm_lean_output"] else ""
 
     # Check the proof sketch with the stored preamble prefix
-    sketch_with_imports = combine_preamble_and_body(str(new_state["preamble"]), raw_output)
+    sketch_with_imports = combine_preamble_and_body(str(theorem_state["preamble"]), raw_output)
     check_response = kimina_client.check(sketch_with_imports, timeout=server_timeout)
 
     # Parse check_response
@@ -138,11 +135,11 @@ def _check_sketch(
     log_kimina_response("check", parsed_response)
 
     # Update the state with the sketch check result
-    new_state["syntactic"] = parsed_response["pass"]
+    theorem_state["syntactic"] = parsed_response["pass"]
 
     # Update the state with the formatted error string
     # Note: get_error_str expects the code with DEFAULT_IMPORTS for proper line number handling
-    new_state["errors"] = get_error_str(sketch_with_imports, parsed_response.get("errors", []), False)
+    theorem_state["errors"] = get_error_str(sketch_with_imports, parsed_response.get("errors", []), False)
 
     # Return a DecomposedFormalTheoremStates with state added to its outputs
-    return {"outputs": [new_state]}  # type: ignore[typeddict-item]
+    return {"outputs": [theorem_state]}  # type: ignore[typeddict-item]

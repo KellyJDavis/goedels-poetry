@@ -87,10 +87,10 @@ def _map_edge(states: FormalTheoremProofStates) -> list[Send]:
     list[Send]
         List of Send objects each indicating the their target node and its input, singular.
     """
-    return [Send("prover_agent", state) for state in states["inputs"]]
+    return [Send("prover_agent", {"item": state}) for state in states["inputs"]]
 
 
-def _prover(llm: BaseChatModel, state: FormalTheoremProofState) -> FormalTheoremProofStates:
+def _prover(llm: BaseChatModel, state: FormalTheoremProofStates) -> FormalTheoremProofStates:
     """
     Proves the formal theorem in the passed FormalTheoremProofState.
 
@@ -110,18 +110,14 @@ def _prover(llm: BaseChatModel, state: FormalTheoremProofState) -> FormalTheorem
     # Create transaction id
     transaction_id = uuid4().hex
 
-    # Copy state to prevent issues with LangGraph's mapreduce implementation
-    new_state: FormalTheoremProofState = {
-        **state,  # shallow copy is OK if you also copy mutables
-        "proof_history": list(state["proof_history"]),
-    }
+    proof_state = cast(FormalTheoremProofState, state["item"])
 
     # Check if errors is None
-    if new_state["errors"] is None:
+    if proof_state["errors"] is None:
         # If it is, load the prompt in use when not correcting a previous proof
         # Combine the stored preamble with the formal theorem for the prompt
         formal_statement_with_imports = combine_preamble_and_body(
-            str(new_state["preamble"]), str(new_state["formal_theorem"])
+            str(proof_state["preamble"]), str(proof_state["formal_theorem"])
         )
         prompt = load_prompt("goedel-prover-v2-initial", formal_statement=formal_statement_with_imports)
 
@@ -130,22 +126,22 @@ def _prover(llm: BaseChatModel, state: FormalTheoremProofState) -> FormalTheorem
             f"PROVER_AGENT ({transaction_id})",
             prompt,
             "goedel-prover-v2-initial",
-            attempt_num=new_state["self_correction_attempts"],
-            pass_num=new_state["pass_attempts"],
+            attempt_num=proof_state["self_correction_attempts"],
+            pass_num=proof_state["pass_attempts"],
         )
 
         # Put the prompt in the final message
-        new_state["proof_history"] += [HumanMessage(content=prompt)]
+        proof_state["proof_history"] += [HumanMessage(content=prompt)]
 
     # Prove the formal statement
-    response_content = llm.invoke(new_state["proof_history"]).content
+    response_content = llm.invoke(proof_state["proof_history"]).content
 
     # Log debug response
     log_llm_response(
         f"PROVER_AGENT ({transaction_id})",
         str(response_content),
-        attempt_num=new_state["self_correction_attempts"],
-        pass_num=new_state["pass_attempts"],
+        attempt_num=proof_state["self_correction_attempts"],
+        pass_num=proof_state["pass_attempts"],
     )
 
     # Parse prover response
@@ -153,24 +149,24 @@ def _prover(llm: BaseChatModel, state: FormalTheoremProofState) -> FormalTheorem
         raw_code = _extract_code_block(str(response_content))
 
         # Store the raw LLM output in the new field
-        new_state["llm_lean_output"] = raw_code
+        proof_state["llm_lean_output"] = raw_code
 
         # Clear formal_proof initially - it will be populated by the proof_parser_agent
-        new_state["formal_proof"] = None
+        proof_state["formal_proof"] = None
 
         # Add the raw code to the state's proof_history
-        new_state["proof_history"] += [AIMessage(content=raw_code)]
+        proof_state["proof_history"] += [AIMessage(content=raw_code)]
     except LLMParsingError:
         # Set parse failure markers - state manager will handle requeueing and attempt increments
-        new_state["formal_proof"] = None
-        new_state["errors"] = (
+        proof_state["formal_proof"] = None
+        proof_state["errors"] = (
             "Malformed LLM response: unable to parse proof body from LLM output. "
             "The response did not contain a valid Lean4 code block or the code block could not be extracted."
         )
         # Do not add to proof_history on parse failure
 
     # Return a FormalTheoremProofStates with state added to its outputs
-    return {"outputs": [new_state]}  # type: ignore[typeddict-item]
+    return {"outputs": [proof_state]}  # type: ignore[typeddict-item]
 
 
 def _extract_code_block_fallback(response: str) -> str:

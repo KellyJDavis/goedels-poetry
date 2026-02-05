@@ -1,4 +1,5 @@
 from functools import partial
+from typing import cast
 from uuid import uuid4
 
 from kimina_client import KiminaClient
@@ -95,7 +96,7 @@ def _map_edge(states: DecomposedFormalTheoremStates) -> list[Send]:
     list[Send]
         List of Send objects each indicating the their target node and its input, singular.
     """
-    return [Send("parser_agent", state) for state in states["inputs"]]
+    return [Send("parser_agent", {"item": state}) for state in states["inputs"]]
 
 
 def _actionable_suffix(parsed: dict, code_preview: str) -> str:
@@ -107,7 +108,7 @@ def _actionable_suffix(parsed: dict, code_preview: str) -> str:
 
 
 def _parse_sketch(
-    server_url: str, server_max_retries: int, server_timeout: int, state: DecomposedFormalTheoremState
+    server_url: str, server_max_retries: int, server_timeout: int, state: DecomposedFormalTheoremStates
 ) -> DecomposedFormalTheoremStates:
     """
     Parses the proof sketch in the passed DecomposedFormalTheoremState.
@@ -132,15 +133,11 @@ def _parse_sketch(
     # Create transaction id
     transaction_id = uuid4().hex
 
-    # Copy state to prevent issues with LangGraph's mapreduce implementation
-    new_state: DecomposedFormalTheoremState = {
-        **state,  # shallow copy is OK if you also copy mutables
-        "decomposition_history": list(state["decomposition_history"]),
-    }
+    theorem_state = cast(DecomposedFormalTheoremState, state["item"])
 
     kimina_client = KiminaClient(api_url=server_url, http_timeout=server_timeout, n_retries=server_max_retries)
-    normalized_preamble = new_state["preamble"].strip()
-    normalized_formal = str(new_state["formal_theorem"]).strip()
+    normalized_preamble = theorem_state["preamble"].strip()
+    normalized_formal = str(theorem_state["formal_theorem"]).strip()
     formal_with_preamble = combine_preamble_and_body(normalized_preamble, normalized_formal)
 
     if normalized_preamble and normalized_formal:
@@ -171,7 +168,7 @@ def _parse_sketch(
             + _actionable_suffix(parsed_formal, formal_with_preamble)
         )
 
-    raw_output = str(new_state["llm_lean_output"]) if new_state["llm_lean_output"] else ""
+    raw_output = str(theorem_state["llm_lean_output"]) if theorem_state["llm_lean_output"] else ""
     normalized_body = raw_output.strip()
     sketch_with_imports = combine_preamble_and_body(normalized_preamble, normalized_body)
     if normalized_preamble and normalized_body:
@@ -199,7 +196,7 @@ def _parse_sketch(
         msg = f"Structural extraction failed for target signature: {target_sig}; preview: {sketch_with_imports[:200]!r}"
         raise ValueError(msg)
 
-    new_state["proof_sketch"] = extracted_sketch
+    theorem_state["proof_sketch"] = extracted_sketch
 
     ast_with_imports = AST(
         parsed_response["ast"],
@@ -209,13 +206,13 @@ def _parse_sketch(
     )
     extracted_preamble = extract_preamble_from_ast(ast_with_imports)
     if extracted_preamble:
-        new_state["preamble"] = extracted_preamble
+        theorem_state["preamble"] = extracted_preamble
 
-    ast_without_imports = remove_default_imports_from_ast(parsed_response["ast"], preamble=new_state["preamble"])
-    new_state["ast"] = AST(
+    ast_without_imports = remove_default_imports_from_ast(parsed_response["ast"], preamble=theorem_state["preamble"])
+    theorem_state["ast"] = AST(
         ast_without_imports,
         sorries=parsed_response.get("sorries"),
         source_text=sketch_with_imports,
         body_start=body_start,
     )
-    return {"outputs": [new_state]}  # type: ignore[typeddict-item]
+    return {"outputs": [theorem_state]}  # type: ignore[typeddict-item]

@@ -1,4 +1,5 @@
 from functools import partial
+from typing import cast
 
 from kimina_client import KiminaClient
 from langgraph.graph import END, START, StateGraph
@@ -91,11 +92,11 @@ def _map_edge(states: FormalTheoremProofStates) -> list[Send]:
     list[Send]
         List of Send objects each indicating the their target node and its input, singular.
     """
-    return [Send("check_proof_agent", state) for state in states["inputs"]]
+    return [Send("check_proof_agent", {"item": state}) for state in states["inputs"]]
 
 
 def _check_proof(
-    server_url: str, server_max_retries: int, server_timeout: int, state: FormalTheoremProofState
+    server_url: str, server_max_retries: int, server_timeout: int, state: FormalTheoremProofStates
 ) -> FormalTheoremProofStates:
     """
     Checks proof of the formal proof in the passed FormalTheoremProofState.
@@ -117,21 +118,17 @@ def _check_proof(
         A FormalTheoremProofStates with the FormalTheoremProofState with the proof checked added
         to the FormalTheoremProofStates "outputs" member.
     """
-    # Copy state to prevent issues with LangGraph's mapreduce implementation
-    new_state = {
-        **state,  # shallow copy is OK if you also copy mutables
-        "proof_history": list(state["proof_history"]),
-    }
+    proof_state = cast(FormalTheoremProofState, state["item"])
 
     # Create a client to access the Kimina Server
     kimina_client = KiminaClient(api_url=server_url, http_timeout=server_timeout, n_retries=server_max_retries)
 
     # Use the raw LLM output directly for validation
     # new_state["llm_lean_output"] contains the complete declaration from the LLM
-    raw_output = str(new_state["llm_lean_output"]) if new_state["llm_lean_output"] else ""
+    raw_output = str(proof_state["llm_lean_output"]) if proof_state["llm_lean_output"] else ""
 
     # Check the formal proof with the stored preamble prefix
-    proof_with_imports = combine_preamble_and_body(str(new_state["preamble"]), raw_output)
+    proof_with_imports = combine_preamble_and_body(str(proof_state["preamble"]), raw_output)
     check_response = kimina_client.check(proof_with_imports, timeout=server_timeout)
 
     # Parse check_response
@@ -142,14 +139,14 @@ def _check_proof(
 
     # Update the state with the proof check result
     # Note: We use "complete" instead of "pass" to ensure proofs with sorries are marked as unsuccessful
-    new_state["proved"] = parsed_response["complete"]
+    proof_state["proved"] = parsed_response["complete"]
 
     # Update the state with the error string formatted for Goedel-Prover-V2 use
     # Note: get_error_str expects the code with DEFAULT_IMPORTS for proper line number handling
-    new_state["errors"] = get_error_str(proof_with_imports, parsed_response.get("errors", []), False)
+    proof_state["errors"] = get_error_str(proof_with_imports, parsed_response.get("errors", []), False)
 
     # Return a FormalTheoremProofStates with state added to its outputs
-    return {"outputs": [new_state]}  # type: ignore[typeddict-item]
+    return {"outputs": [proof_state]}  # type: ignore[typeddict-item]
 
 
 def check_complete_proof(

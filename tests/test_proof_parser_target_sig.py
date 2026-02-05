@@ -171,7 +171,9 @@ def test_parse_proof_formal_theorem_variants(
     _install_kimina_stub(monkeypatch, _OptionBKiminaClient)
     proof_parser_agent = importlib.import_module("goedels_poetry.agents.proof_parser_agent")
     state = _base_state(formal_theorem=formal_theorem, llm_lean_output=llm_lean_output)
-    result = proof_parser_agent._parse_proof("url", 0, 0, state)  # type: ignore[arg-type]
+    result = proof_parser_agent._parse_proof(  # type: ignore[arg-type]
+        "url", 0, 0, {"inputs": [], "outputs": [], "item": state}
+    )
     out = result["outputs"][0]
     assert out["formal_proof"] == "  trivial"
 
@@ -184,7 +186,9 @@ theorem t : True := by sorry"""
     _install_kimina_stub(monkeypatch, _OptionBKiminaClient)
     proof_parser_agent = importlib.import_module("goedels_poetry.agents.proof_parser_agent")
     state = _base_state(formal_theorem=formal, llm_lean_output=proof)
-    result = proof_parser_agent._parse_proof("url", 0, 0, state)  # type: ignore[arg-type]
+    result = proof_parser_agent._parse_proof(  # type: ignore[arg-type]
+        "url", 0, 0, {"inputs": [], "outputs": [], "item": state}
+    )
     out = result["outputs"][0]
     assert out["formal_proof"] == "  trivial"
     assert "volume of a cone" in formal

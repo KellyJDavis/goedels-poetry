@@ -286,7 +286,7 @@ def test_query_vectordb_with_none_search_queries() -> None:
         llm_lean_output=None,
     )
 
-    result = _query_vectordb("http://localhost:8001/api/v1", ["Mathlib"], state)
+    result = _query_vectordb("http://localhost:8001/api/v1", ["Mathlib"], {"inputs": [], "outputs": [], "item": state})
 
     assert result["outputs"][0]["search_results"] is None
     assert result["outputs"][0]["search_queries"] is None
@@ -312,7 +312,7 @@ def test_query_vectordb_with_empty_search_queries() -> None:
         llm_lean_output=None,
     )
 
-    result = _query_vectordb("http://localhost:8001/api/v1", ["Mathlib"], state)
+    result = _query_vectordb("http://localhost:8001/api/v1", ["Mathlib"], {"inputs": [], "outputs": [], "item": state})
 
     assert result["outputs"][0]["search_results"] == []
     assert result["outputs"][0]["search_queries"] == []
@@ -361,7 +361,9 @@ def test_query_vectordb_with_single_query(mock_asyncio_run: MagicMock, mock_clie
         llm_lean_output=None,
     )
 
-    result = _query_vectordb("http://localhost:8001/api/v1", ["Mathlib", "Batteries"], state)
+    result = _query_vectordb(
+        "http://localhost:8001/api/v1", ["Mathlib", "Batteries"], {"inputs": [], "outputs": [], "item": state}
+    )
 
     # Verify asyncio.run was called
     assert mock_asyncio_run.call_count == 1
@@ -420,7 +422,7 @@ def test_query_vectordb_with_multiple_queries(mock_asyncio_run: MagicMock, mock_
         llm_lean_output=None,
     )
 
-    result = _query_vectordb("http://localhost:8001/api/v1", ["Mathlib"], state)
+    result = _query_vectordb("http://localhost:8001/api/v1", ["Mathlib"], {"inputs": [], "outputs": [], "item": state})
 
     # Verify asyncio.run was called 3 times (once per query)
     assert mock_asyncio_run.call_count == 3
@@ -472,7 +474,7 @@ def test_query_vectordb_propagates_exceptions(mock_asyncio_run: MagicMock, mock_
 
     # Exception should propagate
     with pytest.raises(httpx.HTTPStatusError):
-        _query_vectordb("http://localhost:8001/api/v1", ["Mathlib"], state)
+        _query_vectordb("http://localhost:8001/api/v1", ["Mathlib"], {"inputs": [], "outputs": [], "item": state})
 
 
 def test_vector_db_agent_factory() -> None:

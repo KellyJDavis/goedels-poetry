@@ -4,7 +4,7 @@ from operator import add
 from typing import Annotated, Any
 
 from langchain_core.messages import AnyMessage
-from typing_extensions import Required, TypedDict
+from typing_extensions import NotRequired, Required, TypedDict
 
 from goedels_poetry.parsers.ast import AST
 from goedels_poetry.util.tree import TreeNode
@@ -127,6 +127,7 @@ class FormalTheoremProofStates(TypedDict):
     """
 
     inputs: Required[list[FormalTheoremProofState]]
+    item: NotRequired[FormalTheoremProofState]
     outputs: Required[Annotated[list[FormalTheoremProofState], add]]  # TODO: Correct annotation?
 
 
@@ -262,4 +263,5 @@ class DecomposedFormalTheoremStates(TypedDict):
     """
 
     inputs: Required[list[DecomposedFormalTheoremState]]
+    item: NotRequired[DecomposedFormalTheoremState]
     outputs: Required[Annotated[list[DecomposedFormalTheoremState], add]]  # TODO: Correct annotation?
