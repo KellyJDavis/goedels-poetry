@@ -196,7 +196,13 @@ def _parse_sketch(
         msg = f"Structural extraction failed for target signature: {target_sig}; preview: {sketch_with_imports[:200]!r}"
         raise ValueError(msg)
 
-    theorem_state["proof_sketch"] = extracted_sketch
+    # Store the full sketch body (the complete declaration without the preamble), not tactics-only.
+    #
+    # Reconstruction and hole-replacement logic assumes `proof_sketch` matches the AST body's
+    # source-text slice: `ast.get_source_text()[ast.get_body_start():]` (modulo stripping and a
+    # trailing newline). Storing tactics-only here breaks that invariant and causes reconstruction
+    # validation failures.
+    theorem_state["proof_sketch"] = normalized_body
 
     ast_with_imports = AST(
         parsed_response["ast"],

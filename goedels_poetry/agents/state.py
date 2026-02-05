@@ -224,8 +224,10 @@ class DecomposedFormalTheoremState(TypedDict):
         For root decompositions (no parent sketch) and for legacy/unknown cases, this is `None`.
     llm_lean_output: Required[str | None]
         The raw Lean 4 code block extracted from the markdown response of the LLM.
-        This contains the complete declaration (theorem/lemma/example), whereas
-        `proof_sketch` contains only the extracted sketch body.
+        This contains the complete declaration (theorem/lemma/example) returned by the LLM.
+
+        The `proof_sketch` field stores the normalized sketch **body string** used for parsing,
+        decomposition, and reconstruction (typically this is the same declaration, stripped).
     """
 
     # InternalTreeNode specific properties
