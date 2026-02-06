@@ -4,7 +4,6 @@ from typing import cast
 from kimina_client import KiminaClient
 from langgraph.graph import END, START, StateGraph
 from langgraph.graph.state import CompiledStateGraph
-from langgraph.types import Send
 
 from goedels_poetry.agents.state import FormalTheoremProofState, FormalTheoremProofStates
 from goedels_poetry.agents.util.common import (
@@ -13,6 +12,7 @@ from goedels_poetry.agents.util.common import (
 )
 from goedels_poetry.agents.util.debug import log_kimina_response
 from goedels_poetry.agents.util.kimina_server import parse_kimina_check_response
+from goedels_poetry.agents.util.state_isolation import detach_formal_proof_state
 
 
 class ProofCheckerAgentFactory:
@@ -63,36 +63,46 @@ def _build_agent(server_url: str, server_max_retries: int, server_timeout: int) 
     # Create the proof checker agent state graph
     graph_builder = StateGraph(FormalTheoremProofStates)
 
-    # Bind the server related arguments of _check_proof
-    bound_check_proof = partial(_check_proof, server_url, server_max_retries, server_timeout)
+    # Bind the server related arguments of the batch checker.
+    bound_check_proofs = partial(_check_proofs_batch, server_url, server_max_retries, server_timeout)
 
     # Add the nodes
-    graph_builder.add_node("check_proof_agent", bound_check_proof)
+    graph_builder.add_node("check_proof_agent", bound_check_proofs)
 
     # Add the edges
-    graph_builder.add_conditional_edges(START, _map_edge, ["check_proof_agent"])
+    # NOTE: We intentionally check proofs sequentially inside a single node.
+    #
+    # We have repeatedly observed cross-item state contamination when using LangGraph
+    # parallel fan-out with mutable TypedDict payloads.
+    graph_builder.add_edge(START, "check_proof_agent")
     graph_builder.add_edge("check_proof_agent", END)
 
     return graph_builder.compile()
 
 
-def _map_edge(states: FormalTheoremProofStates) -> list[Send]:
+def _check_proofs_batch(
+    server_url: str,
+    server_max_retries: int,
+    server_timeout: int,
+    states: FormalTheoremProofStates,
+) -> FormalTheoremProofStates:
     """
-    Map edge that takes the members of the states["inputs"] list and dispers them to the
-    check_proof_agent nodes.
+    Check all items in `states["inputs"]` sequentially.
 
-    Parameters
-    ----------
-    states: FormalTheoremProofStates
-        The FormalTheoremProofStates containing in the "inputs" member the FormalTheoremProofState
-        instances to check the proofs of.
-
-    Returns
-    -------
-    list[Send]
-        List of Send objects each indicating the their target node and its input, singular.
+    This avoids LangGraph parallel fan-out, which has caused cross-item state corruption in
+    this repository.
     """
-    return [Send("check_proof_agent", {"item": state}) for state in states["inputs"]]
+    outputs: list[FormalTheoremProofState] = []
+    for input_state in states["inputs"]:
+        detached = detach_formal_proof_state(input_state)
+        one = _check_proof(
+            server_url,
+            server_max_retries,
+            server_timeout,
+            {"inputs": [], "outputs": [], "item": detached},
+        )
+        outputs.extend(one["outputs"])
+    return {"outputs": outputs}  # type: ignore[typeddict-item]
 
 
 def _check_proof(

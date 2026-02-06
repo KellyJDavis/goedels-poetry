@@ -15,6 +15,7 @@ from goedels_poetry.agents.state import (
 )
 from goedels_poetry.agents.util.debug import log_kimina_response
 from goedels_poetry.agents.util.kimina_server import parse_kimina_check_response
+from goedels_poetry.agents.util.state_isolation import detach_decomposed_theorem_state
 from goedels_poetry.parsers.ast import AST
 from goedels_poetry.parsers.util.high_level.subgoal_extraction_v2 import (
     extract_subgoal_with_check_responses,
@@ -297,7 +298,11 @@ def _map_edge(states: DecomposedFormalTheoremStates) -> list[Send]:
     list[Send]
         List of Send objects each indicating the their target node and its input, singular.
     """
-    return [Send("sketch_decomposition_agent", {"item": state}) for state in states["inputs"]]
+    # Fan out detached per-item payloads to avoid sharing cyclic proof-tree references.
+    return [
+        Send("sketch_decomposition_agent", {"item": detach_decomposed_theorem_state(state)})
+        for state in states["inputs"]
+    ]
 
 
 def _sketch_decomposer(

@@ -11,6 +11,7 @@ from goedels_poetry.agents.state import DecomposedFormalTheoremState, Decomposed
 from goedels_poetry.agents.util.common import combine_preamble_and_body, remove_default_imports_from_ast
 from goedels_poetry.agents.util.debug import log_kimina_response
 from goedels_poetry.agents.util.kimina_server import is_no_usable_ast, parse_kimina_ast_code_response
+from goedels_poetry.agents.util.state_isolation import detach_decomposed_theorem_state
 from goedels_poetry.parsers.ast import AST
 from goedels_poetry.parsers.util.foundation.decl_extraction import (
     extract_preamble_from_ast,
@@ -96,7 +97,8 @@ def _map_edge(states: DecomposedFormalTheoremStates) -> list[Send]:
     list[Send]
         List of Send objects each indicating the their target node and its input, singular.
     """
-    return [Send("parser_agent", {"item": state}) for state in states["inputs"]]
+    # Fan out detached per-item payloads to avoid sharing cyclic proof-tree references.
+    return [Send("parser_agent", {"item": detach_decomposed_theorem_state(state)}) for state in states["inputs"]]
 
 
 def _actionable_suffix(parsed: dict, code_preview: str) -> str:

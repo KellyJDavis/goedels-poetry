@@ -10,6 +10,7 @@ from goedels_poetry.agents.state import DecomposedFormalTheoremState, Decomposed
 from goedels_poetry.agents.util.common import combine_preamble_and_body, get_error_str
 from goedels_poetry.agents.util.debug import log_kimina_response
 from goedels_poetry.agents.util.kimina_server import parse_kimina_check_response
+from goedels_poetry.agents.util.state_isolation import detach_decomposed_theorem_state
 
 
 class SketchCheckerAgentFactory:
@@ -89,7 +90,8 @@ def _map_edge(states: DecomposedFormalTheoremStates) -> list[Send]:
     list[Send]
         List of Send objects each indicating the their target node and its input, singular.
     """
-    return [Send("check_sketch_agent", {"item": state}) for state in states["inputs"]]
+    # Fan out detached per-item payloads to avoid sharing cyclic proof-tree references.
+    return [Send("check_sketch_agent", {"item": detach_decomposed_theorem_state(state)}) for state in states["inputs"]]
 
 
 def _check_sketch(
