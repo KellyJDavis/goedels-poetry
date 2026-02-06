@@ -5,7 +5,6 @@ from uuid import uuid4
 from kimina_client import KiminaClient
 from langgraph.graph import END, START, StateGraph
 from langgraph.graph.state import CompiledStateGraph
-from langgraph.types import Send
 
 from goedels_poetry.agents.state import FormalTheoremProofState, FormalTheoremProofStates
 from goedels_poetry.agents.util.common import (
@@ -14,6 +13,7 @@ from goedels_poetry.agents.util.common import (
 )
 from goedels_poetry.agents.util.debug import log_kimina_response
 from goedels_poetry.agents.util.kimina_server import is_no_usable_ast, parse_kimina_ast_code_response
+from goedels_poetry.agents.util.state_isolation import detach_formal_proof_state
 from goedels_poetry.parsers.ast import AST
 from goedels_poetry.parsers.util.foundation.decl_extraction import (
     extract_preamble_from_ast,
@@ -70,36 +70,22 @@ def _build_agent(server_url: str, server_max_retries: int, server_timeout: int) 
     # Create the proof parser agent state graph
     graph_builder = StateGraph(FormalTheoremProofStates)
 
-    # Bind the server related arguments of _parse_proof
-    bound_parse_proof = partial(_parse_proof, server_url, server_max_retries, server_timeout)
+    # Bind the server related arguments of the batch parser.
+    bound_parse_proofs = partial(_parse_proofs_batch, server_url, server_max_retries, server_timeout)
 
     # Add the nodes
-    graph_builder.add_node("parser_agent", bound_parse_proof)
+    graph_builder.add_node("parser_agent", bound_parse_proofs)
 
     # Add the edges
-    graph_builder.add_conditional_edges(START, _map_edge, ["parser_agent"])
+    # NOTE: We intentionally parse sequentially inside a single node.
+    #
+    # We have repeatedly observed cross-item state contamination when using LangGraph
+    # parallel fan-out with mutable TypedDict payloads. Parsing is deterministic and
+    # correctness matters more than parallelism here.
+    graph_builder.add_edge(START, "parser_agent")
     graph_builder.add_edge("parser_agent", END)
 
     return graph_builder.compile()
-
-
-def _map_edge(states: FormalTheoremProofStates) -> list[Send]:
-    """
-    Map edge that takes the members of the states["inputs"] list and dispers them to the
-    parser_agent nodes.
-
-    Parameters
-    ----------
-    states: FormalTheoremProofStates
-        The FormalTheoremProofStates containing in the "inputs" member the FormalTheoremProofState
-        instances to parse the proofs of.
-
-    Returns
-    -------
-    list[Send]
-        List of Send objects each indicating the their target node and its input, singular.
-    """
-    return [Send("parser_agent", {"item": state}) for state in states["inputs"]]
 
 
 def _actionable_suffix(parsed: dict, code_preview: str) -> str:
@@ -108,6 +94,32 @@ def _actionable_suffix(parsed: dict, code_preview: str) -> str:
     if err:
         return f"; error: {err}"
     return f"; preview: {code_preview[:200]!r}"
+
+
+def _parse_proofs_batch(
+    server_url: str,
+    server_max_retries: int,
+    server_timeout: int,
+    states: FormalTheoremProofStates,
+) -> FormalTheoremProofStates:
+    """
+    Parse all items in `states["inputs"]` sequentially.
+
+    This avoids LangGraph parallel fan-out, which has caused cross-item state corruption in
+    this repository.
+    """
+    outputs: list[FormalTheoremProofState] = []
+    for input_state in states["inputs"]:
+        detached = detach_formal_proof_state(input_state)
+        # Reuse the existing single-item implementation for consistency.
+        one = _parse_proof(
+            server_url,
+            server_max_retries,
+            server_timeout,
+            {"inputs": [], "outputs": [], "item": detached},
+        )
+        outputs.extend(one["outputs"])
+    return {"outputs": outputs}  # type: ignore[typeddict-item]
 
 
 def _parse_proof(

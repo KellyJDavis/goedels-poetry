@@ -17,6 +17,7 @@ from goedels_poetry.agents.util.common import (
     load_prompt,
 )
 from goedels_poetry.agents.util.debug import log_llm_prompt, log_llm_response
+from goedels_poetry.agents.util.state_isolation import detach_decomposed_theorem_state
 
 
 class ProofSketcherAgentFactory:
@@ -88,7 +89,8 @@ def _map_edge(states: DecomposedFormalTheoremStates) -> list[Send]:
     list[Send]
         List of Send objects each indicating the their target node and its input, singular.
     """
-    return [Send("proof_sketcher", {"item": state}) for state in states["inputs"]]
+    # Fan out detached per-item payloads to avoid sharing cyclic proof-tree references.
+    return [Send("proof_sketcher", {"item": detach_decomposed_theorem_state(state)}) for state in states["inputs"]]
 
 
 def _extract_responses_api_content(response_content: str | list) -> str:

@@ -4,7 +4,7 @@ This test suite verifies that proof body extraction correctly includes
 intro, have, let statements from have statements.
 """
 
-# ruff: noqa: RUF001
+# ruff: noqa: RUF001, RUF002, RUF003
 
 from __future__ import annotations
 
@@ -494,3 +494,45 @@ class TestExtractSubgoalWithCheckResponses:
         assert "z : ZMod 7" in result or "(z : ZMod 7)" in result
         # The proof body should be included (intro z, have hz := ...)
         assert "intro" in result.lower() or "have" in result.lower()
+
+    def test_extract_subgoal_rewrites_named_have_hypothesis_types_from_ast(self, kimina_server_url: str) -> None:
+        """
+        Regression: prefer AST-extracted types for hypotheses that refer to named `have`s.
+
+        Lean's "unsolved goals" pretty-printer can omit type ascriptions/coercions in hypothesis
+        types, e.g. printing `hprod : 30 * (13 / 2) = 195` even when the original sketch wrote
+        `hprod : ((30 : ℝ) * (13 / 2 : ℝ)) = (195 : ℝ)`. If we reuse the pretty-printed string as
+        a lemma binder, Lean may default it to `Nat`, producing a different (or false) hypothesis.
+        """
+        sketch = """theorem test_rewrite_have_hyp_types : True := by
+  have hprod : ((30 : ℝ) * (13 / 2 : ℝ)) = (195 : ℝ) := by
+    sorry
+  have hrewrite : (1 / 3 : ℝ) * ((30 : ℝ) * (13 / 2 : ℝ)) = (1 / 3 : ℝ) * (195 : ℝ) := by
+    sorry
+  trivial
+"""
+        ast = _create_ast_for_sketch(sketch, server_url=kimina_server_url)
+
+        # Mock "unsolved goals" hypotheses where the pretty-printer omitted coercions.
+        #
+        # IMPORTANT: Hypothesis lines in Lean's "unsolved goals" output start at column 0; only
+        # continuation lines are indented. Build the message accordingly so extraction is realistic.
+        check_response = {
+            "errors": [{"severity": "error", "data": "unsolved goals\nhprod : 30 * (13 / 2) = 195\n⊢ True"}],
+            "pass": False,
+            "complete": False,
+        }
+
+        result = extract_subgoal_with_check_responses(
+            ast=ast,
+            check_responses={"hrewrite": check_response},
+            target_subgoal_identifier="hrewrite",
+            target_subgoal_name="hrewrite",
+        )
+
+        assert "lemma hrewrite" in result
+        # Ensure we used the AST version with explicit ℝ coercions (or equivalent).
+        assert "(hprod : ((30 : ℝ)" in result or "(hprod : (30 : ℝ)" in result
+        assert "195 : ℝ" in result
+        # And ensure we did NOT keep the ambiguous pretty-printed binder.
+        assert "(hprod : 30 * (13 / 2) = 195)" not in result

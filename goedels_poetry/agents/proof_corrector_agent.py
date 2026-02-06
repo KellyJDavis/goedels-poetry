@@ -1,11 +1,11 @@
 from langchain_core.messages import HumanMessage
 from langgraph.graph import END, START, StateGraph
 from langgraph.graph.state import CompiledStateGraph
-from langgraph.types import Send
 
 from goedels_poetry.agents.state import FormalTheoremProofStates
 from goedels_poetry.agents.util.common import load_prompt
 from goedels_poetry.agents.util.debug import log_llm_prompt
+from goedels_poetry.agents.util.state_isolation import detach_formal_proof_state
 
 
 class ProofCorrectorAgentFactory:
@@ -39,32 +39,27 @@ def _build_agent() -> CompiledStateGraph:
     graph_builder = StateGraph(FormalTheoremProofStates)
 
     # Add the nodes
-    graph_builder.add_node("corrector_agent", _corrector)
+    graph_builder.add_node("corrector_agent", _correct_proofs_batch)  # type: ignore[arg-type]
 
     # Add the edges
-    graph_builder.add_conditional_edges(START, _map_edge, ["corrector_agent"])
+    # NOTE: We intentionally run sequentially inside a single node to avoid
+    # LangGraph parallel fan-out issues with mutable TypedDict payloads.
+    graph_builder.add_edge(START, "corrector_agent")
     graph_builder.add_edge("corrector_agent", END)
 
     return graph_builder.compile()
 
 
-def _map_edge(states: FormalTheoremProofStates) -> list[Send]:
+def _correct_proofs_batch(states: FormalTheoremProofStates) -> FormalTheoremProofStates:
     """
-    Map edge that takes the members of the states["inputs"] list and dispers them to the
-    corrector_agent nodes.
-
-    Parameters
-    ----------
-    states: FormalTheoremProofStates
-        The FormalTheoremProofStates containing in the "inputs" member the FormalTheoremProofState
-        instances to create the proof corrections for.
-
-    Returns
-    -------
-    list[Send]
-        List of Send objects each indicating the their target node and its input, singular.
+    Apply correction prompting to all items in `states["inputs"]` sequentially.
     """
-    return [Send("corrector_agent", {"item": state}) for state in states["inputs"]]
+    outputs = []
+    for input_state in states["inputs"]:
+        detached = detach_formal_proof_state(input_state)
+        one = _corrector({"inputs": [], "outputs": [], "item": detached})
+        outputs.extend(one["outputs"])
+    return {"outputs": outputs}  # type: ignore[typeddict-item]
 
 
 def _corrector(state: FormalTheoremProofStates) -> FormalTheoremProofStates:

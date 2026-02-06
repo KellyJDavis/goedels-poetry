@@ -4,12 +4,12 @@ from typing import cast
 from kimina_client import KiminaClient
 from langgraph.graph import END, START, StateGraph
 from langgraph.graph.state import CompiledStateGraph
-from langgraph.types import Send
 
 from goedels_poetry.agents.state import FormalTheoremProofState, FormalTheoremProofStates
 from goedels_poetry.agents.util.common import combine_preamble_and_body
 from goedels_poetry.agents.util.debug import log_kimina_response
 from goedels_poetry.agents.util.kimina_server import parse_kimina_check_response
+from goedels_poetry.agents.util.state_isolation import detach_formal_proof_state
 
 
 class FormalTheoremSyntaxAgentFactory:
@@ -60,36 +60,41 @@ def _build_agent(server_url: str, server_max_retries: int, server_timeout: int) 
     # Create the formalizer agent state graph
     graph_builder = StateGraph(FormalTheoremProofStates)
 
-    # Bind the server related arguments of check_syntax
-    bound_check_syntax = partial(_check_syntax, server_url, server_max_retries, server_timeout)
+    # Bind the server related arguments of the batch syntax checker.
+    bound_check_syntaxes = partial(_check_syntaxes_batch, server_url, server_max_retries, server_timeout)
 
     # Add the nodes
-    graph_builder.add_node("syntax_agent", bound_check_syntax)
+    graph_builder.add_node("syntax_agent", bound_check_syntaxes)
 
     # Add the edges
-    graph_builder.add_conditional_edges(START, _map_edge, ["syntax_agent"])
+    # NOTE: We intentionally run sequentially inside a single node to avoid
+    # LangGraph parallel fan-out issues with mutable TypedDict payloads.
+    graph_builder.add_edge(START, "syntax_agent")
     graph_builder.add_edge("syntax_agent", END)
 
     return graph_builder.compile()
 
 
-def _map_edge(states: FormalTheoremProofStates) -> list[Send]:
+def _check_syntaxes_batch(
+    server_url: str,
+    server_max_retries: int,
+    server_timeout: int,
+    states: FormalTheoremProofStates,
+) -> FormalTheoremProofStates:
     """
-    Map edge that takes the members of the states["inputs"] list and dispers them to the
-    syntax_agent nodes.
-
-    Parameters
-    ----------
-    states: FormalTheoremProofStates
-        The FormalTheoremProofStates containing in the "inputs" member the FormalTheoremProofState
-        instances to check the syntax of.
-
-    Returns
-    -------
-    list[Send]
-        List of Send objects each indicating the their target node and its input, singular.
+    Check syntax for all items in `states["inputs"]` sequentially.
     """
-    return [Send("syntax_agent", {"item": state}) for state in states["inputs"]]
+    outputs: list[FormalTheoremProofState] = []
+    for input_state in states["inputs"]:
+        detached = detach_formal_proof_state(input_state)
+        one = _check_syntax(
+            server_url,
+            server_max_retries,
+            server_timeout,
+            {"inputs": [], "outputs": [], "item": detached},
+        )
+        outputs.extend(one["outputs"])
+    return {"outputs": outputs}  # type: ignore[typeddict-item]
 
 
 def _check_syntax(

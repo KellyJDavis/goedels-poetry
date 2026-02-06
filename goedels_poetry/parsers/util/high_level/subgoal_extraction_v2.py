@@ -364,6 +364,39 @@ def extract_subgoal_with_check_responses(
     # Extract hypotheses from the check response
     hypotheses = extract_hypotheses_from_check_response(check_response)
 
+    # Prefer AST-extracted types for hypotheses that correspond to named `have` statements.
+    #
+    # The "unsolved goals" pretty printer often omits type ascriptions/coercions (e.g. `(30 : ℝ)`),  # noqa: RUF003
+    # which can make a hypothesis like `hprod : 30 * (13 / 2) = 195` ambiguous when re-parsed as
+    # a lemma binder (Lean may default it to `Nat`). By mapping such hypotheses back to their
+    # original `have` types from the sketch AST, we preserve the intended types and make the
+    # standalone lemma binders round-trip safely.
+    rewritten: list[str] = []
+    for hyp in hypotheses:
+        if ":=" in hyp:
+            rewritten.append(hyp)
+            continue
+        if ":" not in hyp:
+            rewritten.append(hyp)
+            continue
+
+        lhs, _rhs = hyp.split(":", 1)
+        hyp_name = lhs.strip()
+        # Skip multi-name binders like "b h v : ℝ".  # noqa: RUF003
+        if not hyp_name or " " in hyp_name:
+            rewritten.append(hyp)
+            continue
+
+        try:
+            _n, have_type_str, _have_node = _extract_have_statement_info(ast, hyp_name)
+        except Exception:
+            rewritten.append(hyp)
+            continue
+
+        rewritten.append(f"{hyp_name} : {have_type_str}")
+
+    hypotheses = rewritten
+
     # Convert hypothesis strings to binder strings
     binder_strings = parse_hypothesis_strings_to_binders(hypotheses)
 

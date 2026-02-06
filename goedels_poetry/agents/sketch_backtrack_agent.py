@@ -8,6 +8,7 @@ from langgraph.types import Send
 from goedels_poetry.agents.state import DecomposedFormalTheoremState, DecomposedFormalTheoremStates
 from goedels_poetry.agents.util.common import _format_theorem_hints_section, load_prompt
 from goedels_poetry.agents.util.debug import log_llm_prompt
+from goedels_poetry.agents.util.state_isolation import detach_decomposed_theorem_state
 
 
 class SketchBacktrackAgentFactory:
@@ -66,7 +67,8 @@ def _map_edge(states: DecomposedFormalTheoremStates) -> list[Send]:
     list[Send]
         List of Send objects each indicating the their target node and its input, singular.
     """
-    return [Send("backtrack_agent", {"item": state}) for state in states["inputs"]]
+    # Fan out detached per-item payloads to avoid sharing cyclic proof-tree references.
+    return [Send("backtrack_agent", {"item": detach_decomposed_theorem_state(state)}) for state in states["inputs"]]
 
 
 def _backtrack(state: DecomposedFormalTheoremStates) -> DecomposedFormalTheoremStates:

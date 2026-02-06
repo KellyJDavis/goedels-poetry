@@ -2158,10 +2158,19 @@ class GoedelsPoetryStateManager:
                 if (
                     parsed_ast.get("error") is None
                     and parsed_ast.get("ast") is not None
-                    and "unsolved goals" not in test_check.get("data", "")
+                    and bool(test_check.get("pass", False))
                 ):
-                    # Syntax validation passed - use this strategy
-                    replacement_text = indent_strategy
+                    # Candidate strategy parses and has no check() errors.
+                    #
+                    # IMPORTANT: We still need to validate that the updated AST preserves the
+                    # remaining sorry holes (total hole count should decrease by exactly 1).
+                    # Some indentation strategies can change parsing structure such that remaining
+                    # `sorry` tokens are no longer represented as tactic-sorry nodes, which would
+                    # break subsequent replacements. Treat such cases as a strategy failure and
+                    # try the next strategy.
+                    original_result = result
+                    original_ast = ast
+                    original_outer_scope_vars = dict(outer_scope_vars)
 
                     # Update AST for subsequent replacements (AST is guaranteed to exist at this point)
 
@@ -2260,11 +2269,12 @@ class GoedelsPoetryStateManager:
 
                     # Verify hole count for this name decreased by 1
                     if len(updated_spans) != expected_remaining:
-                        raise ProofReconstructionError(  # noqa: TRY003
-                            f"After replacing hole {child_hole_name}, expected {expected_remaining} remaining holes, "
-                            f"but found {len(updated_spans)}. This indicates an AST inconsistency - the replaced hole "
-                            f"is not correctly reflected in the updated AST."
-                        )
+                        # Strategy produced an AST that doesn't reflect the replacement correctly.
+                        # Restore state and try the next indentation strategy.
+                        result = original_result
+                        ast = original_ast
+                        outer_scope_vars = original_outer_scope_vars
+                        continue
 
                     # Phase 3: Update outer_scope_vars with new variables from this replacement
                     # (for subsequent replacements)
@@ -2324,11 +2334,15 @@ class GoedelsPoetryStateManager:
                     total_holes_before = sum(len(spans) for spans in holes.values())
                     total_holes_after = sum(len(spans) for spans in updated_holes.values())
                     if total_holes_after != total_holes_before - 1:
-                        raise ProofReconstructionError(  # noqa: TRY003
-                            f"After replacing hole {child_hole_name}, total hole count changed incorrectly. "
-                            f"Expected {total_holes_before - 1} total holes, found {total_holes_after}. "
-                            f"This indicates an AST inconsistency."
-                        )
+                        # Strategy changed parsing such that remaining holes are no longer detected.
+                        # Restore state and try the next indentation strategy.
+                        result = original_result
+                        ast = original_ast
+                        outer_scope_vars = original_outer_scope_vars
+                        continue
+
+                    # All validation passed - commit this strategy.
+                    replacement_text = indent_strategy
 
                     # Increment occurrence index only after successful replacement
                     occurrence_indices[child_hole_name] += 1
@@ -2571,7 +2585,13 @@ class GoedelsPoetryStateManager:
             #
             # Verification: _parse_prover_response ALWAYS returns just the proof body
             # (verified via focused Python program - all tests passed)
-            return proof_text.strip()
+            #
+            # IMPORTANT: Preserve leading indentation.
+            # Many tactic bodies rely on alignment (e.g. nested `have ... := by` blocks where a later
+            # `apply h` must be aligned with the `have` line to be *outside* the nested `by` block).
+            # Stripping leading whitespace from only the first line (while leaving subsequent lines
+            # indented) breaks that relative structure and can make all indentation strategies fail.
+            return proof_text.rstrip()
 
         elif isinstance(child, dict) and "children" in child:
             # Internal node (DecomposedFormalTheoremState) - recursively reconstruct
