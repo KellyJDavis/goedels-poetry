@@ -1,9 +1,11 @@
+import re
 from functools import partial
 from typing import cast
 
 from kimina_client import KiminaClient
 from langgraph.graph import END, START, StateGraph
 from langgraph.graph.state import CompiledStateGraph
+from langgraph.types import Send
 
 from goedels_poetry.agents.state import FormalTheoremProofState, FormalTheoremProofStates
 from goedels_poetry.agents.util.common import (
@@ -13,6 +15,15 @@ from goedels_poetry.agents.util.common import (
 from goedels_poetry.agents.util.debug import log_kimina_response
 from goedels_poetry.agents.util.kimina_server import parse_kimina_check_response
 from goedels_poetry.agents.util.state_isolation import detach_formal_proof_state
+
+_DECL_NAME_IN_DECL_RE = re.compile(r"(?m)^\s*(?:private\s+)?(?:theorem|lemma|def|example)\s+([^\s(]+)")
+
+
+def _extract_decl_name_from_decl(decl: str) -> str | None:
+    match = _DECL_NAME_IN_DECL_RE.search(decl)
+    if match is None:
+        return None
+    return match.group(1)
 
 
 class ProofCheckerAgentFactory:
@@ -63,46 +74,34 @@ def _build_agent(server_url: str, server_max_retries: int, server_timeout: int) 
     # Create the proof checker agent state graph
     graph_builder = StateGraph(FormalTheoremProofStates)
 
-    # Bind the server related arguments of the batch checker.
-    bound_check_proofs = partial(_check_proofs_batch, server_url, server_max_retries, server_timeout)
+    # Bind the server related arguments of _check_proof
+    bound_check_proof = partial(_check_proof, server_url, server_max_retries, server_timeout)
 
     # Add the nodes
-    graph_builder.add_node("check_proof_agent", bound_check_proofs)
+    graph_builder.add_node("check_proof_agent", bound_check_proof)
 
     # Add the edges
-    # NOTE: We intentionally check proofs sequentially inside a single node.
-    #
-    # We have repeatedly observed cross-item state contamination when using LangGraph
-    # parallel fan-out with mutable TypedDict payloads.
-    graph_builder.add_edge(START, "check_proof_agent")
+    graph_builder.add_conditional_edges(START, _map_edge, ["check_proof_agent"])
     graph_builder.add_edge("check_proof_agent", END)
 
     return graph_builder.compile()
 
 
-def _check_proofs_batch(
-    server_url: str,
-    server_max_retries: int,
-    server_timeout: int,
-    states: FormalTheoremProofStates,
-) -> FormalTheoremProofStates:
+def _map_edge(states: FormalTheoremProofStates) -> list[Send]:
     """
-    Check all items in `states["inputs"]` sequentially.
+    Map edge that takes the members of the states["inputs"] list and dispers them to the
+    check_proof_agent nodes.
 
-    This avoids LangGraph parallel fan-out, which has caused cross-item state corruption in
-    this repository.
+    IMPORTANT: We send detached, acyclic per-item payloads to prevent shared mutable references
+    from cross-talking across parallel tasks.
     """
-    outputs: list[FormalTheoremProofState] = []
-    for input_state in states["inputs"]:
-        detached = detach_formal_proof_state(input_state)
-        one = _check_proof(
-            server_url,
-            server_max_retries,
-            server_timeout,
-            {"inputs": [], "outputs": [], "item": detached},
+    return [
+        Send(
+            "check_proof_agent",
+            {"inputs": [], "outputs": [], "item": detach_formal_proof_state(input_state)},
         )
-        outputs.extend(one["outputs"])
-    return {"outputs": outputs}  # type: ignore[typeddict-item]
+        for input_state in states["inputs"]
+    ]
 
 
 def _check_proof(
@@ -128,7 +127,7 @@ def _check_proof(
         A FormalTheoremProofStates with the FormalTheoremProofState with the proof checked added
         to the FormalTheoremProofStates "outputs" member.
     """
-    proof_state = cast(FormalTheoremProofState, state["item"])
+    proof_state = detach_formal_proof_state(cast(FormalTheoremProofState, state["item"]))
 
     # Create a client to access the Kimina Server
     kimina_client = KiminaClient(api_url=server_url, http_timeout=server_timeout, n_retries=server_max_retries)
@@ -136,6 +135,21 @@ def _check_proof(
     # Use the raw LLM output directly for validation
     # new_state["llm_lean_output"] contains the complete declaration from the LLM
     raw_output = str(proof_state["llm_lean_output"]) if proof_state["llm_lean_output"] else ""
+
+    # Guard against accepting a proof for the wrong declaration. An unrelated lemma can typecheck,
+    # causing a false "proved=True" that later fails structural extraction in the parser.
+    expected_decl_name = _extract_decl_name_from_decl(str(proof_state["formal_theorem"]))
+    if expected_decl_name:
+        expected_header_re = re.compile(
+            rf"(?m)^\s*(?:private\s+)?(?:theorem|lemma|def|example)\s+{re.escape(expected_decl_name)}(?=\s|\(|:)"
+        )
+        if not expected_header_re.search(raw_output):
+            actual_decl_name = _extract_decl_name_from_decl(raw_output)
+            proof_state["proved"] = False
+            proof_state["errors"] = f"LLM output does not contain expected declaration {expected_decl_name!r}." + (
+                f" Output declares {actual_decl_name!r}." if actual_decl_name else ""
+            )
+            return {"outputs": [proof_state]}  # type: ignore[typeddict-item]
 
     # Check the formal proof with the stored preamble prefix
     proof_with_imports = combine_preamble_and_body(str(proof_state["preamble"]), raw_output)

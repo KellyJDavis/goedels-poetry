@@ -4,6 +4,7 @@ Uses AST for structure, check() for scoping, preserves qualified names.
 """
 
 import copy
+import re
 import uuid
 from typing import TYPE_CHECKING, Any
 
@@ -207,20 +208,23 @@ def rename_conflicting_variables_ast_based(  # noqa: C901
     # We need to wrap it in a temporary lemma for parsing and variable extraction
     # This ensures the AST contains the declarations we need
     # IMPORTANT: Indent all non-empty lines of the proof body so they're part of the `by` block
-    # Preserve existing relative indentation by finding the minimum indentation and normalizing
+    # Preserve existing relative indentation by removing the *minimum* indentation first.
+    #
+    # IMPORTANT: Never left-strip each line individually. Doing so destroys relative indentation
+    # and can make later inlining fail (e.g., nested `have ... := by` blocks).
     lines = proof_body.split("\n")
-    if lines:
-        # Normalize: remove existing indentation, then add 2 spaces for the `by` block
-        indented_lines = []
-        for line in lines:
-            if line.strip():
-                # Remove existing indentation, add 2 spaces
-                indented_lines.append("  " + line.lstrip())
-            else:
-                indented_lines.append(line)
-        indented_body = "\n".join(indented_lines)
-    else:
-        indented_body = proof_body
+    non_empty = [ln for ln in lines if ln.strip()]
+    min_indent = min(len(ln) - len(ln.lstrip(" ")) for ln in non_empty) if non_empty else 0
+    indented_lines: list[str] = []
+    for line in lines:
+        if line.strip():
+            # Remove only the shared minimum indentation, then add 2 spaces for the `by` block.
+            # This keeps internal structure intact.
+            stripped = line[min_indent:] if min_indent and line.startswith(" " * min_indent) else line.lstrip(" ")
+            indented_lines.append("  " + stripped)
+        else:
+            indented_lines.append(line)
+    indented_body = "\n".join(indented_lines)
     temp_lemma = f"lemma _temp_ : True := by\n{indented_body}"
     temp_full = combine_preamble_and_body(DEFAULT_IMPORTS, temp_lemma)
     ast_response = kimina_client.ast_code(temp_full, timeout=server_timeout)
@@ -282,19 +286,26 @@ def rename_conflicting_variables_ast_based(  # noqa: C901
     # Use _extract_renamed_body to get the full lemma code, then extract just the body part
     renamed_code = _extract_renamed_body(renamed_ast)
 
-    # Extract body part (after "by")
-    # The renamed_code will be the full lemma, we need to extract the body
-    if renamed_code and "by" in renamed_code:
-        # Find the "by" and extract everything after it
-        by_index = renamed_code.find("by")
-        if by_index != -1:
-            # Skip "by" and any whitespace after it
-            body_start = by_index + 2
-            while body_start < len(renamed_code) and renamed_code[body_start] in " \n":
-                body_start += 1
-            renamed_code = renamed_code[body_start:].strip()
+    # Extract body part (after the lemma's `:= by\n`), preserving indentation.
+    if renamed_code:
+        match = re.search(r":=\s*by\s*\n", renamed_code)
+        if match is not None:
+            body = renamed_code[match.end() :].rstrip()
+            # Undo the temporary lemma wrapping indentation:
+            # - remove the 2-space `by`-block indent we added
+            # - re-apply the original minimum indentation so the returned body matches the input's shape
+            out_lines: list[str] = []
+            for line in body.split("\n"):
+                if not line.strip():
+                    out_lines.append(line)
+                    continue
+                if line.startswith("  "):
+                    line = line[2:]
+                out_lines.append((" " * min_indent) + line)
+            renamed_body = "\n".join(out_lines).rstrip()
+            return renamed_body if renamed_body else proof_body
 
-    return renamed_code if renamed_code else proof_body
+    return proof_body
 
 
 def _is_qualified_name(node: dict) -> bool:
