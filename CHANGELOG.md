@@ -5,6 +5,52 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.0.0] - 2026-02-07
+
+### Added
+- `llm_lean_output` on agent states to preserve the complete Lean code block returned by the LLM.
+- AST-based target signature extraction for proof and sketch parsers: canonical target signature derived from AST (strip comments and `:= by sorry`), fixing "Structural extraction failed for target signature" when `formal_theorem` contains docstrings or variants.
+- `extract_signature_from_ast()` and `_reconstruct_signature_from_decl_node()` in decl extraction for robust signature matching.
+- `is_no_usable_ast()` in `kimina_server.py` for dedicated Kimina parse-failure handling.
+- Phase 2: AST-based variable extraction and origin analysis (`variable_extraction.py`): `extract_variables_from_check_response()`, `extract_lemma_parameters_from_ast()`, `extract_variables_with_origin()`, `find_variable_declaration_in_ast()`, `extract_outer_scope_variables_ast_based()` using `check()` as source of truth.
+- Phase 3: AST-based variable conflict detection and renaming: `_identify_conflicts()`, `rename_conflicting_variables_ast_based()`, enhanced `is_intentional_shadowing()`; preserves qualified names and intentional shadowing.
+- Phase 4: AST-based function type and application detection: `is_function_type()`, `is_pi_or_forall_type()`, `find_subgoal_usage_in_ast()`, `is_app_node()`, `_analyze_proof_structure_ast_based()` integrated into proof reconstruction.
+- Required `id` on `TreeNode` and state nodes; proof tree children refactored from list to dict keyed by child id (`add_child`/`remove_child` helpers).
+- `item` field on `FormalTheoremProofState` and `DecomposedFormalTheoremState` for LangGraph Send fan-out to pass per-task payloads and avoid state contamination.
+- Per-invocation `transaction_id` in agent debug logging (`log_llm_prompt` / `log_llm_response` / `log_kimina_response`) for correlating prompt/response pairs.
+- CLI flags: debug-only `--decompose-first` and related formal theorem options.
+- Regression tests for indentation preservation, hypothesis type rewriting, prover code-block selection, sketch body alignment, and reconstruction behavior.
+- Python 3.11 workaround for kimina-ast-client/Pydantic TypedDict compatibility in `kimina_server.py` (TYPE_CHECKING + runtime fallback); documented in `PYTHON_3_11_COMPATIBILITY.md`.
+
+### Changed
+- Proof and sketch body extraction: replaced regex-based extraction with structural AST-guided extraction; parser agents use signature matching within the AST to isolate the correct body; checker agents validate using full code block (`llm_lean_output`).
+- Proof reconstruction: rewritten to be AST-native; uses AST-guided hole replacement and `check()`-based subgoal extraction; removed guided reconstruction variants.
+- Subgoal extraction: rewritten to use `check()` responses for theorem portions; handles `<main body>` subgoals.
+- State manager: `_reset_tree_root` replaced by `_reconstruct_tree` (map from node id to modified node, recursive replace by id); all `set_*` methods call `_reconstruct_tree` so in-memory root stays consistent with LangGraph mapreduce results.
+- Agents: copy state before mutating (shallow copy plus explicit copy of mutable fields such as `proof_history` or `decomposition_history`) and return the copy to avoid shared mutable state across LangGraph mapreduce.
+- Proof/sketch parser: store AST without default imports in state; use separate AST with imports for preamble extraction to avoid duplicating default preamble.
+- Decomposer prompt: added rule 11 (do not introduce preamble before the decomposed theorem).
+- Decl extraction: `_find_proof_body_node_structurally` fallback extended to recurse into `group` args via `_recursively_find_proof_node`.
+- Proof pipeline: LangGraph `Send` fan-out restored with detached per-item payloads; prover selects Lean code block declaring the expected lemma when LLM returns multiple blocks; proof checker defensively rejects outputs that don't declare the expected lemma; proof pipeline stages run sequentially inside a single node to avoid cross-item state contamination.
+- Standalone subgoal extraction: rewrite named-have hypothesis types from sketch AST to preserve coercions/types dropped by unsolved-goals pretty-printing; preserve leading indentation for leaf proof bodies; AST-guided hole replacement treats post-parse hole-count inconsistencies as strategy failures.
+- `DecomposedFormalTheoremState.proof_sketch` now stores full normalized sketch declaration (without preamble) to match AST body slice used during reconstruction.
+- Multiline hypothesis parsing fixed in unsolved goals.
+
+### Fixed
+- Proof body extraction: complete bodies (intro, have, let) from have statements; nested blocks and multiple declarations no longer cause parsing failures or incorrect reconstructions.
+- Subgoal extraction: handles theorem portions via `check()` responses; fixes subgoals where required binders were missing.
+- Proof reset routing and proof pipeline state isolation (no cross-item contamination).
+- Sketch parser `proof_sketch` body alignment with AST body slice (reconstruction validation).
+- Indentation preservation through `rename_conflicting_variables_ast_based` (normalize minimum shared indent, restore after wrapping/unwrapping temporary lemma).
+- Prover code-block selection when LLM returns multiple fenced blocks; proof checker rejects outputs that don't declare the expected lemma.
+- Type extraction for `let` statements in variable extraction and conflict detection.
+- Python 3.11 CI/test collection failure (kimina-ast-client TypedDict workaround).
+
+### Removed
+- Backward compatibility for full theorem declarations in `formal_proof`; production and tests use proof body only (tactics after `:= by`).
+- Legacy `strip_known_preamble` and regex heuristics from prover and proof_sketcher agents.
+- Kimina-guided reconstruction variant search; reconstruction is AST-native only.
+
 ## [1.4.3] - 2026-01-12
 
 ### Fixed
@@ -477,6 +523,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Typer for CLI
 - Rich for beautiful terminal output
 
+[2.0.0]: https://github.com/KellyJDavis/goedels-poetry/releases/tag/v2.0.0
 [1.4.3]: https://github.com/KellyJDavis/goedels-poetry/releases/tag/v1.4.3
 [1.4.2]: https://github.com/KellyJDavis/goedels-poetry/releases/tag/v1.4.2
 [1.4.1]: https://github.com/KellyJDavis/goedels-poetry/releases/tag/v1.4.1
