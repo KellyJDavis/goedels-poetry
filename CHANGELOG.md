@@ -5,6 +5,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.0.1] - 2026-02-07
+
+### Fixed
+- Proof parser failure when prover uses `theorem` vs `lemma` for subgoals: signature matching now treats declaration kind as equivalent when strict match fails (e.g. `numbertheory_4x3m7y3neq2003`).
+- Proof parser failure when target has space before `)` in binders: standalone lemma binders and signature matching normalized for closing-delimiter whitespace so tokenization aligns (e.g. `aime_1983_p1`, `hlogw_eq_24logx`).
+
+### Added
+- Two-stage matching in `extract_proof_body_from_ast()` (strict then lemma/theorem-equivalent); Stage C fallback matching after stripping whitespace before `)`, `]`, `}`.
+- Regression tests for signature matching with closing-delimiter whitespace and for fallback overmatch (`test_decl_extraction_robustness`).
+
+### Changed
+- Prover prompts (goedel-prover-v2-initial, goedel-prover-v2-subsequent): instruct model to use `lemma` for subgoals to align with decomposition output.
+- Subgoal and hypothesis extraction: strip whitespace when building binder strings so trailing spaces are not baked into standalone lemma binders.
+
 ## [2.0.0] - 2026-02-07
 
 ### Added
@@ -523,6 +537,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Typer for CLI
 - Rich for beautiful terminal output
 
+[2.0.1]: https://github.com/KellyJDavis/goedels-poetry/releases/tag/v2.0.1
 [2.0.0]: https://github.com/KellyJDavis/goedels-poetry/releases/tag/v2.0.0
 [1.4.3]: https://github.com/KellyJDavis/goedels-poetry/releases/tag/v1.4.3
 [1.4.2]: https://github.com/KellyJDavis/goedels-poetry/releases/tag/v1.4.2
