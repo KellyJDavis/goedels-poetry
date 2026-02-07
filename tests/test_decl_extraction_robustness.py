@@ -138,6 +138,29 @@ lemma target : True := by
         body = extract_proof_body_from_ast(ast, target_sig)
         assert body == "  trivial"
 
+    def test_signature_matching_closing_delim_whitespace_equivalence(self, kimina_server_url: str) -> None:
+        """Allow matching when target has whitespace before closing delimiters (e.g. `x )`)."""
+        code = f"""{DEFAULT_IMPORTS}
+theorem target (x : Nat) (hx : 1 < x) : True := by
+  trivial
+"""
+        ast = _create_ast(code, kimina_server_url)
+        # Note the space before `)` in `(hx : 1 < x )`
+        target_sig = "theorem target (x : Nat) (hx : 1 < x ) : True"
+        body = extract_proof_body_from_ast(ast, target_sig)
+        assert body == "  trivial"
+
+    def test_closing_delim_whitespace_fallback_does_not_overmatch(self, kimina_server_url: str) -> None:
+        """Ensure delimiter-whitespace relaxation does not match different statement types."""
+        code = f"""{DEFAULT_IMPORTS}
+theorem target (x : Nat) (hx : 1 < x) : True := by
+  trivial
+"""
+        ast = _create_ast(code, kimina_server_url)
+        target_sig = "theorem target (x : Nat) (hx : 1 < x ) : False"
+        body = extract_proof_body_from_ast(ast, target_sig)
+        assert body is None
+
 
 @pytest.mark.usefixtures("skip_if_no_lean")
 class TestExtractSignatureFromAst:
