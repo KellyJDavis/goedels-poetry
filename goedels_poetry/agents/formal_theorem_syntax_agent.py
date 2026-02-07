@@ -4,6 +4,7 @@ from typing import cast
 from kimina_client import KiminaClient
 from langgraph.graph import END, START, StateGraph
 from langgraph.graph.state import CompiledStateGraph
+from langgraph.types import Send
 
 from goedels_poetry.agents.state import FormalTheoremProofState, FormalTheoremProofStates
 from goedels_poetry.agents.util.common import combine_preamble_and_body
@@ -60,41 +61,34 @@ def _build_agent(server_url: str, server_max_retries: int, server_timeout: int) 
     # Create the formalizer agent state graph
     graph_builder = StateGraph(FormalTheoremProofStates)
 
-    # Bind the server related arguments of the batch syntax checker.
-    bound_check_syntaxes = partial(_check_syntaxes_batch, server_url, server_max_retries, server_timeout)
+    # Bind the server related arguments of check_syntax
+    bound_check_syntax = partial(_check_syntax, server_url, server_max_retries, server_timeout)
 
     # Add the nodes
-    graph_builder.add_node("syntax_agent", bound_check_syntaxes)
+    graph_builder.add_node("syntax_agent", bound_check_syntax)
 
     # Add the edges
-    # NOTE: We intentionally run sequentially inside a single node to avoid
-    # LangGraph parallel fan-out issues with mutable TypedDict payloads.
-    graph_builder.add_edge(START, "syntax_agent")
+    graph_builder.add_conditional_edges(START, _map_edge, ["syntax_agent"])
     graph_builder.add_edge("syntax_agent", END)
 
     return graph_builder.compile()
 
 
-def _check_syntaxes_batch(
-    server_url: str,
-    server_max_retries: int,
-    server_timeout: int,
-    states: FormalTheoremProofStates,
-) -> FormalTheoremProofStates:
+def _map_edge(states: FormalTheoremProofStates) -> list[Send]:
     """
-    Check syntax for all items in `states["inputs"]` sequentially.
+    Map edge that takes the members of the states["inputs"] list and dispers them to the
+    syntax_agent nodes.
+
+    IMPORTANT: We send detached, acyclic per-item payloads to prevent shared mutable references
+    from cross-talking across parallel tasks.
     """
-    outputs: list[FormalTheoremProofState] = []
-    for input_state in states["inputs"]:
-        detached = detach_formal_proof_state(input_state)
-        one = _check_syntax(
-            server_url,
-            server_max_retries,
-            server_timeout,
-            {"inputs": [], "outputs": [], "item": detached},
+    return [
+        Send(
+            "syntax_agent",
+            {"inputs": [], "outputs": [], "item": detach_formal_proof_state(input_state)},
         )
-        outputs.extend(one["outputs"])
-    return {"outputs": outputs}  # type: ignore[typeddict-item]
+        for input_state in states["inputs"]
+    ]
 
 
 def _check_syntax(
@@ -120,7 +114,7 @@ def _check_syntax(
         A FormalTheoremProofStates with the FormalTheoremProofState with the syntax checked added
         to the FormalTheoremProofStates "outputs" member.
     """
-    proof_state = cast(FormalTheoremProofState, state["item"])
+    proof_state = detach_formal_proof_state(cast(FormalTheoremProofState, state["item"]))
 
     # Create a client to access the Kimina Server
     kimina_client = KiminaClient(api_url=server_url, http_timeout=server_timeout, n_retries=server_max_retries)

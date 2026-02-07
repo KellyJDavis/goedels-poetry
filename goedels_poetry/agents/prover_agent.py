@@ -7,6 +7,7 @@ from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.messages import AIMessage, HumanMessage
 from langgraph.graph import END, START, StateGraph
 from langgraph.graph.state import CompiledStateGraph
+from langgraph.types import Send
 
 from goedels_poetry.agents.state import FormalTheoremProofState, FormalTheoremProofStates
 from goedels_poetry.agents.util.common import (
@@ -59,21 +60,33 @@ def _build_agent(llm: BaseChatModel) -> CompiledStateGraph:
     graph_builder = StateGraph(FormalTheoremProofStates)
 
     # Bind the llm argument of prover
-    bound_prover = partial(_prover_batch, llm)
+    bound_prover = partial(_prover, llm)
 
     # Add the nodes
     graph_builder.add_node("prover_agent", bound_prover)
 
     # Add the edges
-    # NOTE: We intentionally run the "map" sequentially inside the node.
-    #
-    # LangGraph parallel fan-out has repeatedly produced cross-item state contamination in this
-    # repository (LLM output from one subgoal attached to another). Running the batch locally
-    # keeps per-item mutation isolated and makes the pipeline deterministic.
-    graph_builder.add_edge(START, "prover_agent")
+    graph_builder.add_conditional_edges(START, _map_edge, ["prover_agent"])
     graph_builder.add_edge("prover_agent", END)
 
     return graph_builder.compile()
+
+
+def _map_edge(states: FormalTheoremProofStates) -> list[Send]:
+    """
+    Map edge that takes the members of the states["inputs"] list and dispers them to the
+    prover_agent nodes.
+
+    IMPORTANT: We send detached, acyclic per-item payloads to prevent shared mutable references
+    from cross-talking across parallel tasks.
+    """
+    return [
+        Send(
+            "prover_agent",
+            {"inputs": [], "outputs": [], "item": detach_formal_proof_state(input_state)},
+        )
+        for input_state in states["inputs"]
+    ]
 
 
 def _prove_one(llm: BaseChatModel, proof_state: FormalTheoremProofState) -> FormalTheoremProofState:
@@ -129,7 +142,11 @@ def _prove_one(llm: BaseChatModel, proof_state: FormalTheoremProofState) -> Form
 
     # Parse prover response
     try:
-        raw_code = _extract_code_block(str(response_content))
+        response_text = str(response_content)
+        expected_decl_name = _extract_decl_name_from_decl(str(proof_state["formal_theorem"]))
+        raw_code = _extract_code_block_for_decl(response_text, expected_decl_name) if expected_decl_name else None
+        if raw_code is None:
+            raw_code = _extract_code_block(response_text)
 
         # Store the raw LLM output in the new field
         proof_state["llm_lean_output"] = raw_code
@@ -151,17 +168,63 @@ def _prove_one(llm: BaseChatModel, proof_state: FormalTheoremProofState) -> Form
     return proof_state
 
 
-def _prover_batch(llm: BaseChatModel, states: FormalTheoremProofStates) -> FormalTheoremProofStates:
+def _prover(llm: BaseChatModel, state: FormalTheoremProofStates) -> FormalTheoremProofStates:
     """
-    Prove all items in `states["inputs"]` sequentially.
+    Prove the formal theorem in a single per-item state (from Send fan-out).
+    """
+    proof_state = detach_formal_proof_state(cast(FormalTheoremProofState, state["item"]))
+    proved = _prove_one(llm, proof_state)
+    return {"outputs": [proved]}  # type: ignore[typeddict-item]
 
-    This intentionally avoids LangGraph parallel fan-out to prevent cross-item state corruption.
+
+_DECL_NAME_IN_DECL_RE = re.compile(r"(?m)^\s*(?:private\s+)?(?:theorem|lemma|def|example)\s+([^\s(]+)")
+
+
+def _extract_decl_name_from_decl(decl: str) -> str | None:
     """
-    outputs: list[FormalTheoremProofState] = []
-    for input_state in states["inputs"]:
-        detached = detach_formal_proof_state(input_state)
-        outputs.append(_prove_one(llm, detached))
-    return {"outputs": outputs}  # type: ignore[typeddict-item]
+    Extract the declared name from a Lean declaration string.
+
+    This is intentionally heuristic (string-based) to avoid needing Kimina parsing in the prover.
+    """
+    match = _DECL_NAME_IN_DECL_RE.search(decl)
+    if match is None:
+        return None
+    return match.group(1)
+
+
+def _extract_code_block_for_decl(response: str, expected_decl_name: str) -> str | None:
+    """
+    Extract the last Lean code block that declares `expected_decl_name`.
+
+    The prover model occasionally returns multiple Lean code blocks (e.g. an intermediate lemma
+    or an alternate proof). Picking the last ` ```lean...``` ` block can therefore select the
+    wrong declaration. This helper selects a code block by the declaration name instead.
+    """
+    expected_decl_name = expected_decl_name.strip()
+    if not expected_decl_name:
+        return None
+
+    # Match a declaration header for the expected name.
+    header_re = re.compile(
+        rf"(?m)^\s*(?:private\s+)?(?:theorem|lemma|def|example)\s+{re.escape(expected_decl_name)}(?=\s|\(|:)"
+    )
+
+    # Prefer explicitly-labeled Lean code blocks; also allow unlabeled fences as a fallback.
+    patterns = (
+        re.compile(r"```lean4?\s*\n(.*?)\n?```", re.DOTALL | re.IGNORECASE),
+        re.compile(r"```\s*\n(.*?)\n?```", re.DOTALL),
+    )
+
+    candidates: list[str] = []
+    for pat in patterns:
+        for match in pat.finditer(response):
+            block = cast(str, match.group(1))
+            if header_re.search(block):
+                candidates.append(block)
+
+    if not candidates:
+        return None
+    return candidates[-1].strip()
 
 
 def _extract_code_block_fallback(response: str) -> str:

@@ -161,11 +161,15 @@ if IMPORTS_AVAILABLE:
                 server_url=kimina_server_url, server_max_retries=3, server_timeout=3600
             )
 
-            # Create input state (checker uses llm_lean_output as the code to check)
+            # Create input state.
+            #
+            # The checker uses `llm_lean_output` as the code to check, and it must declare the
+            # expected theorem/lemma name from `formal_theorem` (otherwise it would be possible
+            # to accept a proof for a different declaration).
             state = _make_formal_theorem_state(
                 SIMPLE_THEOREM,
-                formal_proof=VALID_LEAN_CODE,
-                overrides={"llm_lean_output": VALID_LEAN_CODE},
+                formal_proof=SIMPLE_THEOREM,
+                overrides={"llm_lean_output": SIMPLE_THEOREM},
             )
             input_states: FormalTheoremProofStates = {"inputs": [state], "outputs": []}
 

@@ -3,6 +3,8 @@ from __future__ import annotations
 import sys
 from typing import TYPE_CHECKING, Any, cast
 
+from goedels_poetry.parsers.util.hypothesis_extraction import extract_hypotheses_from_unsolved_goals_data
+
 # Workaround for Python 3.11 compatibility issue with kimina-ast-client
 # kimina-ast-client uses typing.TypedDict but Pydantic 2.11.9 requires
 # typing_extensions.TypedDict on Python < 3.12. We use lazy imports to
@@ -42,8 +44,6 @@ else:
         else:
             # Re-raise if it's a different error or different Python version
             raise
-
-from goedels_poetry.parsers.util.hypothesis_extraction import extract_hypotheses_from_unsolved_goals_data
 
 
 def parse_kimina_check_response(check_response: CheckResponse) -> dict:
