@@ -34,6 +34,20 @@ def _canonicalize_lemma_theorem(sig: str) -> str:
     return " ".join(out)
 
 
+def _remove_space_before_closing_delims(s: str) -> str:
+    """
+    Remove whitespace immediately before closing delimiters.
+
+    This defends against pretty-printing / token-trailing artifacts that can yield signatures like
+    `(hx : 1 < x )` (note the space before `)`) that are semantically identical to `(hx : 1 < x)`,
+    but fail token-based whitespace normalization.
+    """
+    out = str(s)
+    for delim in (")", "]", "}"):
+        out = out.replace(f" {delim}", delim)
+    return out
+
+
 def _is_comment_kind(kind: str) -> bool:
     """True if the node kind indicates a comment (docstring, block, or line comment)."""
     if not isinstance(kind, str):
@@ -224,6 +238,52 @@ def extract_proof_body_from_ast(ast: AST, target_signature: str) -> str | None: 
             str(matched_sig),
         )
         return _extract_tactics_from_proof_node(proof_node)
+
+    # Stage C: relaxed match for whitespace immediately before closing delimiters.
+    # This is intentionally narrow: we preserve strict matching unless no declaration matches.
+    def _relaxed_closing_delim_key(sig: str) -> str:
+        return _remove_space_before_closing_delims(_canonicalize_lemma_theorem(sig))
+
+    target_key = _relaxed_closing_delim_key(target_signature)
+    matching_proof_node: dict | None = None
+    matched_sig = None
+
+    for cmd in commands:
+        if not isinstance(cmd, dict):
+            continue
+
+        # Handle Lean.Parser.Command.declaration wrapper
+        target_node = cmd
+        kind = cmd.get("kind", "")
+        if kind == "Lean.Parser.Command.declaration":
+            args = cmd.get("args", [])
+            for arg in args:
+                if isinstance(arg, dict) and __is_theorem_or_lemma_kind(arg.get("kind")):
+                    target_node = arg
+                    break
+
+        decl_type = target_node.get("type") or cmd.get("type")
+        if decl_type and _relaxed_closing_delim_key(decl_type) == target_key:
+            proof_node = _find_proof_body_node_structurally(target_node)
+            if proof_node:
+                matching_proof_node = proof_node
+                matched_sig = str(decl_type)
+                continue
+
+        reconstructed_sig = _reconstruct_signature_from_decl_node(target_node, skip_comments=True)
+        if _relaxed_closing_delim_key(reconstructed_sig) == target_key:
+            proof_node = _find_proof_body_node_structurally(target_node)
+            if proof_node:
+                matching_proof_node = proof_node
+                matched_sig = reconstructed_sig
+
+    if matching_proof_node:
+        logger.debug(
+            "Signature match used closing-delimiter whitespace normalization. target=%r matched=%r",
+            str(target_signature),
+            str(matched_sig),
+        )
+        return _extract_tactics_from_proof_node(matching_proof_node)
 
     return None
 

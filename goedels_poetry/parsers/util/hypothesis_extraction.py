@@ -83,4 +83,6 @@ def parse_hypothesis_strings_to_binders(hypotheses: list[str]) -> list[str]:
         List of binder strings with parentheses (e.g., ["(n : Z)", "(hn : n > 1)"]).
         The order is preserved from the input list.
     """
-    return [f"({hypothesis})" for hypothesis in hypotheses]
+    # Strip leading/trailing whitespace so we don't synthesize binders like `(hx : 1 < x )`
+    # when the hypothesis type string ends with trailing spaces.
+    return [f"({hypothesis.strip()})" for hypothesis in hypotheses]

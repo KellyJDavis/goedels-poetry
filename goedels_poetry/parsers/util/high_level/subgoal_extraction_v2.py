@@ -213,7 +213,8 @@ def _extract_main_body_info(ast: AST) -> tuple[str, str]:
     type_ast = __extract_type_ast(theorem_node)
     if type_ast is not None:
         type_ast = __strip_leading_colon(type_ast)
-        type_str = _ast_to_code(type_ast)
+        # _ast_to_code preserves token trailing whitespace; strip to avoid types ending in " ... x ".
+        type_str = _ast_to_code(type_ast).strip()
     else:
         # Type extraction fallback: __extract_type_ast() returns None for:
         # - match bindings: Types are inferred from pattern matching, not in AST
@@ -255,7 +256,9 @@ def _extract_have_statement_info(ast: AST, target_subgoal_name: str) -> tuple[st
     type_ast = __extract_type_ast(have_node)
     if type_ast is not None:
         type_ast = __strip_leading_colon(type_ast)
-        type_str = _ast_to_code(type_ast)
+        # _ast_to_code preserves token trailing whitespace; strip to avoid types ending in " ... x ".
+        # These trailing spaces can later produce binders like `(hx : 1 < x )` when wrapped.
+        type_str = _ast_to_code(type_ast).strip()
     else:
         # Type extraction fallback: __extract_type_ast() returns None for:
         # - match bindings: Types are inferred from pattern matching, not in AST
