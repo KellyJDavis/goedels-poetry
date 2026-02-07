@@ -11,3 +11,5 @@ IMPORTANT: When you've completed your planning you should output your proof of t
 IMPORTANT: Your proof should actually prove the theorem or lemma using Lean 4 code. It should not contain sorry, admit, or any other Lean 4 tactics that indicate an incomplete proof.
 
 IMPORTANT: Your completion should contain ONLY the theorem/def and its proof. Do NOT include any import statements or preamble (like `import Mathlib`, `open`, `set_option`, `noncomputable section`, etc.) as these are already provided in the code above. Start directly with your theorem/definition/lemma declaration.
+
+IMPORTANT: Preserve the declaration header exactly as given (including whether it is `theorem` vs `lemma`, the declaration name, binders, and the statement type). Only change the proof body.
