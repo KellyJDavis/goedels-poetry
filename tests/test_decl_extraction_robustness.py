@@ -116,6 +116,28 @@ theorem target (x : Nat) : x = x := by rfl
         body = extract_proof_body_from_ast(ast, target_sig)
         assert body == " rfl"
 
+    def test_signature_matching_lemma_theorem_equivalence_target_is_lemma(self, kimina_server_url: str) -> None:
+        """Allow matching lemma target against theorem proof declaration."""
+        code = f"""{DEFAULT_IMPORTS}
+theorem target : True := by
+  trivial
+"""
+        ast = _create_ast(code, kimina_server_url)
+        target_sig = "lemma target : True"
+        body = extract_proof_body_from_ast(ast, target_sig)
+        assert body == "  trivial"
+
+    def test_signature_matching_lemma_theorem_equivalence_target_is_theorem(self, kimina_server_url: str) -> None:
+        """Allow matching theorem target against lemma proof declaration."""
+        code = f"""{DEFAULT_IMPORTS}
+lemma target : True := by
+  trivial
+"""
+        ast = _create_ast(code, kimina_server_url)
+        target_sig = "theorem target : True"
+        body = extract_proof_body_from_ast(ast, target_sig)
+        assert body == "  trivial"
+
 
 @pytest.mark.usefixtures("skip_if_no_lean")
 class TestExtractSignatureFromAst:

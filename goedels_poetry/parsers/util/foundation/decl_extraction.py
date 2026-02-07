@@ -1,8 +1,37 @@
 """Robust structural extraction of proof bodies and preambles from Lean 4 ASTs."""
 
+import logging
+
 from goedels_poetry.parsers.ast import AST
 from goedels_poetry.parsers.util.foundation.ast_to_code import _ast_to_code
 from goedels_poetry.parsers.util.foundation.kind_utils import __is_theorem_or_lemma_kind, __normalize_kind
+
+logger = logging.getLogger(__name__)
+
+
+def _ws_normalize(s: str) -> str:
+    """Collapse all whitespace runs to single spaces."""
+    return " ".join(str(s).strip().split())
+
+
+def _canonicalize_lemma_theorem(sig: str) -> str:
+    """
+    Canonicalize the declaration kind token for matching.
+
+    For signature-matching purposes, `lemma` and `theorem` are semantically interchangeable in Lean.
+    This helper replaces the first token equal to `lemma` or `theorem` (not necessarily the first
+    token overall, to allow for leading modifiers/attributes) with `theorem` and whitespace-normalizes.
+    """
+    tokens = str(sig).strip().split()
+    out: list[str] = []
+    replaced = False
+    for tok in tokens:
+        if not replaced and tok in {"lemma", "theorem"}:
+            out.append("theorem")
+            replaced = True
+        else:
+            out.append(tok)
+    return " ".join(out)
 
 
 def _is_comment_kind(kind: str) -> bool:
@@ -109,48 +138,92 @@ def extract_proof_body_from_ast(ast: AST, target_signature: str) -> str | None: 
     if not isinstance(ast_root, dict):
         return None
 
-    # We look for all matching declarations and take the last one
-    matching_proof_node = None
-
     # Traverse top-level commands
     commands = ast_root.get("commands", [])
     if not commands:
         commands = ast_root.get("args", [])
 
-    for cmd in commands:
-        if not isinstance(cmd, dict):
-            continue
+    def _find_last_matching_proof_node(*, allow_lemma_theorem_equivalence: bool) -> tuple[dict | None, str | None]:  # noqa: C901
+        """
+        Return the last proof-node whose declaration matches the target signature.
 
-        # Handle Lean.Parser.Command.declaration wrapper
-        target_node = cmd
-        kind = cmd.get("kind", "")
-        if kind == "Lean.Parser.Command.declaration":
-            # Inner declaration is usually the second argument after modifiers
-            args = cmd.get("args", [])
-            for arg in args:
-                if isinstance(arg, dict) and __is_theorem_or_lemma_kind(arg.get("kind")):
-                    target_node = arg
-                    break
+        Stage A (allow_lemma_theorem_equivalence=False) preserves the existing strict matching:
+        - Kimina `type` field: strip-only equality
+        - Reconstructed signature: whitespace-normalized equality
 
-        # Check for signature match
-        # 1. Try Kimina's 'type' field if it exists
-        decl_type = target_node.get("type") or cmd.get("type")
-        if decl_type and decl_type.strip() == target_signature.strip():
-            proof_node = _find_proof_body_node_structurally(target_node)
-            if proof_node:
-                matching_proof_node = proof_node
+        Stage B (allow_lemma_theorem_equivalence=True) relaxes only lemma/theorem differences by
+        canonicalizing the first occurrence of the tokens `lemma`/`theorem` (wherever they occur)
+        before comparison.
+        """
+        matching_proof_node: dict | None = None
+        matched_sig: str | None = None
+
+        if allow_lemma_theorem_equivalence:
+            target_key = _canonicalize_lemma_theorem(target_signature)
+        else:
+            target_key = _ws_normalize(target_signature)
+
+        for cmd in commands:
+            if not isinstance(cmd, dict):
                 continue
 
-        # 2. Fallback: Reconstruct signature text from AST and compare (skip_comments=True
-        #    so both sides are normalised; see plan 1.3 / 7.6)
-        reconstructed_sig = _reconstruct_signature_from_decl_node(target_node, skip_comments=True)
-        if " ".join(reconstructed_sig.split()) == " ".join(target_signature.split()):
-            proof_node = _find_proof_body_node_structurally(target_node)
-            if proof_node:
-                matching_proof_node = proof_node
+            # Handle Lean.Parser.Command.declaration wrapper
+            target_node = cmd
+            kind = cmd.get("kind", "")
+            if kind == "Lean.Parser.Command.declaration":
+                # Inner declaration is usually the second argument after modifiers
+                args = cmd.get("args", [])
+                for arg in args:
+                    if isinstance(arg, dict) and __is_theorem_or_lemma_kind(arg.get("kind")):
+                        target_node = arg
+                        break
 
-    if matching_proof_node:
-        return _extract_tactics_from_proof_node(matching_proof_node)
+            # Check for signature match
+            # 1) Try Kimina's 'type' field if it exists.
+            decl_type = target_node.get("type") or cmd.get("type")
+            if decl_type:
+                if allow_lemma_theorem_equivalence:
+                    matches = _canonicalize_lemma_theorem(decl_type) == target_key
+                else:
+                    matches = str(decl_type).strip() == str(target_signature).strip()
+
+                if matches:
+                    proof_node = _find_proof_body_node_structurally(target_node)
+                    if proof_node:
+                        matching_proof_node = proof_node
+                        matched_sig = str(decl_type)
+                        continue
+
+            # 2) Fallback: Reconstruct signature text from AST and compare (skip_comments=True
+            #    so both sides are normalised; see plan 1.3 / 7.6)
+            reconstructed_sig = _reconstruct_signature_from_decl_node(target_node, skip_comments=True)
+            if allow_lemma_theorem_equivalence:
+                matches = _canonicalize_lemma_theorem(reconstructed_sig) == target_key
+            else:
+                matches = " ".join(reconstructed_sig.split()) == " ".join(str(target_signature).split())
+
+            if matches:
+                proof_node = _find_proof_body_node_structurally(target_node)
+                if proof_node:
+                    matching_proof_node = proof_node
+                    matched_sig = reconstructed_sig
+
+        return matching_proof_node, matched_sig
+
+    # Stage A: strict match.
+    proof_node, _matched_sig = _find_last_matching_proof_node(allow_lemma_theorem_equivalence=False)
+    if proof_node:
+        return _extract_tactics_from_proof_node(proof_node)
+
+    # Stage B: relaxed match (lemma/theorem equivalence only) — used only if strict match fails.
+    proof_node, matched_sig = _find_last_matching_proof_node(allow_lemma_theorem_equivalence=True)
+    if proof_node:
+        logger.debug(
+            "Signature match used lemma/theorem equivalence. target=%r matched=%r",
+            str(target_signature),
+            str(matched_sig),
+        )
+        return _extract_tactics_from_proof_node(proof_node)
 
     return None
 
