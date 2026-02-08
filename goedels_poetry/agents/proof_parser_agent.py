@@ -13,6 +13,7 @@ from goedels_poetry.agents.util.common import (
     remove_default_imports_from_ast,
 )
 from goedels_poetry.agents.util.debug import log_kimina_response
+from goedels_poetry.agents.util.kimina_ast_utils import actionable_suffix, compute_body_start
 from goedels_poetry.agents.util.kimina_server import (
     is_no_usable_ast,
     parse_kimina_ast_code_response,
@@ -87,14 +88,6 @@ def _build_agent(server_url: str, server_max_retries: int, server_timeout: int) 
     return graph_builder.compile()
 
 
-def _actionable_suffix(parsed: dict, code_preview: str) -> str:
-    """Always include something actionable: error when present, else short preview (plan 2.3, 8.7)."""
-    err = parsed.get("error")
-    if err:
-        return f"; error: {err}"
-    return f"; preview: {code_preview[:200]!r}"
-
-
 def _map_edge(states: FormalTheoremProofStates) -> list[Send]:
     """
     Map edge that takes the members of the states["inputs"] list and dispers them to the
@@ -144,12 +137,7 @@ def _parse_proof(
     normalized_preamble = proof_state["preamble"].strip()
     normalized_formal = str(proof_state["formal_theorem"]).strip()
     formal_with_preamble = combine_preamble_and_body(normalized_preamble, normalized_formal)
-
-    if normalized_preamble and normalized_formal:
-        idx = formal_with_preamble.find(normalized_formal, len(normalized_preamble))
-        body_start_formal = idx if idx != -1 else len(normalized_preamble)
-    else:
-        body_start_formal = 0
+    body_start_formal = compute_body_start(normalized_preamble, normalized_formal, formal_with_preamble)
 
     ast_code_response_formal = kimina_client.ast_code(formal_with_preamble)
     parsed_formal = parse_kimina_ast_code_response(ast_code_response_formal)
@@ -157,7 +145,7 @@ def _parse_proof(
 
     if is_no_usable_ast(parsed_formal):
         raise ValueError(
-            "Kimina failed to parse formal theorem" + _actionable_suffix(parsed_formal, formal_with_preamble)
+            "Kimina failed to parse formal theorem" + actionable_suffix(parsed_formal, formal_with_preamble)
         )
 
     ast_formal = AST(
@@ -170,24 +158,20 @@ def _parse_proof(
     if target_sig is None:
         raise ValueError(
             "Could not extract signature from formal theorem AST"
-            + _actionable_suffix(parsed_formal, formal_with_preamble)
+            + actionable_suffix(parsed_formal, formal_with_preamble)
         )
 
     raw_output = str(proof_state["llm_lean_output"]) if proof_state["llm_lean_output"] else ""
     normalized_body = raw_output.strip()
     proof_with_imports = combine_preamble_and_body(normalized_preamble, normalized_body)
-    if normalized_preamble and normalized_body:
-        idx = proof_with_imports.find(normalized_body, len(normalized_preamble))
-        body_start = idx if idx != -1 else len(normalized_preamble)
-    else:
-        body_start = 0
+    body_start = compute_body_start(normalized_preamble, normalized_body, proof_with_imports)
 
     ast_code_response = kimina_client.ast_code(proof_with_imports)
     parsed_response = parse_kimina_ast_code_response(ast_code_response)
     log_kimina_response(f"ast_code ({transaction_id})", parsed_response)
 
     if is_no_usable_ast(parsed_response):
-        raise ValueError("Kimina failed to parse proof" + _actionable_suffix(parsed_response, proof_with_imports))
+        raise ValueError("Kimina failed to parse proof" + actionable_suffix(parsed_response, proof_with_imports))
 
     proof_ast_without_imports = remove_default_imports_from_ast(parsed_response["ast"], preamble=normalized_preamble)
     ast = AST(

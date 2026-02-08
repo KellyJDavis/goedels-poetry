@@ -7,10 +7,153 @@ from langgraph.graph.state import CompiledStateGraph
 from langgraph.types import Send
 
 from goedels_poetry.agents.state import DecomposedFormalTheoremState, DecomposedFormalTheoremStates
-from goedels_poetry.agents.util.common import combine_preamble_and_body, get_error_str
+from goedels_poetry.agents.util.common import (
+    combine_preamble_and_body,
+    get_error_str,
+    remove_default_imports_from_ast,
+)
 from goedels_poetry.agents.util.debug import log_kimina_response
-from goedels_poetry.agents.util.kimina_server import parse_kimina_check_response
+from goedels_poetry.agents.util.kimina_ast_utils import (
+    actionable_suffix,
+    ast_code_parsed,
+    compute_body_start,
+)
+from goedels_poetry.agents.util.kimina_server import (
+    is_no_usable_ast,
+    parse_kimina_check_response,
+)
 from goedels_poetry.agents.util.state_isolation import detach_decomposed_theorem_state
+from goedels_poetry.parsers.ast import AST
+from goedels_poetry.parsers.util.foundation.decl_extraction import (
+    extract_proof_body_from_ast,
+    extract_signature_from_ast,
+)
+
+
+def _mark_unsyntactic_with_error(theorem_state: DecomposedFormalTheoremState, message: str) -> None:
+    """
+    Mark a sketch-state as syntactically invalid and clear derived parse artifacts.
+
+    This is used when the sketch *typechecks* but is malformed for downstream structural parsing.
+    """
+    theorem_state["syntactic"] = False
+    theorem_state["proof_sketch"] = None
+    theorem_state["ast"] = None
+    theorem_state["errors"] = message
+
+
+def _try_extract_target_signature(
+    *,
+    kimina_client: KiminaClient,
+    server_timeout: int,
+    normalized_preamble: str,
+    formal_theorem: str,
+) -> str | None:
+    normalized_formal = str(formal_theorem).strip()
+    formal_with_preamble = combine_preamble_and_body(normalized_preamble, normalized_formal)
+    body_start_formal = compute_body_start(normalized_preamble, normalized_formal, formal_with_preamble)
+
+    parsed_formal, err = ast_code_parsed(
+        kimina_client,
+        formal_with_preamble,
+        server_timeout=server_timeout,
+        log_label="ast_code_formal",
+        log_fn=log_kimina_response,
+    )
+    if err is not None or parsed_formal is None or is_no_usable_ast(parsed_formal):
+        return None
+
+    try:
+        ast_formal = AST(
+            parsed_formal["ast"],
+            sorries=parsed_formal.get("sorries"),
+            source_text=formal_with_preamble,
+            body_start=body_start_formal,
+        )
+    except Exception:
+        return None
+
+    return extract_signature_from_ast(ast_formal)
+
+
+def _maybe_flag_downstream_parser_errors(
+    *,
+    theorem_state: DecomposedFormalTheoremState,
+    kimina_client: KiminaClient,
+    server_timeout: int,
+    raw_output: str,
+) -> None:
+    """
+    If the sketch otherwise passes Kimina (`syntactic=True` and no compilation errors), ensure it
+    is parseable and structurally extractable by the downstream parser.
+
+    On failure, mutate `theorem_state` to `syntactic=False` with an error string to allow correction.
+    Never raises.
+    """
+    if not (theorem_state["syntactic"] and theorem_state["errors"] == ""):
+        return
+
+    normalized_preamble = str(theorem_state["preamble"]).strip()
+    normalized_body = str(raw_output).strip()
+    normalized_sketch_with_imports = combine_preamble_and_body(normalized_preamble, normalized_body)
+    body_start = compute_body_start(normalized_preamble, normalized_body, normalized_sketch_with_imports)
+
+    # Parser exceptional condition (line ~190): Kimina failed to parse proof AST.
+    parsed_ast, err = ast_code_parsed(
+        kimina_client,
+        normalized_sketch_with_imports,
+        server_timeout=server_timeout,
+        log_label="ast_code",
+        log_fn=log_kimina_response,
+    )
+    if err is not None:
+        _mark_unsyntactic_with_error(theorem_state, f"Kimina failed to parse proof; error: {err}")
+        return
+
+    if parsed_ast is None or is_no_usable_ast(parsed_ast):
+        _mark_unsyntactic_with_error(
+            theorem_state,
+            "Kimina failed to parse proof" + actionable_suffix(parsed_ast or {}, normalized_sketch_with_imports),
+        )
+        return
+
+    # Parser exceptional condition (line ~202): structural extraction failed.
+    target_sig = _try_extract_target_signature(
+        kimina_client=kimina_client,
+        server_timeout=server_timeout,
+        normalized_preamble=normalized_preamble,
+        formal_theorem=str(theorem_state["formal_theorem"]),
+    )
+    if target_sig is None:
+        return
+
+    try:
+        sketch_ast_without_imports = remove_default_imports_from_ast(parsed_ast["ast"], preamble=normalized_preamble)
+        ast = AST(
+            sketch_ast_without_imports,
+            sorries=parsed_ast.get("sorries"),
+            source_text=normalized_sketch_with_imports,
+            body_start=body_start,
+        )
+        extracted_sketch = extract_proof_body_from_ast(ast, target_sig)
+    except Exception as e:
+        _mark_unsyntactic_with_error(
+            theorem_state,
+            (
+                f"Structural extraction failed for target signature: {target_sig}; error: {e!r}; "
+                f"preview: {normalized_sketch_with_imports[:200]!r}"
+            ),
+        )
+        return
+
+    if extracted_sketch is None:
+        _mark_unsyntactic_with_error(
+            theorem_state,
+            (
+                f"Structural extraction failed for target signature: {target_sig}; "
+                f"preview: {normalized_sketch_with_imports[:200]!r}"
+            ),
+        )
 
 
 class SketchCheckerAgentFactory:
@@ -142,6 +285,13 @@ def _check_sketch(
     # Update the state with the formatted error string
     # Note: get_error_str expects the code with DEFAULT_IMPORTS for proper line number handling
     theorem_state["errors"] = get_error_str(sketch_with_imports, parsed_response.get("errors", []), False)
+
+    _maybe_flag_downstream_parser_errors(
+        theorem_state=theorem_state,
+        kimina_client=kimina_client,
+        server_timeout=server_timeout,
+        raw_output=raw_output,
+    )
 
     # Return a DecomposedFormalTheoremStates with state added to its outputs
     return {"outputs": [theorem_state]}  # type: ignore[typeddict-item]

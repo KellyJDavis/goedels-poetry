@@ -10,6 +10,7 @@ from langgraph.types import Send
 from goedels_poetry.agents.state import DecomposedFormalTheoremState, DecomposedFormalTheoremStates
 from goedels_poetry.agents.util.common import combine_preamble_and_body, remove_default_imports_from_ast
 from goedels_poetry.agents.util.debug import log_kimina_response
+from goedels_poetry.agents.util.kimina_ast_utils import actionable_suffix, compute_body_start
 from goedels_poetry.agents.util.kimina_server import (
     is_no_usable_ast,
     parse_kimina_ast_code_response,
@@ -104,14 +105,6 @@ def _map_edge(states: DecomposedFormalTheoremStates) -> list[Send]:
     return [Send("parser_agent", {"item": detach_decomposed_theorem_state(state)}) for state in states["inputs"]]
 
 
-def _actionable_suffix(parsed: dict, code_preview: str) -> str:
-    """Always include something actionable: error when present, else short preview (plan 2.3, 8.7)."""
-    err = parsed.get("error")
-    if err:
-        return f"; error: {err}"
-    return f"; preview: {code_preview[:200]!r}"
-
-
 def _parse_sketch(
     server_url: str, server_max_retries: int, server_timeout: int, state: DecomposedFormalTheoremStates
 ) -> DecomposedFormalTheoremStates:
@@ -144,12 +137,7 @@ def _parse_sketch(
     normalized_preamble = theorem_state["preamble"].strip()
     normalized_formal = str(theorem_state["formal_theorem"]).strip()
     formal_with_preamble = combine_preamble_and_body(normalized_preamble, normalized_formal)
-
-    if normalized_preamble and normalized_formal:
-        idx = formal_with_preamble.find(normalized_formal, len(normalized_preamble))
-        body_start_formal = idx if idx != -1 else len(normalized_preamble)
-    else:
-        body_start_formal = 0
+    body_start_formal = compute_body_start(normalized_preamble, normalized_formal, formal_with_preamble)
 
     ast_code_response_formal = kimina_client.ast_code(formal_with_preamble)
     parsed_formal = parse_kimina_ast_code_response(ast_code_response_formal)
@@ -157,7 +145,7 @@ def _parse_sketch(
 
     if is_no_usable_ast(parsed_formal):
         raise ValueError(
-            "Kimina failed to parse formal theorem" + _actionable_suffix(parsed_formal, formal_with_preamble)
+            "Kimina failed to parse formal theorem" + actionable_suffix(parsed_formal, formal_with_preamble)
         )
 
     ast_formal = AST(
@@ -170,24 +158,20 @@ def _parse_sketch(
     if target_sig is None:
         raise ValueError(
             "Could not extract signature from formal theorem AST"
-            + _actionable_suffix(parsed_formal, formal_with_preamble)
+            + actionable_suffix(parsed_formal, formal_with_preamble)
         )
 
     raw_output = str(theorem_state["llm_lean_output"]) if theorem_state["llm_lean_output"] else ""
     normalized_body = raw_output.strip()
     sketch_with_imports = combine_preamble_and_body(normalized_preamble, normalized_body)
-    if normalized_preamble and normalized_body:
-        idx = sketch_with_imports.find(normalized_body, len(normalized_preamble))
-        body_start = idx if idx != -1 else len(normalized_preamble)
-    else:
-        body_start = 0
+    body_start = compute_body_start(normalized_preamble, normalized_body, sketch_with_imports)
 
     ast_code_response = kimina_client.ast_code(sketch_with_imports)
     parsed_response = parse_kimina_ast_code_response(ast_code_response)
     log_kimina_response(f"ast_code ({transaction_id})", parsed_response)
 
     if is_no_usable_ast(parsed_response):
-        raise ValueError("Kimina failed to parse proof" + _actionable_suffix(parsed_response, sketch_with_imports))
+        raise ValueError("Kimina failed to parse proof" + actionable_suffix(parsed_response, sketch_with_imports))
 
     sketch_ast_without_imports = remove_default_imports_from_ast(parsed_response["ast"], preamble=normalized_preamble)
     ast = AST(
