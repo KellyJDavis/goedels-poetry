@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import sys
+import types
 from dataclasses import dataclass
 
 import pytest
@@ -24,11 +26,60 @@ class _FakeKiminaClient:
         return _FakeAstModuleResponse(results=[self._queue.pop(0)])
 
 
+def _clear_modules(monkeypatch: pytest.MonkeyPatch, module_names: list[str]) -> None:
+    for name in module_names:
+        monkeypatch.delitem(sys.modules, name, raising=False)
+
+
+def _install_kimina_stub(monkeypatch: pytest.MonkeyPatch) -> None:
+    """
+    Install a stub kimina_client module (and its .models) before importing agents.
+
+    The real `kimina_client` dependency can raise a Pydantic TypedDict compatibility error during
+    import on Python < 3.12. Many unit tests avoid this by stubbing `kimina_client` before importing
+    agent modules that reference it.
+    """
+    _clear_modules(
+        monkeypatch,
+        [
+            "kimina_client",
+            "kimina_client.models",
+            "goedels_poetry.agents.util.kimina_server",
+            "goedels_poetry.agents.util.kimina_ast_utils",
+            "goedels_poetry.agents.proof_checker_agent",
+            "goedels_poetry.agents.sketch_checker_agent",
+        ],
+    )
+
+    kimina_mod = types.ModuleType("kimina_client")
+
+    class _StubKiminaClient:  # minimal placeholder for imports
+        def __init__(self, *args: object, **kwargs: object) -> None:
+            pass
+
+    kimina_mod.KiminaClient = _StubKiminaClient
+
+    models_mod = types.ModuleType("kimina_client.models")
+
+    class _StubAstModuleResponse:  # minimal placeholder
+        def __init__(self, results: object) -> None:
+            self.results = results
+
+    models_mod.AstModuleResponse = _StubAstModuleResponse
+    models_mod.CheckResponse = object
+    models_mod.CommandResponse = dict
+    models_mod.Message = dict
+
+    monkeypatch.setitem(sys.modules, "kimina_client", kimina_mod)
+    monkeypatch.setitem(sys.modules, "kimina_client.models", models_mod)
+
+
 def test_proof_checker_flags_kimina_ast_parse_failure(monkeypatch: pytest.MonkeyPatch) -> None:
     """
     If the proof otherwise 'passes' (proved=True, errors="") but ast_code is unusable,
     the checker should flip proved=False and set an error instead of letting the parser raise.
     """
+    _install_kimina_stub(monkeypatch)
     from goedels_poetry.agents import proof_checker_agent as mod
 
     proof_state = {
@@ -61,7 +112,8 @@ def test_proof_checker_flags_kimina_ast_parse_failure(monkeypatch: pytest.Monkey
     assert "Kimina failed to parse proof" in proof_state["errors"]
 
 
-def test_sketch_checker_flags_kimina_ast_parse_failure() -> None:
+def test_sketch_checker_flags_kimina_ast_parse_failure(monkeypatch: pytest.MonkeyPatch) -> None:
+    _install_kimina_stub(monkeypatch)
     from goedels_poetry.agents import sketch_checker_agent as mod
 
     theorem_state = {
@@ -98,6 +150,7 @@ def test_proof_checker_flags_structural_extraction_failure(monkeypatch: pytest.M
     If ast_code succeeds but structural extraction fails (extract_proof_body_from_ast returns None),
     the checker should flip proved=False and set a structural-extraction error.
     """
+    _install_kimina_stub(monkeypatch)
     from goedels_poetry.agents import proof_checker_agent as mod
 
     # Patch signature extraction so the structural check is exercised on dummy ASTs.
