@@ -11,10 +11,24 @@ from goedels_poetry.agents.state import FormalTheoremProofState, FormalTheoremPr
 from goedels_poetry.agents.util.common import (
     combine_preamble_and_body,
     get_error_str,
+    remove_default_imports_from_ast,
 )
 from goedels_poetry.agents.util.debug import log_kimina_response
-from goedels_poetry.agents.util.kimina_server import parse_kimina_check_response
+from goedels_poetry.agents.util.kimina_ast_utils import (
+    actionable_suffix,
+    ast_code_parsed,
+    compute_body_start,
+)
+from goedels_poetry.agents.util.kimina_server import (
+    is_no_usable_ast,
+    parse_kimina_check_response,
+)
 from goedels_poetry.agents.util.state_isolation import detach_formal_proof_state
+from goedels_poetry.parsers.ast import AST
+from goedels_poetry.parsers.util.foundation.decl_extraction import (
+    extract_proof_body_from_ast,
+    extract_signature_from_ast,
+)
 
 _DECL_NAME_IN_DECL_RE = re.compile(r"(?m)^\s*(?:private\s+)?(?:theorem|lemma|def|example)\s+([^\s(]+)")
 
@@ -24,6 +38,132 @@ def _extract_decl_name_from_decl(decl: str) -> str | None:
     if match is None:
         return None
     return match.group(1)
+
+
+def _mark_unproved_with_error(proof_state: FormalTheoremProofState, message: str) -> None:
+    """
+    Mark a proof-state as unsuccessful and clear derived parse artifacts.
+
+    This is used when the proof *typechecks* but is malformed for downstream structural parsing.
+    """
+    proof_state["proved"] = False
+    proof_state["formal_proof"] = None
+    proof_state["ast"] = None
+    proof_state["errors"] = message
+
+
+def _try_extract_target_signature(
+    *,
+    kimina_client: KiminaClient,
+    server_timeout: int,
+    normalized_preamble: str,
+    formal_theorem: str,
+) -> str | None:
+    normalized_formal = str(formal_theorem).strip()
+    formal_with_preamble = combine_preamble_and_body(normalized_preamble, normalized_formal)
+    body_start_formal = compute_body_start(normalized_preamble, normalized_formal, formal_with_preamble)
+
+    parsed_formal, err = ast_code_parsed(
+        kimina_client,
+        formal_with_preamble,
+        server_timeout=server_timeout,
+        log_label="ast_code_formal",
+        log_fn=log_kimina_response,
+    )
+    if err is not None or parsed_formal is None or is_no_usable_ast(parsed_formal):
+        return None
+
+    try:
+        ast_formal = AST(
+            parsed_formal["ast"],
+            sorries=parsed_formal.get("sorries"),
+            source_text=formal_with_preamble,
+            body_start=body_start_formal,
+        )
+    except Exception:
+        return None
+
+    return extract_signature_from_ast(ast_formal)
+
+
+def _maybe_flag_downstream_parser_errors(
+    *,
+    proof_state: FormalTheoremProofState,
+    kimina_client: KiminaClient,
+    server_timeout: int,
+    raw_output: str,
+) -> None:
+    """
+    If the proof otherwise passes Kimina (`proved=True` and no compilation errors), ensure it is
+    parseable and structurally extractable by the downstream parser.
+
+    On failure, mutate `proof_state` to `proved=False` with an error string to allow self-correction.
+    Never raises.
+    """
+    if not (proof_state["proved"] and proof_state["errors"] == ""):
+        return
+
+    normalized_preamble = str(proof_state["preamble"]).strip()
+    normalized_body = str(raw_output).strip()
+    normalized_proof_with_imports = combine_preamble_and_body(normalized_preamble, normalized_body)
+    body_start = compute_body_start(normalized_preamble, normalized_body, normalized_proof_with_imports)
+
+    # Parser exceptional condition (line ~190): Kimina failed to parse proof AST.
+    parsed_ast, err = ast_code_parsed(
+        kimina_client,
+        normalized_proof_with_imports,
+        server_timeout=server_timeout,
+        log_label="ast_code",
+        log_fn=log_kimina_response,
+    )
+    if err is not None:
+        _mark_unproved_with_error(proof_state, f"Kimina failed to parse proof; error: {err}")
+        return
+
+    if parsed_ast is None or is_no_usable_ast(parsed_ast):
+        _mark_unproved_with_error(
+            proof_state,
+            "Kimina failed to parse proof" + actionable_suffix(parsed_ast or {}, normalized_proof_with_imports),
+        )
+        return
+
+    # Parser exceptional condition (line ~202): structural extraction failed.
+    target_sig = _try_extract_target_signature(
+        kimina_client=kimina_client,
+        server_timeout=server_timeout,
+        normalized_preamble=normalized_preamble,
+        formal_theorem=str(proof_state["formal_theorem"]),
+    )
+    if target_sig is None:
+        return
+
+    try:
+        proof_ast_without_imports = remove_default_imports_from_ast(parsed_ast["ast"], preamble=normalized_preamble)
+        ast = AST(
+            proof_ast_without_imports,
+            sorries=parsed_ast.get("sorries"),
+            source_text=normalized_proof_with_imports,
+            body_start=body_start,
+        )
+        extracted_proof = extract_proof_body_from_ast(ast, target_sig)
+    except Exception as e:
+        _mark_unproved_with_error(
+            proof_state,
+            (
+                f"Structural extraction failed for target signature: {target_sig}; error: {e!r}; "
+                f"preview: {normalized_proof_with_imports[:200]!r}"
+            ),
+        )
+        return
+
+    if extracted_proof is None:
+        _mark_unproved_with_error(
+            proof_state,
+            (
+                f"Structural extraction failed for target signature: {target_sig}; "
+                f"preview: {normalized_proof_with_imports[:200]!r}"
+            ),
+        )
 
 
 class ProofCheckerAgentFactory:
@@ -168,6 +308,13 @@ def _check_proof(
     # Update the state with the error string formatted for Goedel-Prover-V2 use
     # Note: get_error_str expects the code with DEFAULT_IMPORTS for proper line number handling
     proof_state["errors"] = get_error_str(proof_with_imports, parsed_response.get("errors", []), False)
+
+    _maybe_flag_downstream_parser_errors(
+        proof_state=proof_state,
+        kimina_client=kimina_client,
+        server_timeout=server_timeout,
+        raw_output=raw_output,
+    )
 
     # Return a FormalTheoremProofStates with state added to its outputs
     return {"outputs": [proof_state]}  # type: ignore[typeddict-item]

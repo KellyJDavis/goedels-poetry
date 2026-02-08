@@ -282,8 +282,10 @@ if IMPORTS_AVAILABLE:
             # Sketch checker uses llm_lean_output as the code to check.
             state = _make_decomposed_theorem_state(
                 SIMPLE_THEOREM,
-                proof_sketch=VALID_LEAN_CODE,
-                overrides={"llm_lean_output": VALID_LEAN_CODE},
+                # Use a sketch that declares the expected theorem; otherwise downstream structural
+                # extraction (used by sketch_parser_agent) can fail even when the code typechecks.
+                proof_sketch=SIMPLE_THEOREM,
+                overrides={"llm_lean_output": SIMPLE_THEOREM},
             )
             input_states: DecomposedFormalTheoremStates = {"inputs": [state], "outputs": []}
 
