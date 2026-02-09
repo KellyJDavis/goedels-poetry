@@ -2564,6 +2564,7 @@ class GoedelsPoetryStateManager:
         from goedels_poetry.parsers.ast import AST
         from goedels_poetry.parsers.util.foundation.decl_extraction import (
             extract_proof_body_from_ast,
+            extract_signature_from_ast,
         )
 
         if isinstance(child, dict) and "formal_proof" in child and "children" not in child:
@@ -2607,10 +2608,12 @@ class GoedelsPoetryStateManager:
             # Note: decomposed_state.get("ast") is the AST of the sketch (with sorry holes), not the reconstructed proof.
             # We need to re-parse complete_proof to get its AST for accurate extraction.
             #
-            # Important: complete_proof from _reconstruct_node_proof_ast_based() for decomposed nodes is always just the
-            # proof body (reconstructed sketch with holes replaced), NOT a full theorem declaration. This is because
-            # _reconstruct_node_proof_ast_based() only wraps with theorem signature for root LEAF nodes (not root decomposed nodes).
-            # So we correctly combine it with preamble for re-parsing.
+            # Important: For decomposed nodes, `_reconstruct_node_proof_ast_based()` returns the reconstructed
+            # sketch *body* (i.e. the full theorem/lemma declaration without the preamble), because
+            # `DecomposedFormalTheoremState["proof_sketch"]` stores the complete declaration body.
+            #
+            # We combine it with the node's preamble so Kimina can parse it and we can structurally
+            # extract the tactics after `:= by`.
             #
             # Get preamble from decomposed_state for combining with complete_proof for parsing
             preamble = decomposed_state.get("preamble", DEFAULT_IMPORTS)
@@ -2656,7 +2659,16 @@ class GoedelsPoetryStateManager:
                 )
 
                 # Use robust AST-based extraction from decl_extraction.py
-                target_sig = str(decomposed_state["formal_theorem"]).strip()
+                # IMPORTANT: `extract_proof_body_from_ast` matches against the *signature only*
+                # (up to but not including `:=`). Many internal nodes store `formal_theorem` as a
+                # full declaration with `:= by ...`, so we compute the signature from the AST we
+                # just parsed to avoid brittle string matching.
+                target_sig = extract_signature_from_ast(reconstructed_ast)
+                if target_sig is None:
+                    raise ProofReconstructionError(  # noqa: TRY003
+                        "Could not extract a theorem/lemma signature from reconstructed AST for internal node with "
+                        f"formal_theorem: {decomposed_state.get('formal_theorem')!r}"
+                    )
                 proof_body = extract_proof_body_from_ast(reconstructed_ast, target_sig)
                 if proof_body is not None and proof_body.strip():
                     # Successfully extracted using AST
