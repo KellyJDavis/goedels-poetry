@@ -363,11 +363,29 @@ def _extract_tactics_from_proof_node(proof_node: dict) -> str:
                 info = by_args[0].get("info", {})
                 trailing = info.get("trailing", "")
                 next_line_indent = trailing.lstrip("\n")
-            return next_line_indent + _ast_to_code(by_args[1]).strip()
+            # IMPORTANT: Do NOT `.strip()` the tactic body.
+            #
+            # `.strip()` removes leading spaces from only the *first* line (subsequent lines keep
+            # their indentation since they're preceded by `\n`). For proofs with multiple aligned
+            # top-level tactics (e.g. multiple `have ... := by` blocks), that breaks relative
+            # indentation and can later make inlining/reconstruction fail with
+            # "All indentation strategies failed".
+            #
+            # When Kimina doesn't include indentation spaces in the `by` token's trailing
+            # (`next_line_indent == ""`), stripping is especially harmful: we would drop the first
+            # line's indentation and incorrectly nest later tactics.
+            tactics = _ast_to_code(by_args[1])
+            tactics = tactics.lstrip("\n").rstrip()
+            if next_line_indent:
+                # Preserve existing relative structure by only normalizing the *first line*'s
+                # indentation, then prefixing the indentation extracted from `by`.
+                tactics = tactics.lstrip(" \t")
+                return next_line_indent + tactics
+            return tactics
     elif kind == "Lean.Parser.Tactic.tacticSeq":
-        return _ast_to_code(proof_node).strip()
+        return _ast_to_code(proof_node).lstrip("\n").rstrip()
 
-    return _ast_to_code(proof_node).strip()
+    return _ast_to_code(proof_node).lstrip("\n").rstrip()
 
 
 def extract_preamble_from_ast(ast: AST) -> str:  # noqa: C901
