@@ -5,6 +5,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.0.2] - 2026-02-09
+
+### Added
+- Checker agents now detect malformed LLM Lean output (unusable Kimina AST and structural extraction failure) and surface them as correctable errors instead of letting parser agents raise and stop processing. Proof checker marks proof unproved and sets actionable `errors`; sketch checker flips `syntactic=False` and sets `errors` so the LLM can self-correct.
+- Shared module `goedels_poetry/agents/util/kimina_ast_utils.py`: `actionable_suffix()`, `compute_body_start()`, `ast_code_parsed()` for use by parser and checker agents.
+- Unit tests in `tests/test_checker_parser_failure_conditions.py` for checker behavior when `ast_code` is unusable or structural extraction fails.
+
+### Changed
+- Proof and sketch parser agents now use `actionable_suffix` and `compute_body_start` from `kimina_ast_utils` (behavior unchanged; redundant checks in parsers retained).
+- Proof checker: after successful Kimina check with no compilation errors, runs `ast_code` on preamble + LLM output and validates AST / structural extraction; on failure, clears derived artifacts and sets actionable error message.
+- Sketch checker: analogous post-check `ast_code` and structural-extraction validation; on failure, clears `proof_sketch` and `ast` and sets `errors`.
+
+### Fixed
+- GitHub CI: test fixes in `test_checker_parser_failure_conditions.py` and `test_kimina_agents.py`.
+
 ## [2.0.1] - 2026-02-07
 
 ### Fixed
@@ -537,6 +552,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Typer for CLI
 - Rich for beautiful terminal output
 
+[2.0.2]: https://github.com/KellyJDavis/goedels-poetry/releases/tag/v2.0.2
 [2.0.1]: https://github.com/KellyJDavis/goedels-poetry/releases/tag/v2.0.1
 [2.0.0]: https://github.com/KellyJDavis/goedels-poetry/releases/tag/v2.0.0
 [1.4.3]: https://github.com/KellyJDavis/goedels-poetry/releases/tag/v1.4.3
