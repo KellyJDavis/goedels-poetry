@@ -887,9 +887,14 @@ class GoedelsPoetryStateManager:
         to start a fresh proof attempt with the initial prompt.
         """
         proof["self_correction_attempts"] = 0
+        # Clear any derived artifacts from a previous attempt/pass so stale outputs can't leak
+        # into later validation/reconstruction.
+        proof["proved"] = False
         proof["errors"] = None
         proof["proof_history"] = []
-        # reset additional state as needed
+        proof["llm_lean_output"] = None
+        proof["formal_proof"] = None
+        proof["ast"] = None
 
     def _queue_proofs_for_decomposition(self, proofs_too_difficult: list[FormalTheoremProofState]) -> None:
         """
@@ -1379,9 +1384,15 @@ class GoedelsPoetryStateManager:
         node : DecomposedFormalTheoremState
             The node to prepare for re-sketching
         """
+        # Backtracking means we are restarting the sketch/decompose loop for this node.
+        # Reset any attempt counter and derived artifacts so stale values cannot leak
+        # into the next sketching/parsing/validation cycle.
+        node["self_correction_attempts"] = 0
+        node["llm_lean_output"] = None
+
         # Clear children (they will be removed from tree separately)
         node["children"] = {}
-        # Clear sketch-related fields
+        # Defensive: clear sketch "result" fields
         node["proof_sketch"] = None
         node["syntactic"] = False
         node["errors"] = None

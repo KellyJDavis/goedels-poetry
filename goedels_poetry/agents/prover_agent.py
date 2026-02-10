@@ -158,6 +158,8 @@ def _prove_one(llm: BaseChatModel, proof_state: FormalTheoremProofState) -> Form
         proof_state["proof_history"] += [AIMessage(content=raw_code)]
     except LLMParsingError:
         # Set parse failure markers - state manager will handle requeueing and attempt increments
+        # Also clear llm_lean_output so a prior successful extraction can't be reused accidentally.
+        proof_state["llm_lean_output"] = None
         proof_state["formal_proof"] = None
         proof_state["errors"] = (
             "Malformed LLM response: unable to parse proof body from LLM output. "
