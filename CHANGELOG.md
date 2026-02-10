@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.0.4] - 2026-02-10
+
+### Fixed
+- Proof pass restart: `_reset_self_correction_state()` now clears `proved`, `llm_lean_output`, `formal_proof`, and `ast` in addition to attempts, errors, and proof history so stale artifacts do not leak and reconstruction cannot reuse an older, invalid proof body.
+- Prover agent: on `LLMParsingError`, sets `llm_lean_output = None` so invalid output is not retained.
+- Decomposition backtrack: `_prepare_node_for_resketching()` resets `self_correction_attempts` and clears `llm_lean_output`, `proof_sketch`, `syntactic`, `errors`, `ast`, `search_queries`, and `search_results` (and children) so nodes are clean when resketching.
+
 ## [2.0.3] - 2026-02-09
 
 ### Fixed
@@ -561,6 +568,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Typer for CLI
 - Rich for beautiful terminal output
 
+[2.0.4]: https://github.com/KellyJDavis/goedels-poetry/releases/tag/v2.0.4
 [2.0.3]: https://github.com/KellyJDavis/goedels-poetry/releases/tag/v2.0.3
 [2.0.2]: https://github.com/KellyJDavis/goedels-poetry/releases/tag/v2.0.2
 [2.0.1]: https://github.com/KellyJDavis/goedels-poetry/releases/tag/v2.0.1
