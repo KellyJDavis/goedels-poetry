@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.0.5] - 2026-02-13
+
+### Fixed
+- AST-to-code: suppress Kimina `[anonymous]` sentinel so reconstruction does not emit invalid Lean (e.g. `have [anonymous]: ...`); prefer `rawVal` when present and treat `val == "[anonymous]"` as emit nothing.
+- AST-to-code: make serialization rewrite-aware by preferring `val` when it differs from `rawVal`, preserving rewritten idents and anonymous haves while still suppressing `[anonymous]`; variable renaming updated to keep `rawVal` in sync. Regression tests added.
+
 ## [2.0.4] - 2026-02-10
 
 ### Fixed
@@ -568,6 +574,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Typer for CLI
 - Rich for beautiful terminal output
 
+[2.0.5]: https://github.com/KellyJDavis/goedels-poetry/releases/tag/v2.0.5
 [2.0.4]: https://github.com/KellyJDavis/goedels-poetry/releases/tag/v2.0.4
 [2.0.3]: https://github.com/KellyJDavis/goedels-poetry/releases/tag/v2.0.3
 [2.0.2]: https://github.com/KellyJDavis/goedels-poetry/releases/tag/v2.0.2
