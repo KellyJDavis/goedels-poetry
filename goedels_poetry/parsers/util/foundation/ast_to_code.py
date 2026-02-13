@@ -25,16 +25,28 @@ def _ast_to_code(node: Any) -> str:  # noqa: C901
             "no token here" / anonymous binders in the original source. Emitting it literally
             produces invalid Lean (e.g. `have [anonymous]: ...`), so we must suppress it.
             """
-            # Prefer rawVal when it is present and non-empty; it is closest to the original token.
-            raw = d.get("rawVal")
-            if isinstance(raw, str) and raw != "":
-                return raw
-
             v_any: Any = d.get("val", "")
-            v = v_any if isinstance(v_any, str) else str(v_any)
-            if v == "[anonymous]":
+            v_str = v_any if isinstance(v_any, str) else None
+
+            # Always suppress Kimina's anonymous sentinel.
+            if v_str == "[anonymous]":
                 return ""
-            return v
+
+            raw = d.get("rawVal")
+            raw_str = raw if isinstance(raw, str) else None
+
+            # If rawVal exists, use it only when it matches the current val.
+            # This keeps output faithful to original tokenization, but remains rewrite-aware:
+            # variable renaming mutates `val`, while Kimina's `rawVal` stays as originally parsed.
+            if raw_str:
+                if v_str is not None and v_str != raw_str:
+                    return v_str
+                return raw_str
+
+            # Fallbacks: prefer val when it's a string, otherwise stringify.
+            if v_str is not None:
+                return v_str
+            return str(v_any)
 
         parts = []
         if "val" in node:
