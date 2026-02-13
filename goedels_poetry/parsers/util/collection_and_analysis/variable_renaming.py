@@ -375,7 +375,13 @@ def _rename_in_node_recursive(
         if _should_rename_identifier(node, rename_map, parent_is_qualified, in_declaration):
             val = node.get("val")
             if isinstance(val, str):
-                node["val"] = rename_map[val]
+                new_name = rename_map[val]
+                node["val"] = new_name
+                # Keep rawVal consistent when present (Kimina often provides both).
+                # This avoids serializers that prefer rawVal from "losing" the rename.
+                raw = node.get("rawVal")
+                if isinstance(raw, str):
+                    node["rawVal"] = new_name
 
         # Process children based on whether this is a declaration
         is_decl = _is_declaration_kind(kind)
