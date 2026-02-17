@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.0.6] - 2026-02-17
+
+### Added
+- Sketch checker: AST-based guardrail `_find_haves_with_only_nested_sorry()` to detect when a named subgoal’s only `sorry` is inside a structured subproof (e.g. `calc` step) instead of a top-level placeholder; such sketches are marked unsyntactic with an actionable error so reconstruction is not attempted.
+- Regression tests: `test_sketch_checker_rejects_nested_sorry_in_calc_subproof` and `test_sketch_checker_allows_top_level_sorry_in_have` for nested-sorry rejection and allowed top-level sorry in `have` blocks.
+
+### Changed
+- Decomposer prompts (initial, subsequent, backtrack): added constraints instructing the LLM never to place `sorry` inside nested subproofs and to use top-level `have h : T := by sorry` for unproven subgoals.
+
+### Fixed
+- Sketches where a named subgoal’s only sorry was inside a nested subproof (e.g. inside a `calc` tactic) no longer cause proof reconstruction to fail with “All indentation strategies failed”; the sketch checker now rejects them early with a clear error so the decomposer can retry.
+
 ## [2.0.5] - 2026-02-13
 
 ### Fixed
@@ -574,6 +586,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Typer for CLI
 - Rich for beautiful terminal output
 
+[2.0.6]: https://github.com/KellyJDavis/goedels-poetry/releases/tag/v2.0.6
 [2.0.5]: https://github.com/KellyJDavis/goedels-poetry/releases/tag/v2.0.5
 [2.0.4]: https://github.com/KellyJDavis/goedels-poetry/releases/tag/v2.0.4
 [2.0.3]: https://github.com/KellyJDavis/goedels-poetry/releases/tag/v2.0.3
