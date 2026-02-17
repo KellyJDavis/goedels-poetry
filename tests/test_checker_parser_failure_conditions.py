@@ -145,6 +145,238 @@ def test_sketch_checker_flags_kimina_ast_parse_failure(monkeypatch: pytest.Monke
     assert "Kimina failed to parse proof" in theorem_state["errors"]
 
 
+def test_sketch_checker_rejects_nested_sorry_in_calc_subproof(monkeypatch: pytest.MonkeyPatch) -> None:
+    """
+    Regression test for the reconstruction failure mode:
+    a named `have h : T := by ...` contains only a nested `sorry` inside a `calc` step.
+
+    Such sketches typecheck (pass Kimina) but violate downstream decomposition/reconstruction
+    assumptions, so the sketch checker should reject them with a clear error.
+    """
+    _install_kimina_stub(monkeypatch)
+    from goedels_poetry.agents import sketch_checker_agent as mod
+
+    # Minimal AST with a named have `h_main` whose only sorry is under `Lean.calcTactic`.
+    ast_with_nested_sorry = {
+        "commands": [
+            {
+                "kind": "Lean.Parser.Command.theorem",
+                "args": [
+                    {"val": "theorem"},
+                    {"kind": "Lean.Parser.Command.declId", "args": [{"val": "t"}]},
+                    {"val": ":"},
+                    {"val": "True"},
+                    {"val": ":="},
+                    {
+                        "kind": "Lean.Parser.Term.byTactic",
+                        "args": [
+                            {"val": "by"},
+                            {
+                                "kind": "Lean.Parser.Tactic.tacticSeq",
+                                "args": [
+                                    {
+                                        "kind": "Lean.Parser.Tactic.tacticHave_",
+                                        "args": [
+                                            {"val": "have"},
+                                            {
+                                                "kind": "Lean.Parser.Term.haveDecl",
+                                                "args": [
+                                                    {
+                                                        "kind": "Lean.Parser.Term.haveIdDecl",
+                                                        "args": [
+                                                            {
+                                                                "kind": "Lean.Parser.Term.haveId",
+                                                                "args": [{"val": "h_main"}],
+                                                            }
+                                                        ],
+                                                    },
+                                                    {"val": ":"},
+                                                    {"val": "1 = 1"},
+                                                ],
+                                            },
+                                            {"val": ":="},
+                                            {
+                                                "kind": "Lean.Parser.Term.byTactic",
+                                                "args": [
+                                                    {"val": "by"},
+                                                    {
+                                                        "kind": "Lean.Parser.Tactic.tacticSeq",
+                                                        "args": [
+                                                            {
+                                                                "kind": "Lean.calcTactic",
+                                                                "args": [
+                                                                    {
+                                                                        "kind": "Lean.calcSteps",
+                                                                        "args": [
+                                                                            {
+                                                                                "kind": "Lean.calcFirstStep",
+                                                                                "args": [
+                                                                                    {"val": "1 = 1"},
+                                                                                    {"val": ":="},
+                                                                                    {
+                                                                                        "kind": "Lean.Parser.Term.byTactic",
+                                                                                        "args": [
+                                                                                            {"val": "by"},
+                                                                                            {
+                                                                                                "kind": "Lean.Parser.Tactic.tacticSeq",
+                                                                                                "args": [
+                                                                                                    {
+                                                                                                        "kind": "Lean.Parser.Tactic.tacticSorry",
+                                                                                                        "args": [
+                                                                                                            {
+                                                                                                                "val": "sorry",
+                                                                                                                "info": {
+                                                                                                                    "pos": [
+                                                                                                                        0,
+                                                                                                                        5,
+                                                                                                                    ]
+                                                                                                                },
+                                                                                                            }
+                                                                                                        ],
+                                                                                                    }
+                                                                                                ],
+                                                                                            },
+                                                                                        ],
+                                                                                    },
+                                                                                ],
+                                                                            }
+                                                                        ],
+                                                                    }
+                                                                ],
+                                                            }
+                                                        ],
+                                                    },
+                                                ],
+                                            },
+                                        ],
+                                    }
+                                ],
+                            },
+                        ],
+                    },
+                ],
+            }
+        ]
+    }
+
+    theorem_state = {
+        "syntactic": True,
+        "errors": "",
+        "preamble": "import Foo",
+        "formal_theorem": "theorem t : True := by trivial",
+        "proof_sketch": "dummy",
+        "ast": {"dummy": True},
+    }
+
+    kimina = _FakeKiminaClient(ast_code_results=[{"error": None, "ast": ast_with_nested_sorry}])
+
+    mod._maybe_flag_downstream_parser_errors(
+        theorem_state=theorem_state,
+        kimina_client=kimina,
+        server_timeout=1,
+        raw_output="theorem t : True := by\n  have h_main : 1 = 1 := by\n    calc\n      1 = 1 := by\n        sorry\n  trivial\n",
+    )
+
+    assert theorem_state["syntactic"] is False
+    assert theorem_state["proof_sketch"] is None
+    assert theorem_state["ast"] is None
+    assert isinstance(theorem_state["errors"], str)
+    assert "Sketch rejected" in theorem_state["errors"]
+    assert "h_main" in theorem_state["errors"]
+
+
+def test_sketch_checker_allows_top_level_sorry_in_have(monkeypatch: pytest.MonkeyPatch) -> None:
+    _install_kimina_stub(monkeypatch)
+    from goedels_poetry.agents import sketch_checker_agent as mod
+
+    ast_with_outer_sorry = {
+        "commands": [
+            {
+                "kind": "Lean.Parser.Command.theorem",
+                "args": [
+                    {"val": "theorem"},
+                    {"kind": "Lean.Parser.Command.declId", "args": [{"val": "t"}]},
+                    {"val": ":"},
+                    {"val": "True"},
+                    {"val": ":="},
+                    {
+                        "kind": "Lean.Parser.Term.byTactic",
+                        "args": [
+                            {"val": "by"},
+                            {
+                                "kind": "Lean.Parser.Tactic.tacticSeq",
+                                "args": [
+                                    {
+                                        "kind": "Lean.Parser.Tactic.tacticHave_",
+                                        "args": [
+                                            {"val": "have"},
+                                            {
+                                                "kind": "Lean.Parser.Term.haveDecl",
+                                                "args": [
+                                                    {
+                                                        "kind": "Lean.Parser.Term.haveIdDecl",
+                                                        "args": [
+                                                            {
+                                                                "kind": "Lean.Parser.Term.haveId",
+                                                                "args": [{"val": "h_ok"}],
+                                                            }
+                                                        ],
+                                                    },
+                                                    {"val": ":"},
+                                                    {"val": "True"},
+                                                ],
+                                            },
+                                            {"val": ":="},
+                                            {
+                                                "kind": "Lean.Parser.Term.byTactic",
+                                                "args": [
+                                                    {"val": "by"},
+                                                    {
+                                                        "kind": "Lean.Parser.Tactic.tacticSeq",
+                                                        "args": [
+                                                            {
+                                                                "kind": "Lean.Parser.Tactic.tacticSorry",
+                                                                "args": [{"val": "sorry", "info": {"pos": [0, 5]}}],
+                                                            }
+                                                        ],
+                                                    },
+                                                ],
+                                            },
+                                        ],
+                                    }
+                                ],
+                            },
+                        ],
+                    },
+                ],
+            }
+        ]
+    }
+
+    theorem_state = {
+        "syntactic": True,
+        "errors": "",
+        "preamble": "import Foo",
+        "formal_theorem": "theorem t : True := by trivial",
+        "proof_sketch": "dummy",
+        "ast": {"dummy": True},
+    }
+
+    kimina = _FakeKiminaClient(ast_code_results=[{"error": None, "ast": ast_with_outer_sorry}])
+
+    mod._maybe_flag_downstream_parser_errors(
+        theorem_state=theorem_state,
+        kimina_client=kimina,
+        server_timeout=1,
+        raw_output="theorem t : True := by\n  have h_ok : True := by\n    sorry\n  trivial\n",
+    )
+
+    # Should remain syntactic; the downstream structural checks may return early if target signature
+    # extraction fails under this unit-test Kimina stub, but it must not be rejected by the new guardrail.
+    assert theorem_state["syntactic"] is True
+    assert theorem_state["errors"] == ""
+
+
 def test_proof_checker_flags_structural_extraction_failure(monkeypatch: pytest.MonkeyPatch) -> None:
     """
     If ast_code succeeds but structural extraction fails (extract_proof_body_from_ast returns None),

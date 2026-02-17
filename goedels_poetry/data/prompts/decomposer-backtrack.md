@@ -12,6 +12,15 @@ Before producing the new Lean 4 code to sketch a proof, provide:
 2. A description of the new strategy you will try
 3. An explanation of how this new approach differs from the previous one
 
+IMPORTANT constraint (must follow):
+- Never place a `sorry` inside a nested subproof (e.g. inside a `calc` step `... := by sorry`, inside `match`/`cases` branches, or inside any nested `by` block).
+- If a subgoal is unproven, it must end with a single top-level placeholder:
+  ```lean4
+  have h_name : T := by
+    sorry
+  ```
+  If you want to outline a structured proof (like `calc`), put the outline in comments, but keep the proof itself as `by sorry`.
+
 Note that the theorems listed below may differ from those presented in previous attempts, as a new search strategy was used to find potentially useful theorems for this different decomposition approach. These theorems may or may not be new compared to previous attempts, but they represent theorems identified specifically for trying this alternative strategy. Consider how these theorems might be useful in your new decomposition approach.
 
 {{ theorem_hints_section }}

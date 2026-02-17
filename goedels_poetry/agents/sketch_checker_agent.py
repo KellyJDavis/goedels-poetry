@@ -42,6 +42,71 @@ def _mark_unsyntactic_with_error(theorem_state: DecomposedFormalTheoremState, me
     theorem_state["errors"] = message
 
 
+# AST-based guardrail: reject sketches that introduce nested `sorry` holes inside structured
+# subproofs (e.g. `calc` steps) for a named `have`. The decomposition+reconstruction pipeline
+# assumes each named subgoal has a top-level placeholder `have h : T := by sorry` so the child
+# proof of `T` can be inlined at that hole. A nested `sorry` (e.g. inside `calc ... := by sorry`)
+# violates that assumption and can cause reconstruction to fail even when all children are proved.
+_CALC_NESTING_KINDS: set[str] = {
+    # Observed in Kimina AST for `calc` tactic blocks.
+    "Lean.calcTactic",
+    "Lean.calcSteps",
+    "Lean.calcFirstStep",
+    "Lean.calcStep",
+}
+
+
+def _find_haves_with_only_nested_sorry(ast: object) -> list[str]:  # noqa: C901
+    """
+    Return have-names whose proof contains one or more `sorry` nodes, all of which appear
+    under a nested proof construct (currently: under `calc`).
+
+    This is intentionally AST-based (no regex/text parsing of Lean).
+    """
+    from goedels_poetry.parsers.util.names_and_bindings.anonymous_haves import __collect_anonymous_haves
+    from goedels_poetry.parsers.util.names_and_bindings.name_extraction import _extract_have_id_name
+
+    if not isinstance(ast, dict | list):
+        return []
+
+    anon_have_by_id, _anon_by_name = __collect_anonymous_haves(ast)
+    counts: dict[str, dict[str, int]] = {}
+
+    def record(have_name: str, *, nested: bool) -> None:
+        slot = counts.setdefault(have_name, {"outer": 0, "nested": 0})
+        if nested:
+            slot["nested"] += 1
+        else:
+            slot["outer"] += 1
+
+    def rec(node: object, *, current_have: str | None, in_nested: bool) -> None:
+        if isinstance(node, dict):
+            kind = node.get("kind")
+            kind_str = kind if isinstance(kind, str) else None
+            in_nested2 = in_nested or (kind_str in _CALC_NESTING_KINDS)
+
+            if kind_str == "Lean.Parser.Tactic.tacticHave_":
+                have_name = _extract_have_id_name(node) or anon_have_by_id.get(id(node))
+                current_have = have_name
+
+            if kind_str == "Lean.Parser.Tactic.tacticSorry" and current_have:
+                record(current_have, nested=in_nested2)
+
+            for v in node.values():
+                rec(v, current_have=current_have, in_nested=in_nested2)
+        elif isinstance(node, list):
+            for it in node:
+                rec(it, current_have=current_have, in_nested=in_nested)
+
+    rec(ast, current_have=None, in_nested=False)
+
+    violations: list[str] = []
+    for have_name, c in counts.items():
+        if c["nested"] > 0 and c["outer"] == 0:
+            violations.append(have_name)
+    return sorted(violations)
+
+
 def _try_extract_target_signature(
     *,
     kimina_client: KiminaClient,
@@ -114,6 +179,30 @@ def _maybe_flag_downstream_parser_errors(
         _mark_unsyntactic_with_error(
             theorem_state,
             "Kimina failed to parse proof" + actionable_suffix(parsed_ast or {}, normalized_sketch_with_imports),
+        )
+        return
+
+    # Guardrail: reject sketches that contain only nested `sorry` holes for a named `have`.
+    # Example of a violating pattern:
+    #   have h_main : T := by
+    #     calc
+    #       ... := by sorry
+    #
+    # In such sketches, the only `sorry` attributed to `h_main` is the one inside the `calc` step,
+    # but the child proof for `h_main` will be a proof of `T`, which cannot be inlined at the
+    # calc-step goal. This leads to "All indentation strategies failed" reconstruction failures.
+    violating_haves = _find_haves_with_only_nested_sorry(parsed_ast.get("ast"))
+    if violating_haves:
+        names_preview = ", ".join(violating_haves[:6]) + ("..." if len(violating_haves) > 6 else "")
+        _mark_unsyntactic_with_error(
+            theorem_state,
+            (
+                "Sketch rejected: found nested `sorry` hole(s) inside structured subproofs (e.g. `calc`) "
+                "for the following subgoal(s): "
+                f"{names_preview}. "
+                "Each subgoal `have h : T := by ...` must use a single top-level placeholder "
+                "`have h : T := by\\n  sorry` (no nested `sorry` inside `calc`/subproof steps)."
+            ),
         )
         return
 
