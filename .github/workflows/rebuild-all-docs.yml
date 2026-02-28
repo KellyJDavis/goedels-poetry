@@ -1,0 +1,292 @@
+name: Rebuild All Documentation
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pages: write
+  id-token: write
+
+concurrency:
+  group: "pages"
+  cancel-in-progress: false
+
+jobs:
+  clean-and-rebuild:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up the environment
+        uses: ./.github/actions/setup-python-env
+
+      - name: Setup git for gh-pages
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Clean and initialize gh-pages branch
+        run: |
+          cd "$(dirname ${{ github.workspace }})"
+
+          # Try to clone existing gh-pages branch
+          if git clone --branch gh-pages --single-branch https://github.com/${{ github.repository }}.git gh-pages-repo 2>/dev/null; then
+            echo "Existing gh-pages branch found - cleaning it"
+            cd gh-pages-repo
+
+            # Backup any existing documentation directories
+            mkdir -p /tmp/docs-backup
+            if compgen -G "v*" > /dev/null 2>&1; then
+              cp -r v* /tmp/docs-backup/ 2>/dev/null || true
+            fi
+            if [ -d "main" ]; then
+              cp -r main /tmp/docs-backup/ 2>/dev/null || true
+            fi
+            if [ -f "index.html" ]; then
+              cp index.html /tmp/docs-backup/ 2>/dev/null || true
+            fi
+
+            # Clean everything except .git
+            find . -mindepth 1 -maxdepth 1 ! -name '.git' -exec rm -rf {} +
+
+            # Restore docs if they existed
+            if [ -d "/tmp/docs-backup" ] && [ "$(ls -A /tmp/docs-backup 2>/dev/null)" ]; then
+              cp -r /tmp/docs-backup/* . 2>/dev/null || true
+            fi
+          else
+            echo "Creating new gh-pages branch"
+            git clone --single-branch https://github.com/${{ github.repository }}.git gh-pages-repo
+            cd gh-pages-repo
+            git checkout --orphan gh-pages
+            git rm -rf . 2>/dev/null || true
+            git remote add origin https://github.com/${{ github.repository }}.git 2>/dev/null || \
+            git remote set-url origin https://github.com/${{ github.repository }}.git
+          fi
+
+          # Create placeholder if empty
+          if [ -z "$(ls -A . 2>/dev/null | grep -v '^\.')" ]; then
+            cat > index.html << 'EOF'
+          <!DOCTYPE html>
+          <html>
+          <head>
+            <meta charset="utf-8">
+            <title>Gödel's Poetry Documentation</title>
+            <style>
+              body {
+                font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+                max-width: 800px;
+                margin: 100px auto;
+                padding: 20px;
+                text-align: center;
+              }
+              h1 { color: #333; }
+              p { color: #666; line-height: 1.6; }
+              a { color: #0366d6; text-decoration: none; }
+              a:hover { text-decoration: underline; }
+            </style>
+          </head>
+          <body>
+            <h1>Gödel's Poetry Documentation</h1>
+            <p>Documentation is being generated. Please check back shortly.</p>
+            <p>Visit the <a href="https://github.com/KellyJDavis/goedels-poetry">GitHub repository</a> for more information.</p>
+          </body>
+          </html>
+          EOF
+          fi
+
+          git add -A
+          git commit -m "Clean gh-pages branch [skip ci]" || echo "No changes to commit"
+          git push https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git gh-pages --force
+
+      - name: Build main documentation
+        run: |
+          cd ${{ github.workspace }}
+
+          # Update site_url for versioned deployment
+          cp mkdocs.yml mkdocs.yml.original
+          sed -i "s|site_url:.*|site_url: https://KellyJDavis.github.io/goedels-poetry/main/goedels-poetry|g" mkdocs.yml
+
+          # Build docs
+          uv run mkdocs build
+
+          # Verify build
+          if [ ! -d "site" ] || [ -z "$(ls -A site 2>/dev/null)" ]; then
+            echo "Error: site directory is empty or missing"
+            mv mkdocs.yml.original mkdocs.yml 2>/dev/null || true
+            exit 1
+          fi
+
+          # Restore original mkdocs.yml
+          mv mkdocs.yml.original mkdocs.yml
+
+      - name: Add main docs to gh-pages
+        run: |
+          GH_PAGES_DIR="$(dirname ${{ github.workspace }})/gh-pages-repo"
+          cd "$GH_PAGES_DIR"
+
+          # Copy main docs
+          mkdir -p main/goedels-poetry
+          cp -r ${{ github.workspace }}/site/* main/goedels-poetry/
+
+          git add -A
+          git commit -m "Add main branch documentation [skip ci]" || echo "No changes"
+
+      - name: Build and add tag documentation
+        run: |
+          cd ${{ github.workspace }}
+          GH_PAGES_DIR="$(dirname ${{ github.workspace }})/gh-pages-repo"
+
+          # Get all version tags (sorted by version number)
+          TAGS=$(git tag --sort=-version:refname | grep '^v[0-9]')
+
+          if [ -z "$TAGS" ]; then
+            echo "No version tags found"
+            exit 0
+          fi
+
+          for TAG in $TAGS; do
+            echo "Building documentation for $TAG..."
+
+            # Checkout the tag
+            git checkout "$TAG"
+
+            # Check if mkdocs.yml exists at this tag
+            if [ ! -f "mkdocs.yml" ]; then
+              echo "mkdocs.yml not found at $TAG, skipping..."
+              continue
+            fi
+
+            # Update site_url for this version
+            cp mkdocs.yml mkdocs.yml.original
+            sed -i "s|site_url:.*|site_url: https://KellyJDavis.github.io/goedels-poetry/${TAG}/goedels-poetry|g" mkdocs.yml
+
+            # Build docs
+            if uv run mkdocs build 2>/dev/null; then
+              # Copy to gh-pages
+              cd "$GH_PAGES_DIR"
+              mkdir -p "${TAG}/goedels-poetry"
+              cp -r ${{ github.workspace }}/site/* "${TAG}/goedels-poetry/"
+
+              cd ${{ github.workspace }}
+              echo "✓ Built documentation for $TAG"
+            else
+              echo "✗ Failed to build documentation for $TAG"
+            fi
+
+            # Restore original mkdocs.yml
+            mv mkdocs.yml.original mkdocs.yml 2>/dev/null || true
+
+            # Clean up build artifacts
+            rm -rf site
+          done
+
+          # Return to main branch
+          git checkout main
+
+      - name: Create root redirect and finalize
+        run: |
+          GH_PAGES_DIR="$(dirname ${{ github.workspace }})/gh-pages-repo"
+          cd "$GH_PAGES_DIR"
+
+          # Find latest tag
+          cd ${{ github.workspace }}
+          LATEST_TAG=$(git tag --sort=-version:refname | grep '^v[0-9]' | head -n 1)
+
+          if [ -z "$LATEST_TAG" ]; then
+            echo "No version tags found, redirecting to main"
+            LATEST_TAG="main"
+          fi
+
+          cd "$GH_PAGES_DIR"
+
+          # Create root index.html
+          cat > index.html << EOF
+          <!DOCTYPE html>
+          <html>
+          <head>
+            <meta charset="utf-8">
+            <title>Redirecting to Latest Documentation</title>
+            <meta http-equiv="refresh" content="0; url=./${LATEST_TAG}/goedels-poetry/">
+            <link rel="canonical" href="./${LATEST_TAG}/goedels-poetry/">
+            <script>
+              window.location.replace("./${LATEST_TAG}/goedels-poetry/");
+            </script>
+          </head>
+          <body>
+            <p>Redirecting to <a href="./${LATEST_TAG}/goedels-poetry/">latest documentation</a>...</p>
+          </body>
+          </html>
+          EOF
+
+          # Commit everything
+          git add -A
+          if git commit -m "Rebuild all documentation [skip ci]"; then
+            echo "Changes committed"
+
+            # Push with retry
+            PUSH_SUCCESS=false
+            for i in 1 2 3; do
+              if git push https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git gh-pages; then
+                PUSH_SUCCESS=true
+                break
+              fi
+              echo "Push attempt $i failed, retrying..."
+              if [ $i -lt 3 ]; then
+                sleep 2
+              fi
+            done
+
+            if [ "$PUSH_SUCCESS" = false ]; then
+              echo "Error: Failed to push after 3 attempts"
+              exit 1
+            fi
+          else
+            echo "No changes to commit"
+          fi
+
+      - name: Prepare artifact for Pages deployment
+        run: |
+          GH_PAGES_DIR="$(dirname ${{ github.workspace }})/gh-pages-repo"
+          ARTIFACT_DIR="${{ github.workspace }}/pages-artifact"
+
+          mkdir -p "$ARTIFACT_DIR"
+          cd "$GH_PAGES_DIR"
+
+          # Copy everything except .git
+          if ! cp -r . "$ARTIFACT_DIR/" 2>/dev/null; then
+            if ! cp -r * "$ARTIFACT_DIR/" 2>/dev/null; then
+              echo "Error: Failed to copy content"
+              exit 1
+            fi
+          fi
+
+          rm -rf "$ARTIFACT_DIR/.git"
+
+          # Verify artifact
+          if [ -z "$(ls -A $ARTIFACT_DIR 2>/dev/null)" ]; then
+            echo "Error: Artifact is empty"
+            exit 1
+          fi
+
+          echo "Artifact contents:"
+          ls -la "$ARTIFACT_DIR"
+
+      - name: Upload artifact
+        uses: actions/upload-pages-artifact@v4
+        with:
+          path: pages-artifact
+
+  deploy:
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    runs-on: ubuntu-latest
+    needs: clean-and-rebuild
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
