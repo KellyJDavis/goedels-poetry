@@ -151,6 +151,10 @@ jobs:
           for TAG in $TAGS; do
             echo "Building documentation for $TAG..."
 
+            # Clean any modified files before checkout
+            git reset --hard
+            git clean -fd
+
             # Checkout the tag
             git checkout "$TAG"
 
@@ -183,6 +187,10 @@ jobs:
             # Clean up build artifacts
             rm -rf site
           done
+
+          # Clean any modified files before returning to main
+          git reset --hard
+          git clean -fd
 
           # Return to main branch
           git checkout main
