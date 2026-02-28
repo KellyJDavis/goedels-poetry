@@ -49,6 +49,14 @@ jobs:
           if git clone --branch gh-pages --single-branch https://github.com/${{ github.repository }}.git gh-pages-repo 2>/dev/null; then
             cd gh-pages-repo
             git checkout gh-pages
+
+            # Verify gh-pages contains only documentation, not source code
+            if [ -d "goedels_poetry" ] || [ -d "tests" ] || [ -f "pyproject.toml" ]; then
+              echo "⚠️  WARNING: gh-pages branch contains source code!"
+              echo "This will cause documentation deployment issues."
+              echo "Please run the 'Rebuild All Documentation' workflow to fix this."
+              echo "See scripts/FIX-GITHUB-PAGES.md for details."
+            fi
           else
             # gh-pages doesn't exist, create it
             git clone --single-branch https://github.com/${{ github.repository }}.git gh-pages-repo
